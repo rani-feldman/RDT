@@ -26,21 +26,63 @@ The full, living design document is [RDT Design Document](https://claude.ai/code
 
 ## Architecture
 
+The PC application has four layers. Each layer talks only to the layer directly below it.
+
+```mermaid
+flowchart TB
+  subgraph UI["User interface (PySide6 GUI and CLI)"]
+    direction LR
+    conn[Connection bar]
+    vars[Variable view]
+    chart[Live chart]
+    mem[Memory view]
+    console[SCPI console]
+    profed[Profile editor]
+    buttons[Command buttons]
+    cli[CLI]
+  end
+
+  subgraph CORE["Application core"]
+    direction LR
+    api["Target API<br/><small>one entry point for GUI and CLI</small>"]
+    ws["Workspace<br/><small>load and save .rdtw files</small>"]
+    guard["Write guard<br/><small>read-only, min/max, confirm</small>"]
+    sym["Symbol database<br/><small>ELF/DWARF, types, expressions</small>"]
+    codec["Value codec<br/><small>formats, Q-format, scaling</small>"]
+    sched["Poll scheduler<br/><small>intervals, block merging</small>"]
+    watcher["ELF file watcher<br/><small>reload and re-map on rebuild</small>"]
+    stats["Statistics<br/><small>min, max, mean per item</small>"]
+    csv["CSV logger<br/><small>timestamped scaled values</small>"]
+  end
+
+  subgraph PROTO["Protocol"]
+    direction LR
+    session["Session<br/><small>sequence, timeout, retry</small>"]
+    scpi["SCPI profile engine<br/><small>templates, reply parsing</small>"]
+    binary["Binary protocol<br/><small>later, for a firmware agent</small>"]
+  end
+
+  subgraph TRANS["Transports"]
+    direction LR
+    com[COM port]
+    tcp[LAN TCP]
+    udp[LAN UDP]
+    plugin["Plug-in (later)"]
+  end
+
+  device[("Device: simulator now, existing firmware later")]
+
+  UI <--> CORE
+  CORE <--> PROTO
+  PROTO <--> TRANS
+  TRANS <--> device
 ```
-GUI / CLI / Python API
-        |
-Symbol resolver (ELF + DWARF)  ->  name to address, size, type
-        |
-Value codec                     ->  bytes <-> typed values, scaling
-        |
-Poll scheduler                  ->  intervals, block merging
-        |
-Protocol (SCPI profile | binary)
-        |
-Transport (COM | TCP | UDP | plug-in)
-        |
-Device (simulator now, existing firmware later)
-```
+
+Every panel, and the CLI, calls the Target API and never the layers below it:
+- The core resolves names through the symbol database, plans reads in the poll scheduler, and checks writes in the write guard.
+- Only the protocol and transport layers know how bytes reach the device.
+
+So swapping the simulator for the real firmware, or SCPI for the binary protocol, changes nothing above those two layers.
 
 The firmware only ever sees an address and a byte count. Everything that knows about names and types lives on the PC.
 
