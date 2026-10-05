@@ -28,55 +28,23 @@ The full, living design document is [RDT Design Document](https://claude.ai/code
 
 The PC application has four layers. Each layer talks only to the layer directly below it.
 
-```mermaid
-flowchart TB
-  subgraph UI["User interface (PySide6 GUI and CLI)"]
-    direction LR
-    conn[Connection bar]
-    vars[Variable view]
-    chart[Live chart]
-    mem[Memory view]
-    console[SCPI console]
-    profed[Profile editor]
-    buttons[Command buttons]
-    cli[CLI]
-  end
+![PC application block diagram](images/pc-block-diagram.png)
 
-  subgraph CORE["Application core"]
-    direction LR
-    api["Target API<br/><small>one entry point for GUI and CLI</small>"]
-    ws["Workspace<br/><small>load and save .rdtw files</small>"]
-    guard["Write guard<br/><small>read-only, min/max, confirm</small>"]
-    sym["Symbol database<br/><small>ELF/DWARF, types, expressions</small>"]
-    codec["Value codec<br/><small>formats, Q-format, scaling</small>"]
-    sched["Poll scheduler<br/><small>intervals, block merging</small>"]
-    watcher["ELF file watcher<br/><small>reload and re-map on rebuild</small>"]
-    stats["Statistics<br/><small>min, max, mean per item</small>"]
-    csv["CSV logger<br/><small>timestamped scaled values</small>"]
-  end
-
-  subgraph PROTO["Protocol"]
-    direction LR
-    session["Session<br/><small>sequence, timeout, retry</small>"]
-    scpi["SCPI profile engine<br/><small>templates, reply parsing</small>"]
-    binary["Binary protocol<br/><small>later, for a firmware agent</small>"]
-  end
-
-  subgraph TRANS["Transports"]
-    direction LR
-    com[COM port]
-    tcp[LAN TCP]
-    udp[LAN UDP]
-    plugin["Plug-in (later)"]
-  end
-
-  device[("Device: simulator now, existing firmware later")]
-
-  UI <--> CORE
-  CORE <--> PROTO
-  PROTO <--> TRANS
-  TRANS <--> device
-```
+| Block | Role |
+| --- | --- |
+| Target API | One entry point for the GUI and the CLI |
+| Workspace | Loads and saves `.rdtw` files |
+| Write guard | Read-only flag, min/max limits, confirm before writing |
+| Symbol database | ELF/DWARF loading, type model, expressions |
+| Value codec | Display formats, Q-format, scaling |
+| Poll scheduler | Polling intervals, merging nearby reads into blocks |
+| ELF file watcher | Reloads the ELF and re-maps watched items when it is rebuilt |
+| Statistics | Min, max and mean per watched item |
+| CSV logger | Timestamped, scaled values |
+| Session | Sequencing, timeouts, retries |
+| SCPI profile engine | Command templates, reply parsing |
+| Binary protocol | Later, for a firmware agent |
+| Device | The simulator now, the existing firmware later |
 
 Every panel, and the CLI, calls the Target API and never the layers below it:
 - The core resolves names through the symbol database, plans reads in the poll scheduler, and checks writes in the write guard.
