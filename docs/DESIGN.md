@@ -23,6 +23,12 @@ The full, living design document is [RDT Design Document](https://claude.ai/code
 | Write | One value per command: `write address,value,size`. Buffer writes may come later. |
 | Host | Python with a Qt GUI (PySide6). The GUI is the primary interface, and the CLI and Python API sit on the same core. |
 | Authentication | None. RDT is a tool for trusted benches and networks. |
+| PC operating system | Windows only. The code stays portable, so Linux can be added later. |
+| Firmware language | C only. The symbol reader does not handle C++. |
+| Memory ranges | RDT refuses any address outside the ELF's RAM and flash sections and the extra ranges listed in the SCPI profile. |
+| Peripheral reads | Never merged into blocks. Each item in a peripheral range is read on its own at its exact size. |
+| Link loss | RDT reconnects on its own. Values grey out and writes are refused while the link is down. |
+| Shared SCPI port | Other tools may use the port over LAN at the same time. RDT tolerates unexpected replies and busy firmware. |
 
 ## Architecture
 
@@ -80,14 +86,31 @@ max_response = 1024            # bytes of data the firmware can put in one reply
 error_query  = "SYST:ERR?"
 terminator   = "\n"
 timeout_ms   = 500
+
+[[ranges]]                     # extra ranges RDT may access beyond the ELF's RAM and flash
+name  = "GPIOA"                # peripheral ranges are never block-merged
+start = 0x48000000
+size  = 0x400
 ```
 
 - **Reads:** on each poll cycle, the watched items are sorted by address and nearby items are merged into blocks no larger than `max_response`. Each block is one read, and every value is decoded from it. There is no multi-address read command.
+  - Items in a peripheral range are never merged, because reading a register can clear a flag or pop a FIFO. Each is read on its own at its exact size.
+  - Addresses outside the ELF's RAM and flash and the profile's `ranges` are refused before anything is sent.
 - **Writes:** the value is sent as the raw integer in hex, so a float like 1.5 becomes `0x3FC00000` and the firmware never parses floats.
   - Struct and array edits become one write per field or cell. These are not atomic, and the GUI says so.
   - Values wider than `max_write` are split into pieces.
 - **Replies:** a reply format that the fixed options cannot describe can be matched with a regular expression instead.
 - **UDP:** a timed-out read is re-sent. A timed-out write is never blindly repeated; RDT first confirms it, by reading the value back or by running the error query.
+- **Link loss:** values grey out, writes are refused, and RDT retries in the background with a growing delay. Once the link is back, it re-reads every watched value, marks the gap in the chart and the CSV log, and resumes polling.
+
+### Sharing the link with other tools
+
+Other tools may talk to the firmware's SCPI port over LAN while RDT is connected. A COM port can be opened by only one program, so this applies to LAN only.
+
+- Each tool uses its own TCP connection, and the firmware must send each reply on the connection that asked. Over UDP it replies to the sender's address and port.
+- Every read reply must match the requested size. A reply that doesn't fit is discarded, the input is flushed, and the read is sent again.
+- A busy or error reply is retried with a growing delay instead of failing at once.
+- The SCPI error queue is shared by all clients, so a timed-out write is confirmed by reading the value back, not by the error query.
 
 ### Recommended firmware commands (to be added later)
 
@@ -177,11 +200,11 @@ tests/
 | --- | --- | --- |
 | M0 | Spec and skeleton | This design, repo layout, CI |
 | M1 | Simulated device | SCPI over TCP, UDP and a virtual COM port; memory loaded from the ELF |
-| M2 | Host core and first GUI | Transports, session, SCPI profiles; connection bar, profile editor, console, command buttons, memory view; CLI |
+| M2 | Host core and first GUI | Transports, session, SCPI profiles, reconnect; connection bar, profile editor, console, command buttons, memory view; CLI; a test with a second SCPI client |
 | M3 | Symbols | ELF/DWARF, types, expressions, codec, variable view, formats and scaling, write safety, workspace, ELF rebuild detection |
 | M4 | Watch | Polling scheduler, live chart, statistics, CSV logging |
 | M5 | Binary protocol | Faster path for a future firmware agent |
-| M6 | Application release | Installer, user docs, firmware command spec |
+| M6 | Application release | Windows installer, user docs, firmware command spec |
 | Later | Firmware integration | Memory commands in the existing firmware, hardware tests |
 
 ## Open items
