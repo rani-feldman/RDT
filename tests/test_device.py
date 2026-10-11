@@ -69,9 +69,9 @@ def test_silent_secondary_mcu(device):
     device.internal_timeout_ms = 20
     q(device, "SIM:MCU:SIL 1,ON")
     assert q(device, "SIM:MCU:SIL? 1") == "1"
-    start = time.monotonic()
+    start = time.perf_counter()  # time.monotonic ticks every ~16 ms on Windows
     assert q(device, "MEM:READ? 1,0x20000084,4") == '-240,"MCU not responding"'
-    assert time.monotonic() - start >= 0.02
+    assert time.perf_counter() - start >= 0.018  # the main MCU waited out its internal timeout
     assert q(device, "MEM:READ? 0,0x20000000,4") == "0000C03F"  # the others keep working
     q(device, "SIM:MCU:SIL 1,OFF")
     assert q(device, "MEM:READ? 1,0x20000084,4") == "F4010000"
