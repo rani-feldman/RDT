@@ -66,7 +66,7 @@ The firmware only ever sees an address and a byte count. Everything that knows a
 - `pyelftools` walks `.debug_info`. Every global and file-static variable is recorded with its address, size and type.
 - The type model covers base types, pointers, arrays, structs and unions with member offsets, enums with their names, bit fields, and typedefs.
 - Supported expressions: `name`, `a.b.c`, `arr[3]`, `arr[2][5]`, `*ptr`, `ptr->m`, `file.c:name`, and the raw form `@0x20000418:u32`.
-- Every expression starts with the MCU's name, always, with no default: `main:motor.speed`, `@motorctl:0x20000418:u32`. The name is the MCU's display name from the workspace, and the watch list, chart legend and CSV columns show it too.
+- Every expression starts with the MCU's name, always, with no default: `main:motor.speed`, `@motorctl:0x20000418:u32`. The name is the MCU's display name from the workspace, and the watch tabs, chart legend and CSV columns show it too.
 - A raw address can take any ELF type, then members or cells: `@main:0x48000000:GPIO_TypeDef.ODR`. The type can be a typedef or a struct, union or enum tag.
 - An expression that goes through a pointer is re-resolved before every read, so a watch follows the pointer when it moves.
 - Not supported: local variables, function-static variables, and variables the compiler kept only as constants.
@@ -148,7 +148,7 @@ The device has several MCUs, each with its own ELF. The main MCU owns the USB/LA
 | Internal channel | MCUs 1 and up use fixed 64-byte command and response frames. The main MCU's firmware splits a large read into 64-byte pieces, so `max_response` stays one profile setting. |
 | Timeouts | One profile timeout, which each MCU can override, because split reads take longer. |
 | Silent MCU | The main MCU sends no reply and puts a defined error in the queue. RDT greys out only that MCU's values, keeps polling the others, and retries it in the background. Because another LAN client may read that error first, RDT also greys out an MCU after three timeouts in a row while MCU 0 still answers. |
-| Watch list and chart | One mixed watch tree with an MCU column and filter. The chart and the CSV log can combine values from any MCUs; timestamps come from the PC. |
+| Watch tabs and chart | Each watch tab is one mixed tree with an MCU column and filter. The chart and the CSV log can combine values from any MCUs; timestamps come from the PC. |
 
 - Symbols, memory ranges, the ELF watcher and the build check all work per MCU.
 - On MCUs 1 and up, a struct or array larger than 64 bytes is read in pieces, so its fields may not come from the same moment. The variable view marks such items.
@@ -188,12 +188,15 @@ A range can sit in the profile with `mcu = "name"`, or under its MCU entry; both
 
 ### Workspace file
 
-The `.rdtw` workspace is the target file plus the watch list, command buttons and chart layout. A plain target file opens as a workspace with no watches.
+The `.rdtw` workspace is the target file plus the watch tabs and the chart layout. A plain target file opens as a workspace with one empty tab.
 
 ```toml
 poll_ms = 500                    # global interval; 0 = off
 
-[[watch]]
+[[tab]]
+name = "Motor"                   # unique, case-insensitive
+
+[[tab.watch]]
 expr      = "main:motor.speed"
 poll      = "global"             # global | manual | a number of ms
 format    = "dec"                # dec | hex | bin | char
@@ -206,10 +209,11 @@ min       = 0                    # in shown units
 max       = 3000
 confirm   = true
 
-[[button]]
-name    = "Set speed"
-command = "MOTOR:SPEED {param}"
-param   = "rpm"                  # label for the {param} prompt
+[[tab]]
+name = "Overview"
+
+[[tab.watch]]
+expr = "main:motor.speed"        # same item as in "Motor": settings shared
 
 [chart]
 window_s = 30                    # visible history, 1 s to 600 s
@@ -226,7 +230,9 @@ hidden = false                   # optional
 - Shown value = raw / 2^q × scale + offset, on single values only. A write converts from shown units to the nearest raw value and is refused if it doesn't fit the type.
 - Read-only on a struct or array covers all its fields. A write that needs a confirm with no one to answer it is refused.
 - Saving rewrites the file, so comments in it are lost. Paths are stored relative to the file.
-- CLI: `-w` opens a workspace (`-t` is the same option), `read` and `watch` default to the watch list, `write -y` skips the confirm, and `press`, `init`, `list`, `add` and `remove` run buttons and edit the watch list.
+- **Watch tabs:** each `[[tab]]` has a name and its own ordered list of items. One expression can be in several tabs but is one item, with one set of settings (format, scaling, polling, write safety) shared by every tab. The settings are written at the item's first place only; a later place may repeat them but must not differ, or the file fails to load. Write safety is checked across all tabs.
+- **Older files:** a top-level `[[watch]]` list loads as one tab named "Watch" and is saved as tabs. A `[[button]]` table loads with a warning and is dropped on save; command buttons were removed (rani, 2026-10-11), and such commands are sent from the SCPI console or with `rdt send`.
+- CLI: `-w` opens a workspace (`-t` is the same option), and `write -y` skips the confirm. `read` and `watch` default to every tab, or one with `--tab NAME`. `add --tab NAME` adds to a tab and creates it if new; `remove --tab NAME` removes from one tab, and from every tab without it. `rdt tab add|rename|remove` manages tabs, `list` prints the items per tab, and `init` starts a workspace.
 
 ## GUI
 
@@ -235,24 +241,24 @@ hidden = false                   # optional
 | Connection bar | COM (port, baud) or TCP/UDP (IP, port), profile selection, connect | M3 |
 | SCPI profile editor | Define and test the command templates | M3 |
 | SCPI console | Send any command by hand, see the raw reply, history | M3 |
-| Command buttons | User-defined buttons that each send one SCPI command, with an optional parameter | M3 |
 | Memory view | Hex/ASCII dump of any range, editable | M3 |
-| Variable view | Debugger-style watch tree from the ELF | M3 |
+| Variable view | Debugger-style watch trees from the ELF, in several tabs | M3 |
 | Live chart | Oscilloscope of watched values: pause, zoom, cursors | M4 |
 
 ### How the GUI works
 
 - **Start:** `rdt-gui [workspace.rdtw]` or `python -m rdt.gui`. The GUI works on one workspace, and every edit saves back to it. Opening a plain `.toml` target file starts an unsaved workspace, and Save asks for a `.rdtw` path.
 - **Threading:** all device I/O runs on one worker thread, in the order it was asked for. Keyed jobs (each watch item, the memory view, the ELF check) are dropped while the previous job with the same key is still pending, so a slow poll falls behind instead of queueing. A 50 ms tick looks for due items, and each row shows its achieved rate.
+- **Watch tabs:** the centre of the window is a tab bar of watch trees. Tabs are added with +, renamed by double-click, removed (with a question if the tab is not empty; the last tab can't be removed) and reordered by dragging. The Watch menu has New tab (Ctrl+Shift+T), Rename and Remove, and Ctrl+PgUp/PgDown switch tabs. An item's menu has "Also show in tab" and "Remove from this tab". Items added from the symbol browser go to the tab in front.
 - **Watch tree:** structs and arrays get header rows with depth, type and address. Every item is read once on connect; manual items are read only by hand or with F6.
 - **Writes:** edited in place, checked by the workspace's write safety, confirmed in a dialog when the item asks for it, and verified by read-back.
 - **ELF check:** every 1 s while connected, with re-mapping by name. Items that moved or changed type turn orange with a note; items that no longer exist turn grey and show "gone".
 - **Profile editor:** edits every SCPI field with a live preview of the commands and a test read using the edited profile before applying. Applying stores the profile inside the workspace and reconnects. MCUs and their ELFs have their own dialog.
-- **Link state:** the console, memory view and buttons are disabled unless the link is up, and the connection fields can be edited only while disconnected.
+- **Link state:** the console and memory view are disabled unless the link is up, and the connection fields can be edited only while disconnected.
 
 ### Watch, chart, statistics and CSV (M4)
 
-- **Poll scheduler:** items on one MCU that are at most 32 bytes apart merge into one read of up to `max_response` bytes. Peripheral ranges are never merged. A merged read that fails is re-read item by item. Only one poll runs at a time, so a slow link falls behind instead of queueing. Each sample carries the PC time its reply arrived.
+- **Poll scheduler:** items on one MCU that are at most 32 bytes apart merge into one read of up to `max_response` bytes. Peripheral ranges are never merged. A merged read that fails is re-read item by item. Only one poll runs at a time, so a slow link falls behind instead of queueing. Every tab keeps polling, not only the visible one: each poll collects what every tab has due, reads each expression once, and gives the result to every tab that shows it. The chart and the CSV log see items from all tabs. Each sample carries the PC time its reply arrived.
 - **Chart:** `window_s` sets the visible history (1 s to 600 s). Each `[[chart.series]]` names an `expr`, an `axis` (1 to 4: axis 1 on the left, the rest on the right), a `color`, and optionally a `unit` and `hidden`. Signals with the same unit share an axis by default. A charted field of a collapsed struct is still read.
 - **Statistics:** Min, Max, Mean and Samples columns in the watch tree, hidden by default and shown with View > Statistics columns (Ctrl+T). Changing an item's scaling resets its statistics.
 - **CSV log:** `rdt watch --csv FILE` on the CLI, or from the GUI.
@@ -263,7 +269,7 @@ hidden = false                   # optional
 
 ### Variable view
 
-- The user browses or searches the ELF's globals and adds them to the watch tree.
+- The user browses or searches the ELF's globals and adds them to a watch tab.
 - Structs expand to every field and arrays to every cell, nested to any depth. Large arrays open in pages of 100 cells.
 - Each value is displayed according to its type:
   - integers in decimal, hex or binary
@@ -287,14 +293,13 @@ hidden = false                   # optional
 1. **Live chart** with pause, zoom, pan, two cursors, multiple Y axes, and 10 minutes of history.
 2. **Display formats and scaling:** dec, hex, bin or char; Q15, Q31 or Qm.n; and `raw / 2^q × scale + offset` with a unit. Writes apply the inverse scaling. See [Workspace file](#workspace-file).
 3. **Enum and bit-field names** taken from DWARF.
-4. **Workspace file** (`.rdtw`, TOML) holding the ELF path, connection, profile, watch list, formats, limits, chart layout and buttons.
+4. **Workspace file** (`.rdtw`, TOML) holding the ELF path, connection, profile, watch tabs, formats, limits and chart layout.
 5. **ELF rebuild detection:** when the ELF changes, RDT reloads it and re-maps watched items by name. Items whose address or type changed are flagged, and items that no longer exist are kept greyed out.
 6. **CSV logging** with ISO 8601 timestamps and scaled values.
 7. **Write safety:** a per-item read-only flag, min/max limits, and an optional confirm before writing.
-8. **Command buttons** that each send a user-defined SCPI command.
-9. **Statistics:** min, max, mean and sample count per item, with a reset.
+8. **Statistics:** min, max, mean and sample count per item, with a reset.
 
-Not in v1: multi-variable read, an on-target recorder, alarms, stimulus, computed values, a scripting API, and log replay.
+Not in v1: command buttons (removed by rani, 2026-10-11; the SCPI console sends any command), multi-variable read, an on-target recorder, alarms, stimulus, computed values, a scripting API, and log replay.
 
 ## Package layout
 
@@ -327,7 +332,7 @@ tests/
 | M0 | Spec and skeleton | This design, repo layout, CI |
 | M1 | Simulated device | SCPI over TCP, UDP and a virtual COM port; several MCUs, each with memory loaded from its ELF; 64-byte split; failed commands send no reply |
 | M2 | Host core and CLI | Transports, session, SCPI profiles, the target file with several MCUs, reconnect; CLI; a test with a second SCPI client. No GUI yet |
-| M3 | First GUI and symbols | Connection bar, profile editor, console, command buttons, memory view; ELF/DWARF, types, expressions, codec, variable view, formats and scaling, write safety, workspace, ELF rebuild detection |
+| M3 | First GUI and symbols | Connection bar, profile editor, console, memory view; ELF/DWARF, types, expressions, codec, variable view, formats and scaling, write safety, workspace, ELF rebuild detection |
 | M4 | Watch | Polling scheduler, live chart, statistics, CSV logging |
 | M5 | Binary protocol | Faster path for a future firmware agent |
 | M6 | Application release | Windows installer, user docs, firmware command spec |
