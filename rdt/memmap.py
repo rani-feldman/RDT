@@ -1,0 +1,107 @@
+"""Memory map of one MCU: where RDT may read and write.
+
+RDT refuses any access outside the ELF's allocated sections (RAM and flash) and the extra
+ranges listed in the profile or the target file. Sections without the write flag, such as
+``.text`` and ``.rodata``, are read-only. A read may span adjacent ELF sections, but an access
+that touches a listed range must stay inside that one range: those are typically peripherals,
+which are never merged with anything else.
+"""
+
+from __future__ import annotations
+
+from dataclasses import dataclass
+from pathlib import Path
+
+from .errors import AccessRefused, ConfigError
+from .profile import Range
+
+
+@dataclass
+class Area:
+    name: str
+    start: int
+    size: int
+    writable: bool
+    peripheral: bool  # a listed range rather than an ELF section
+
+    @property
+    def end(self) -> int:
+        return self.start + self.size
+
+
+@dataclass
+class ElfInfo:
+    path: Path
+    byte_order: str
+    sections: list[Area]
+
+
+def load_elf_sections(path: str | Path) -> ElfInfo:
+    from elftools.common.exceptions import ELFError
+    from elftools.elf.constants import SH_FLAGS
+    from elftools.elf.elffile import ELFFile
+
+    path = Path(path)
+    try:
+        with open(path, "rb") as f:
+            elf = ELFFile(f)
+            areas = []
+            for sec in elf.iter_sections():
+                if not sec["sh_flags"] & SH_FLAGS.SHF_ALLOC or sec["sh_size"] == 0:
+                    continue
+                writable = bool(sec["sh_flags"] & SH_FLAGS.SHF_WRITE)
+                areas.append(Area(sec.name, sec["sh_addr"], sec["sh_size"], writable, False))
+            order = "little" if elf.little_endian else "big"
+    except OSError as e:
+        raise ConfigError(f"cannot read ELF {path}: {e.strerror}") from None
+    except ELFError as e:
+        raise ConfigError(f"{path} is not a valid ELF file: {e}") from None
+    return ElfInfo(path, order, sorted(areas, key=lambda a: a.start))
+
+
+class MemoryMap:
+    def __init__(self, sections: list[Area] | None = None, ranges: list[Range] | None = None):
+        areas = list(sections or [])
+        areas += [Area(r.name, r.start, r.size, r.writable, True) for r in ranges or []]
+        areas.sort(key=lambda a: a.start)
+        for a, b in zip(areas, areas[1:]):
+            if b.start < a.end and (a.peripheral or b.peripheral):
+                raise ConfigError(f"range {b.name} overlaps {a.name}")
+        self.areas = areas
+
+    def check(self, addr: int, size: int, write: bool = False) -> list[Area]:
+        """Return the areas the access covers, or raise ``AccessRefused``."""
+        if size < 1:
+            raise AccessRefused("size must be at least 1")
+        if addr < 0:
+            raise AccessRefused("address must not be negative")
+        end = addr + size
+        what = f"0x{addr:08X}..0x{end - 1:08X}"
+        covered: list[Area] = []
+        pos = addr
+        for a in self.areas:
+            if a.end <= pos:
+                continue
+            if a.start > pos:
+                break
+            covered.append(a)
+            pos = max(pos, a.end)
+            if pos >= end:
+                break
+        if pos < end:
+            raise AccessRefused(f"{what} is outside the MCU's known memory (0x{pos:08X} is not in the ELF "
+                                f"or a listed range)")
+        if any(a.peripheral for a in covered) and len(covered) > 1:
+            raise AccessRefused(f"{what} crosses the edge of range {next(a.name for a in covered if a.peripheral)}; "
+                                f"listed ranges are accessed on their own")
+        if write:
+            for a in covered:
+                if not a.writable:
+                    raise AccessRefused(f"{what} is in read-only {a.name}")
+        return covered
+
+    def find(self, addr: int) -> Area | None:
+        for a in self.areas:
+            if a.start <= addr < a.end:
+                return a
+        return None

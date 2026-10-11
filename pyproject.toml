@@ -16,10 +16,11 @@ dependencies = [
 dev = ["pytest>=8"]
 
 [project.scripts]
+rdt = "rdt.cli:main"
 rdt-sim = "sim.__main__:main"
 
 [tool.setuptools.packages.find]
-include = ["sim*"]
+include = ["rdt*", "sim*"]
 
 [tool.setuptools.package-data]
 sim = ["examples/*.toml", "examples/firmware/*"]
