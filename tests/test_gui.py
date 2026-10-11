@@ -56,7 +56,7 @@ def connect(qtbot, win):
 
 
 def value(win, path):
-    for st in win.watch_tree.states.values():
+    for _, st in win.watch_tabs.states():
         node = st.nodes.get(path)
         if node is not None:
             return node.text(COL_VALUE)
@@ -158,7 +158,7 @@ def test_symbol_browser_adds_and_save_round_trips(qtbot, win, tmp_path):
     assert not win.dirty
 
 
-def test_console_buttons_and_memory(qtbot, win, monkeypatch):
+def test_console_and_memory(qtbot, win):
     connect(qtbot, win)
     con = win.console
     con.input.setText("*IDN?")
@@ -167,12 +167,6 @@ def test_console_buttons_and_memory(qtbot, win, monkeypatch):
     assert con.history.items == ["*IDN?"]
     con.send("BOGUS:COMMAND?")
     qtbot.waitUntil(lambda: "(no reply" in con.output.toPlainText(), timeout=3000)
-
-    monkeypatch.setattr(QInputDialog, "getText", lambda *a, **k: ("1", True))
-    silence = next(b for b in win.ws.buttons if b.name == "Silence MCU")
-    win.buttons.press(silence)
-    qtbot.waitUntil(lambda: "> SIM:MCU:SIL 1,ON" in con.output.toPlainText(), timeout=3000)
-    win.buttons.press(next(b for b in win.ws.buttons if b.name == "Identify"))
 
     mem = win.memory
     mem.mcu.setCurrentText("main")
@@ -184,6 +178,61 @@ def test_console_buttons_and_memory(qtbot, win, monkeypatch):
     cell = mem.table.item(0, 4)        # first byte of gains
     cell.setText("7F")
     qtbot.waitUntil(lambda: mem.data[:1] == b"\x7f", timeout=3000)
+
+
+def test_watch_tabs(qtbot, win, monkeypatch, tmp_path):
+    tabs = win.watch_tabs
+    assert [tabs.tabText(i) for i in range(tabs.count())] == ["Motor", "System"]
+    motor, system = tabs.trees
+    assert win.watch_tree is motor
+    # main:motor.mode is in both tabs: one item, read once per poll, shown in each.
+    assert motor.states["main:motor.mode"].watch is system.states["main:motor.mode"].watch
+    reads = []
+    real = win.ws.read_many
+    monkeypatch.setattr(win.ws, "read_many", lambda t, items, *a, **k: reads.append(
+        [w.expr for w in items]) or real(t, items, *a, **k))
+    connect(qtbot, win)
+    # the tab in the back keeps polling
+    wait_value(qtbot, win, "main:tick_count", lambda v: v.startswith("0x"))
+    qtbot.waitUntil(lambda: system.states["main:motor.mode"].item.text(COL_VALUE) != "", timeout=3000)
+    assert all(r.count("main:motor.mode") <= 1 for r in reads)
+
+    # new settings for a shared item show in both tabs
+    motor.set_format("main:motor.mode", "hex")
+    assert system.states["main:motor.mode"].watch.display.format == "hex"
+
+    monkeypatch.setattr(QInputDialog, "getText", lambda *a, **k: ("Scratch", True))
+    tree = tabs.new_tab()
+    assert win.watch_tree is tree and tabs.tabText(2) == "Scratch"
+    assert tree.add_watch("main:gains") is not None
+    tabs.new_tab("scratch")   # a name in use is refused
+    assert tabs.count() == 3
+    tabs.rename_tab(2, "Gains")
+    tabs.tabBar().moveTab(2, 0)
+    assert [t.name for t in win.ws.tabs] == ["Gains", "Motor", "System"]
+    path = tmp_path / "tabs.rdtw"
+    assert win._save_to(path)
+    back = Workspace.load(path)
+    assert [(t.name, len(t.watches)) for t in back.tabs] == [("Gains", 1), ("Motor", 4), ("System", 3)]
+
+    monkeypatch.setattr(QMessageBox, "question", lambda *a, **k: QMessageBox.Yes)
+    tabs.close_tab(0)
+    tabs.close_tab(0)
+    assert [t.name for t in win.ws.tabs] == ["System"]
+    tabs.close_tab(0)   # the last tab stays
+    assert tabs.count() == 1
+
+
+def test_an_old_workspace_with_buttons_opens(qtbot, tmp_path):
+    path = tmp_path / "old.rdtw"
+    path.write_text('[[mcu]]\nid = 0\nname = "main"\n\n[[watch]]\nexpr = "main:tick_count"\n\n'
+                    '[[button]]\nname = "Who"\ncommand = "*IDN?"\n')
+    w = MainWindow()
+    qtbot.addWidget(w, before_close_func=lambda w: setattr(w, "dirty", False))
+    assert w.open_path(path)
+    assert [w.watch_tabs.tabText(i) for i in range(w.watch_tabs.count())] == ["Watch"]
+    assert "main:tick_count" in w.watch_tree.states
+    assert "no longer supported" in w.message.text()
 
 
 def test_profile_dialog_preview_and_apply(qtbot, win):
@@ -228,7 +277,7 @@ def test_elf_rebuild_remaps(qtbot, win, tmp_path):
     win.ws.config.mcus[0].elf = elf
     connect(qtbot, win)
     wait_value(qtbot, win, "main:tick_count", lambda v: True)
-    st = win.watch_tree.states["main:tick_count"]
+    st = win.watch_tabs.trees[1].states["main:tick_count"]   # in the tab that is not in front
     rebuilt = ROOT / "tests" / "elf" / "corpus-clang-v2.elf"
     if not rebuilt.exists():
         pytest.skip("no rebuild variant ELF")

@@ -13,7 +13,7 @@ python -m sim &          # the simulated device, in its own terminal
 rdt -t examples/sim_target.toml info
 rdt -t examples/sim_target.toml read main:motor
 rdt -t examples/sim_target.toml write main:motor.mode MODE_FAULT
-rdt -w examples/sim_bench.rdtw watch     # a workspace: watch list, scaling, write limits
+rdt -w examples/sim_bench.rdtw watch     # a workspace: watch tabs, scaling, write limits
 ```
 
 See [docs/CLI.md](docs/CLI.md) for the commands, variable names and expressions, the target file and workspaces, and how the host handles timeouts, write confirmation, silent MCUs and link loss.
@@ -25,7 +25,7 @@ python -m sim &
 rdt-gui examples/sim_bench.rdtw
 ```
 
-Connection bar, debugger-style watch tree from the ELF, live chart with cursors, statistics, CSV logging, memory view, SCPI console, command buttons and an SCPI profile editor. See [docs/GUI.md](docs/GUI.md).
+Connection bar, watch tabs with a debugger-style watch tree from the ELF, live chart with cursors, statistics, CSV logging, memory view, SCPI console and an SCPI profile editor. See [docs/GUI.md](docs/GUI.md).
 
 ## Simulated device
 

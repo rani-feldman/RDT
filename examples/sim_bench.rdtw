@@ -1,6 +1,6 @@
 # RDT workspace for the simulated device (python -m sim): the target file's connection, profile
-# and MCUs, plus a watch list, buttons and polling. Paths are relative to this file.
-# rdt -w examples/sim_bench.rdtw read | watch | write EXPR VALUE | press NAME [VALUE] | list
+# and MCUs, plus watch tabs and polling. Paths are relative to this file.
+# rdt -w examples/sim_bench.rdtw read [--tab NAME] | watch [--tab NAME] | write EXPR VALUE | list
 profile = "../sim/examples/default_profile.toml"
 poll_ms = 500                 # global polling interval; 0 turns polling off
 
@@ -24,41 +24,42 @@ name       = "motorctl"
 elf        = "../sim/examples/firmware/motorctl.elf"
 timeout_ms = 1000
 
-[[watch]]
-expr    = "main:motor.speed"
-unit    = "rpm"
-poll    = 100                 # this item every 100 ms; "global" (the default) or "manual"
+# Watch tabs: each tab is its own watch list. Every tab keeps polling, not only the one shown.
+[[tab]]
+name = "Motor"
 
-[[watch]]
-expr    = "main:motor.target"
-unit    = "rpm"
-min     = 0                   # write limits, in shown units
-max     = 3000
-confirm = true                # ask before writing
+  [[tab.watch]]
+  expr    = "main:motor.speed"
+  unit    = "rpm"
+  poll    = 100                 # this item every 100 ms; "global" (the default) or "manual"
 
-[[watch]]
-expr    = "main:motor.current_ma"
-scale   = 0.001               # shown = raw * scale + offset
-unit    = "A"
+  [[tab.watch]]
+  expr    = "main:motor.target"
+  unit    = "rpm"
+  min     = 0                   # write limits, in shown units
+  max     = 3000
+  confirm = true                # ask before writing
 
-[[watch]]
-expr      = "main:motor.mode"
-read_only = true
+  [[tab.watch]]
+  expr    = "main:motor.current_ma"
+  scale   = 0.001               # shown = raw * scale + offset
+  unit    = "A"
 
-[[watch]]
-expr    = "main:tick_count"
-format  = "hex"               # dec | hex | bin | char
+  [[tab.watch]]
+  expr      = "main:motor.mode"
+  read_only = true
 
-[[watch]]
-expr    = "motorctl:temperature"
-unit    = "degC"
-poll    = "manual"
+[[tab]]
+name = "System"
 
-[[button]]
-name    = "Identify"
-command = "*IDN?"
+  [[tab.watch]]
+  expr    = "main:tick_count"
+  format  = "hex"               # dec | hex | bin | char
 
-[[button]]
-name    = "Silence MCU"       # a simulator command: make a secondary MCU stop answering
-command = "SIM:MCU:SIL {param},ON"
-param   = "MCU id"
+  [[tab.watch]]
+  expr    = "motorctl:temperature"
+  unit    = "degC"
+  poll    = "manual"
+
+  [[tab.watch]]
+  expr = "main:motor.mode"    # an item can be in several tabs; its settings are given once
