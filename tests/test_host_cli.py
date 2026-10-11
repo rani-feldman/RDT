@@ -124,6 +124,101 @@ def test_no_mcus_is_an_error(capsys):
     assert "no MCUs" in capsys.readouterr().err
 
 
-def test_symbol_names_are_not_yet_supported(sim, capsys):
-    assert rdt(sim, "read", "main:motor.speed")[0] == 1
-    assert "@mcu:address:type" in capsys.readouterr().err
+def test_read_by_name(sim):
+    code, out = rdt(sim, "read", "main:motor.speed", "motorctl:pwm_duty", "main:firmware_name")
+    assert code == 0
+    assert out.splitlines() == ['main:motor.speed = 1.5', 'motorctl:pwm_duty = 500 (0x000001F4)',
+                                'main:firmware_name = "rdt-main"']
+
+
+def test_read_a_struct(sim):
+    code, out = rdt(sim, "read", "main:motor")
+    assert code == 0
+    assert out.splitlines() == [
+        "main:motor  motor_t, 16 bytes at 0x20000000",
+        "main:motor.speed      = 1.5            float",
+        "main:motor.target     = 3000           float",
+        "main:motor.current_ma = -120 (0xFF88)  int16_t",
+        "main:motor.enabled    = 1 (0x01)       uint8_t",
+        "main:motor.mode       = MODE_RUN (1)   mode_t",
+    ]
+
+
+def test_read_a_large_struct_on_a_secondary_mcu(sim):
+    # 132 bytes behind MCU 0, so split into 64-byte frames, and its array cut at --max-cells.
+    code, out = rdt(sim, "read", "motorctl:adc_log", "--max-cells", "4")
+    lines = out.splitlines()
+    assert code == 0 and lines[0] == "motorctl:adc_log  adc_log_t, 132 bytes at 0x20000000"
+    assert lines[1].startswith("motorctl:adc_log.samples[0]") and "= 1 (0x0001)" in lines[1]
+    assert lines[5] == "motorctl:adc_log.samples[4..63]   ... 60 more cells"
+    assert lines[6].startswith("motorctl:adc_log.count ")   # a counter in the simulator
+
+
+def test_write_by_name(sim):
+    assert rdt(sim, "write", "main:motor.mode", "MODE_FAULT") == (
+        0, "main:motor.mode = MODE_FAULT (2) (confirmed by read-back)\n")
+    assert rdt(sim, "write", "main:gains[3]", "-7")[1] == "main:gains[3] = -7 (0xFFFFFFF9) (confirmed by read-back)\n"
+    assert rdt(sim, "read", "main:gains[3]", "main:motor.mode")[1].splitlines() == [
+        "main:gains[3] = -7 (0xFFFFFFF9)", "main:motor.mode = MODE_FAULT (2)"]
+
+
+def test_write_by_name_refuses(sim, capsys):
+    assert rdt(sim, "write", "main:motor.mode", "MODE_FAST")[0] == 1
+    assert "use one of MODE_IDLE, MODE_RUN, MODE_FAULT" in capsys.readouterr().err
+    assert rdt(sim, "write", "main:motor", "1")[0] == 1
+    assert "write one field or cell at a time" in capsys.readouterr().err
+    assert rdt(sim, "write", "main:firmware_name[0]", "'x'")[0] == 1
+    assert "read-only .rodata" in capsys.readouterr().err
+
+
+def test_name_errors(sim):
+    code, out = rdt(sim, "read", "main:nope", "main:gains[4]", "motor:speed", "main:motor.speed")
+    assert code == 1
+    lines = out.splitlines()
+    assert lines[0] == "main:nope : no variable 'nope' in main.elf"
+    assert lines[1] == "main:gains[4] : gains[4] is out of range; gains has 4 cells (0..3)"
+    assert lines[2] == "motor:speed : unknown MCU 'motor'; this target has main, motorctl"
+    assert lines[3] == "main:motor.speed = 1.5"
+
+
+def test_dump_by_name(sim):
+    code, out = rdt(sim, "dump", "main:firmware_name")
+    assert out.strip() == "08000050  72 64 74 2D 6D 61 69 6E 00 00 00 00 00 00 00 00  |rdt-main........|"
+    assert rdt(sim, "dump", "main:firmware_name", "4")[1].strip().startswith("08000050  72 64 74 2D  ")
+
+
+def test_symbols_and_ptype_need_no_device(capsys):
+    out = io.StringIO()
+    # Port 1 refuses connections: these commands never open the link.
+    assert main(["-t", str(EXAMPLE_TARGET), "--tcp", "127.0.0.1:1", "symbols", "main"], out=out) == 0
+    assert out.getvalue().splitlines() == [
+        "0x08000050      16  const char[16]     firmware_name",
+        "0x20000000      16  motor_t            motor",
+        "0x20000010       4  volatile uint32_t  tick_count",
+        "0x20000014      16  int32_t[4]         gains",
+        "0x20000024     200  uint8_t[200]       rx_buffer",
+    ]
+    out = io.StringIO()
+    assert main(["-t", str(EXAMPLE_TARGET), "--tcp", "127.0.0.1:1", "ptype", "main:motor"], out=out) == 0
+    text = out.getvalue()
+    assert text.splitlines()[0] == "main:motor  motor_t  struct {...}, 16 bytes at 0x20000000 in main.c"
+    assert "+0x0C  mode        mode_t" in text and "{MODE_IDLE = 0, MODE_RUN = 1, MODE_FAULT = 2}" in text
+    out = io.StringIO()
+    assert main(["-t", str(EXAMPLE_TARGET), "--tcp", "127.0.0.1:1", "ptype", "main:mode_t"], out=out) == 0
+    assert out.getvalue().startswith("mode_t  enum {...}, 4 bytes")
+
+
+def test_watch_by_name(sim):
+    code, out = rdt(sim, "watch", "main:motor", "motorctl:pwm_duty", "-i", "20", "-n", "2")
+    lines = out.splitlines()
+    assert code == 0 and len(lines) == 3
+    assert lines[0].split() == ["time", "main:motor.speed", "main:motor.target", "main:motor.current_ma",
+                                "main:motor.enabled", "main:motor.mode", "motorctl:pwm_duty"]
+    assert lines[1].split()[1:] == ["1.5", "3000", "-120", "1", "MODE_RUN", "500"]
+
+
+def test_console_by_name(sim, monkeypatch):
+    monkeypatch.setattr("sys.stdin", io.StringIO(".write main:motor.enabled 0\n.read main:motor.enabled\n.quit\n"))
+    code, out = rdt(sim, "console")
+    assert out.splitlines()[1:] == ["main:motor.enabled = 0 (0x00) (confirmed by read-back)",
+                                    "main:motor.enabled = 0 (0x00)"]
