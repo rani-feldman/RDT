@@ -66,7 +66,7 @@ The firmware only ever sees an address and a byte count. Everything that knows a
 - `pyelftools` walks `.debug_info`. Every global and file-static variable is recorded with its address, size and type.
 - The type model covers base types, pointers, arrays, structs and unions with member offsets, enums with their names, bit fields, and typedefs.
 - Supported expressions: `name`, `a.b.c`, `arr[3]`, `arr[2][5]`, `*ptr`, `ptr->m`, `file.c:name`, and the raw form `@0x20000418:u32`.
-- An MCU prefix picks the MCU: `mcu1:motor.speed`, `@mcu2:0x20000418:u32`. Without a prefix, the expression means MCU 0.
+- Every expression starts with the MCU's name, always, with no default: `main:motor.speed`, `@motorctl:0x20000418:u32`. The name is the MCU's display name from the workspace, and the watch list, chart legend and CSV columns show it too.
 - Parsed results are cached on disk, keyed by the ELF's hash.
 
 ## SCPI profile
