@@ -11,6 +11,10 @@ class ConfigError(RdtError):
     """A profile, target file or command-line option is invalid."""
 
 
+class SymbolError(RdtError):
+    """A name, type or expression can't be resolved from the MCU's ELF."""
+
+
 class LinkError(RdtError):
     """The transport could not be opened, or it broke while in use."""
 
