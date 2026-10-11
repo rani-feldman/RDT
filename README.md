@@ -18,6 +18,15 @@ rdt -w examples/sim_bench.rdtw watch     # a workspace: watch list, scaling, wri
 
 See [docs/CLI.md](docs/CLI.md) for the commands, variable names and expressions, the target file and workspaces, and how the host handles timeouts, write confirmation, silent MCUs and link loss.
 
+## GUI
+
+```
+python -m sim &
+rdt-gui examples/sim_bench.rdtw
+```
+
+Connection bar, debugger-style watch tree from the ELF, memory view, SCPI console, command buttons and an SCPI profile editor. See [docs/GUI.md](docs/GUI.md).
+
 ## Simulated device
 
 Until the firmware has the memory commands, RDT is developed against a simulated device that runs on the same PC:
