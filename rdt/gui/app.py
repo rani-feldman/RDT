@@ -9,6 +9,8 @@ from __future__ import annotations
 
 import logging
 import sys
+import time
+from datetime import datetime
 from pathlib import Path
 
 from PySide6.QtCore import Qt, QTimer
@@ -18,11 +20,13 @@ from PySide6.QtWidgets import (
     QPushButton, QSpinBox, QToolBar,
 )
 
-from ..errors import ConfigError
+from ..csvlog import CsvLog
+from ..errors import ConfigError, LinkDown
 from ..profile import Profile
 from ..session import LinkState
 from ..target import ConnectionConfig, McuConfig, TargetConfig
 from ..workspace import Workspace
+from .chart import ChartPanel
 from .device import Device, describe_error
 from .panels import ButtonPanel, Console, McuDialog, MemoryView, ProfileDialog
 from .variables import SymbolBrowser, WatchTree
@@ -78,6 +82,10 @@ class ConnectionBar(QToolBar):
         self.poll.setSpecialValueText("Off")
         self.poll.setToolTip("Global polling interval; each watched item can override it")
         self.poll.valueChanged.connect(main.set_poll_ms)
+        self.log_button = QPushButton("Log CSV")
+        self.log_button.setCheckable(True)
+        self.log_button.setToolTip("Log every watched value to a CSV file while connected (Ctrl+L)")
+        self.log_button.clicked.connect(main.toggle_log)
         self.addWidget(self.transport)
         self._lan = [self.addWidget(self.host), self.addWidget(QLabel(":")), self.addWidget(self.port)]
         self._serial = [self.addWidget(self.com), self.addWidget(self.baud)]
@@ -88,6 +96,7 @@ class ConnectionBar(QToolBar):
         self.addSeparator()
         self.addWidget(QLabel(" Poll "))
         self.addWidget(self.poll)
+        self.addWidget(self.log_button)
         self.transport.currentTextChanged.connect(self._kind)
         for w in (self.transport, self.com, self.baud):
             w.currentTextChanged.connect(main.connection_edited)
@@ -152,9 +161,17 @@ class MainWindow(QMainWindow):
         self.device.opened.connect(self._opened)
         self.device.closed.connect(self._show_state)
         self._connecting = False
+        self.log: CsvLog | None = None
+        self._log_link_up = True
 
+        self.chart = ChartPanel(self)
+        self.chart.changed.connect(self._chart_changed)
+        self.chart.series_changed.connect(self._chart_series_changed)
         self.watch_tree = WatchTree(self)
         self.watch_tree.changed.connect(self.set_dirty)
+        self.watch_tree.sampled.connect(self.chart.feed)
+        self.watch_tree.sampled.connect(self._log_readings)
+        self.watch_tree.chart_requested.connect(self.add_to_chart)
         self.setCentralWidget(self.watch_tree)
         self.symbols = SymbolBrowser(self)
         self.symbols.add_requested.connect(self.watch_tree.add_watch)
@@ -166,6 +183,7 @@ class MainWindow(QMainWindow):
         self.addToolBar(self.bar)
         self.docks = {}
         for title, widget, area in (("Variables", self.symbols, Qt.LeftDockWidgetArea),
+                                    ("Chart", self.chart, Qt.BottomDockWidgetArea),
                                     ("Console", self.console, Qt.BottomDockWidgetArea),
                                     ("Memory", self.memory, Qt.BottomDockWidgetArea),
                                     ("Buttons", self.buttons, Qt.RightDockWidgetArea)):
@@ -174,13 +192,16 @@ class MainWindow(QMainWindow):
             dock.setWidget(widget)
             self.addDockWidget(area, dock)
             self.docks[title] = dock
+        self.tabifyDockWidget(self.docks["Chart"], self.docks["Console"])
         self.tabifyDockWidget(self.docks["Console"], self.docks["Memory"])
-        self.docks["Console"].raise_()
-        self.resizeDocks([self.docks["Console"]], [220], Qt.Vertical)
+        self.docks["Chart"].raise_()
+        self.resizeDocks([self.docks["Chart"]], [300], Qt.Vertical)
         self.resizeDocks([self.docks["Variables"], self.docks["Buttons"]], [250, 150], Qt.Horizontal)
         self._menus()
         self.message = QLabel()
         self.statusBar().addWidget(self.message, 1)
+        self.log_label = QLabel()
+        self.statusBar().addPermanentWidget(self.log_label)
 
         self.poll_timer = QTimer(self)
         self.poll_timer.timeout.connect(self.watch_tree.tick)
@@ -222,15 +243,25 @@ class MainWindow(QMainWindow):
         action(m, "&Read all now", self.read_all, "F6")
         action(m, "Re&move selected", lambda: [self.watch_tree.remove_watch(e) for e in self.watch_tree.selected_exprs()],
                QKeySequence.Delete)
+        m.addSeparator()
+        action(m, "Add selected to &chart", self.chart_selected, "Ctrl+G")
+        action(m, "Reset &statistics", lambda: self.watch_tree.reset_stats())
+        self.log_action = action(m, "&Log to CSV...", self.toggle_log, "Ctrl+L")
+        self.log_action.setCheckable(True)
         m = self.menuBar().addMenu("&View")
         for dock in self.docks.values():
             m.addAction(dock.toggleViewAction())
+        m.addSeparator()
+        stats = action(m, "&Statistics columns", self.watch_tree.show_stats, "Ctrl+T")
+        stats.setCheckable(True)
 
     # --- workspace ---------------------------------------------------------------------------
 
     def show_workspace(self) -> None:
         self.bar.show_config(self.ws)
         self.watch_tree.rebuild()
+        self.watch_tree.reset_stats()
+        self.chart.load(self.ws.chart)
         self.symbols.set_workspace(self.ws)
         self.memory.set_workspace(self.ws)
         self.buttons.rebuild()
@@ -278,6 +309,7 @@ class MainWindow(QMainWindow):
         return True
 
     def load(self, ws: Workspace) -> None:
+        self.stop_log()
         if self.device.target is not None:
             self.device.close()
         self.ws = ws
@@ -313,8 +345,9 @@ class MainWindow(QMainWindow):
         if not self._maybe_save():
             event.ignore()
             return
-        for t in (self.poll_timer, self.state_timer, self.elf_timer, self.memory.timer):
+        for t in (self.poll_timer, self.state_timer, self.elf_timer, self.memory.timer, self.chart.timer):
             t.stop()
+        self.stop_log()
         self.device.shutdown()
         event.accept()
 
@@ -397,6 +430,8 @@ class MainWindow(QMainWindow):
             return
 
         def reloaded(mcus):
+            if mcus and self.log is not None:
+                self.log.event(time.time(), f"ELF rebuilt for {', '.join(mcus)}")
             if mcus:
                 self.status(f"ELF rebuilt for {', '.join(mcus)}; watch items found again by name")
                 self.watch_tree.remap(mcus)
@@ -448,6 +483,111 @@ class MainWindow(QMainWindow):
                                         f"Expression, such as {mcu}:motor.speed or @{mcu}:0x20000000:u32")
         if ok and text.strip():
             self.watch_tree.add_watch(text.strip())
+
+    # --- chart -------------------------------------------------------------------------------
+
+    def reads_closed(self, expr: str) -> bool:
+        """True when a collapsed struct or array must be read anyway: it has a charted field, or
+        everything is being logged."""
+        return self.log is not None or self.chart.wants(expr)
+
+    def add_to_chart(self, path: str, unit: str = "") -> None:
+        self.chart.add(path, unit)
+        self.docks["Chart"].show()
+        self.docks["Chart"].raise_()
+
+    def chart_selected(self) -> None:
+        paths = [p for p in self.watch_tree.selected_paths() if self.watch_tree.chartable(p)]
+        if not paths:
+            self.status("Select numeric values in the watch tree to chart them")
+        for p in paths:
+            self.watch_tree.chart(p)
+
+    def _chart_changed(self) -> None:
+        self.ws.chart = self.chart.to_dict()
+        self.set_dirty()
+
+    def _chart_series_changed(self) -> None:
+        for expr in self.watch_tree.states:
+            if self.chart.wants(expr):
+                self.watch_tree.states[expr].force = True
+
+    # --- CSV log -----------------------------------------------------------------------------
+
+    def toggle_log(self) -> None:
+        if self.log is not None:
+            self.stop_log()
+        else:
+            self.start_log()
+        self._show_log()
+
+    def start_log(self, path: str | Path | None = None) -> bool:
+        if self.device.target is None:
+            self.status("Connect first: the log's columns come from the values read", error=True)
+            self._show_log()
+            return False
+        if path is None:
+            base = self.ws.path.parent if self.ws.path else Path.cwd()
+            name = base / f"rdt-{datetime.now():%Y%m%d-%H%M%S}.csv"
+            path, _ = QFileDialog.getSaveFileName(self, "Log to CSV", str(name), "CSV (*.csv)")
+            if not path:
+                self._show_log()
+                return False
+        columns, units = [], {}
+        for expr, st in self.watch_tree.states.items():
+            leaves = [p for p, r in st.shown.items() if r.text is not None and r.raw is not None] or [expr]
+            columns += [p for p in leaves if p not in columns]
+            if st.watch.display.unit:
+                units[expr] = st.watch.display.unit
+        try:
+            self.log = CsvLog(path, columns, units)
+        except ConfigError as e:
+            self.status(str(e), error=True)
+            self._show_log()
+            return False
+        self._log_link_up = True
+        for st in self.watch_tree.states.values():
+            st.force = True   # a first row with everything
+        self.status(f"Logging {len(columns)} values to {path}")
+        self._show_log()
+        return True
+
+    def stop_log(self) -> None:
+        if self.log is None:
+            return
+        log, self.log = self.log, None
+        log.close()
+        self.status(f"Logged {log.rows} rows to {log.path}")
+        self._show_log()
+
+    def _log_readings(self, readings) -> None:
+        values = {}
+        for r in readings:
+            for row in r.shown or ():
+                if row.text is not None and row.raw is not None:
+                    values[row.path] = row.value
+        was_up = self._log_link_up
+        if any(isinstance(r.error, LinkDown) for r in readings):
+            self._log_link_up = False
+        elif values:
+            self._log_link_up = True
+        if self.log is None:
+            return
+        event = "" if was_up == self._log_link_up else ("link up" if self._log_link_up else "link down")
+        if values or event:
+            when = min((r.time for r in readings if r.time), default=time.time())
+            self.log.write(when, values, event)
+        self._show_log()
+
+    def _show_log(self) -> None:
+        on = self.log is not None
+        for w in (self.bar.log_button, self.log_action):
+            w.blockSignals(True)
+            w.setChecked(on)
+            w.blockSignals(False)
+        self.bar.log_button.setText("● Logging" if on else "Log CSV")
+        self.bar.log_button.setStyleSheet("color: #c03030" if on else "")
+        self.log_label.setText(f"CSV: {self.log.path.name}, {self.log.rows} rows" if on else "")
 
     def read_all(self) -> None:
         for expr in list(self.watch_tree.states):

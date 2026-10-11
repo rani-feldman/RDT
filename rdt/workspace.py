@@ -22,8 +22,8 @@ from dataclasses import dataclass, field, fields
 from pathlib import Path
 from typing import Callable
 
-from . import tomlw
-from .errors import ConfigError, SymbolError, WriteRefused
+from . import scheduler, tomlw
+from .errors import ConfigError, RdtError, SymbolError, WriteRefused
 from .profile import Profile, Range
 from .scaling import Display
 from .symbols import Location, parse
@@ -156,6 +156,17 @@ class Shown:
     type_name: str = ""
     addr: int = 0
     scalar: bool = True   # a value that can be written
+
+
+@dataclass
+class Reading:
+    """One watched item from one poll: its values as shown, or why there are none."""
+
+    watch: Watch
+    time: float                       # the PC's clock (time.time()) when the reply arrived
+    loc: Location | None = None
+    shown: list[Shown] | None = None
+    error: Exception | None = None
 
 
 @dataclass
@@ -302,8 +313,32 @@ class Workspace:
         """Read a watched item (or any expression) and show it with its format and scaling.
         ``compact`` drops the extras for narrow columns: no hex beside decimals, enum names alone.
         ``headers`` also returns a row for each struct and array, as a tree shows them."""
-        w = item if isinstance(item, Watch) else (self.watch(item) or Watch(item))
+        w = self._item(item)
         loc, rows = t.read_rows(w.expr, max_cells)
+        return loc, self.show(w, loc, rows, compact, headers)
+
+    def read_many(self, t: Target, items: list[Watch | str], max_cells: int | dict[str, int] = 100,
+                  compact: bool = False, headers: bool = False) -> list[Reading]:
+        """Read several items at once through the poll scheduler: nearby items share one read.
+        ``max_cells`` may give each item's own limit, by expression. Errors are kept per item."""
+        watches = [self._item(i) for i in items]
+        out = []
+        for w, s in zip(watches, scheduler.read_many(t, [w.expr for w in watches])):
+            r = Reading(w, s.time, s.loc, error=s.error)
+            if s.error is None:
+                cells = max_cells.get(w.expr, 100) if isinstance(max_cells, dict) else max_cells
+                try:
+                    r.shown = self.show(w, s.loc, t.rows(s.loc, s.data, cells), compact, headers)
+                except RdtError as e:
+                    r.error = e
+            out.append(r)
+        return out
+
+    def _item(self, item: Watch | str) -> Watch:
+        return item if isinstance(item, Watch) else (self.watch(item) or Watch(item))
+
+    def show(self, w: Watch, loc: Location, rows: list, compact: bool = False, headers: bool = False) -> list[Shown]:
+        """Rows of a value already read, with the item's format and scaling."""
         if w.display.scaled and not is_scalar(loc.type) and loc.bit_size is None:
             raise ConfigError(f"{w.expr}: scaling needs a single value, not a {loc.type.name}")
         out = []
@@ -330,7 +365,7 @@ class Workspace:
             else:
                 text = w.display.text(shown, bits)
             out.append(Shown(r.path, text, shown, r.value, **extra))
-        return loc, out
+        return out
 
     def write(self, t: Target, expr: str, text: str,
               confirm: Callable[[str], bool] | None = None) -> tuple[Location, object]:
