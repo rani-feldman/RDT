@@ -1,0 +1,28 @@
+# RDT target file for the simulated device (python -m sim).
+# Copy it for a real bench: change [connection], point profile at the firmware's SCPI profile,
+# and give each MCU its ELF. Paths are relative to this file.
+
+profile = "../sim/examples/default_profile.toml"
+
+[connection]
+transport = "tcp"            # tcp | udp | serial
+address   = "127.0.0.1:5025" # HOST:PORT for tcp and udp
+# transport = "serial"
+# port      = "COM12"        # the other end of the com0com pair the simulator serves
+# baud      = 115200
+
+[[mcu]]
+id   = 0                     # MCU 0 is the main MCU, which owns the link
+name = "main"
+elf  = "../sim/examples/firmware/main.elf"
+
+  [[mcu.ranges]]             # memory with no ELF section behind it; never merged into other reads
+  name  = "GPIOA"
+  start = 0x48000000
+  size  = 0x400
+
+[[mcu]]
+id         = 1
+name       = "motorctl"
+elf        = "../sim/examples/firmware/motorctl.elf"
+timeout_ms = 1000            # reads are split into 64-byte frames behind MCU 0, so allow longer
