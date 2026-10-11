@@ -186,6 +186,40 @@ size  = 0x400
 
 A range can sit in the profile with `mcu = "name"`, or under its MCU entry; both mean the same.
 
+### Workspace file
+
+The `.rdtw` workspace is the target file plus the watch list, command buttons and chart layout. A plain target file opens as a workspace with no watches.
+
+```toml
+poll_ms = 500                    # global interval; 0 = off
+
+[[watch]]
+expr      = "main:motor.speed"
+poll      = "global"             # global | manual | a number of ms
+format    = "dec"                # dec | hex | bin | char
+q         = 15                   # optional fixed-point bits
+scale     = 1.0
+offset    = 0.0
+unit      = "rpm"
+read_only = false
+min       = 0                    # in shown units
+max       = 3000
+confirm   = true
+
+[[button]]
+name    = "Set speed"
+command = "MOTOR:SPEED {param}"
+param   = "rpm"                  # label for the {param} prompt
+
+[chart]                          # kept as written, for the GUI
+```
+
+- The `[connection]`, `[profile]` and `[[mcu]]` tables are the same as in the target file.
+- Shown value = raw / 2^q × scale + offset, on single values only. A write converts from shown units to the nearest raw value and is refused if it doesn't fit the type.
+- Read-only on a struct or array covers all its fields. A write that needs a confirm with no one to answer it is refused.
+- Saving rewrites the file, so comments in it are lost. Paths are stored relative to the file.
+- CLI: `-w` opens a workspace (`-t` is the same option), `read` and `watch` default to the watch list, `write -y` skips the confirm, and `press`, `init`, `list`, `add` and `remove` run buttons and edit the watch list.
+
 ## GUI
 
 | Panel | Purpose | Milestone |
@@ -222,7 +256,7 @@ A range can sit in the profile with `mcu = "name"`, or under its MCU entry; both
 ### v1 features adopted from FreeMASTER and STM32CubeMonitor
 
 1. **Live chart** with pause, zoom, pan, two cursors, multiple Y axes, and 10 minutes of history.
-2. **Display formats and scaling:** dec, hex, bin or char; Q15, Q31 or Qm.n; and `raw * k + offset` with a unit. Writes apply the inverse scaling.
+2. **Display formats and scaling:** dec, hex, bin or char; Q15, Q31 or Qm.n; and `raw / 2^q × scale + offset` with a unit. Writes apply the inverse scaling. See [Workspace file](#workspace-file).
 3. **Enum and bit-field names** taken from DWARF.
 4. **Workspace file** (`.rdtw`, TOML) holding the ELF path, connection, profile, watch list, formats, limits, chart layout and buttons.
 5. **ELF rebuild detection:** when the ELF changes, RDT reloads it and re-maps watched items by name. Items whose address or type changed are flagged, and items that no longer exist are kept greyed out.
