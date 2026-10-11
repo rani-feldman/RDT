@@ -15,6 +15,10 @@ class SymbolError(RdtError):
     """A name, type or expression can't be resolved from the MCU's ELF."""
 
 
+class WriteRefused(RdtError):
+    """The workspace's write safety refused a write: read-only, out of limits, or not confirmed."""
+
+
 class LinkError(RdtError):
     """The transport could not be opened, or it broke while in use."""
 

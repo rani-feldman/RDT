@@ -13,9 +13,10 @@ python -m sim &          # the simulated device, in its own terminal
 rdt -t examples/sim_target.toml info
 rdt -t examples/sim_target.toml read main:motor
 rdt -t examples/sim_target.toml write main:motor.mode MODE_FAULT
+rdt -w examples/sim_bench.rdtw watch     # a workspace: watch list, scaling, write limits
 ```
 
-See [docs/CLI.md](docs/CLI.md) for the commands, variable names and expressions, the target file, and how the host handles timeouts, write confirmation, silent MCUs and link loss.
+See [docs/CLI.md](docs/CLI.md) for the commands, variable names and expressions, the target file and workspaces, and how the host handles timeouts, write confirmation, silent MCUs and link loss.
 
 ## Simulated device
 
