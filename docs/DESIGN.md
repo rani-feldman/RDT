@@ -67,7 +67,13 @@ The firmware only ever sees an address and a byte count. Everything that knows a
 - The type model covers base types, pointers, arrays, structs and unions with member offsets, enums with their names, bit fields, and typedefs.
 - Supported expressions: `name`, `a.b.c`, `arr[3]`, `arr[2][5]`, `*ptr`, `ptr->m`, `file.c:name`, and the raw form `@0x20000418:u32`.
 - Every expression starts with the MCU's name, always, with no default: `main:motor.speed`, `@motorctl:0x20000418:u32`. The name is the MCU's display name from the workspace, and the watch list, chart legend and CSV columns show it too.
-- Parsed results are cached on disk, keyed by the ELF's hash.
+- A raw address can take any ELF type, then members or cells: `@main:0x48000000:GPIO_TypeDef.ODR`. The type can be a typedef or a struct, union or enum tag.
+- An expression that goes through a pointer is re-resolved before every read, so a watch follows the pointer when it moves.
+- Not supported: local variables, function-static variables, and variables the compiler kept only as constants.
+- Only `char` arrays show as strings; `uint8_t` and `int8_t` arrays stay numbers.
+- A bit-field write reads the holding word, changes the field, writes the word back and confirms it by read-back. If the firmware changes a neighbouring field in that moment, that change is lost.
+- When the ELF changes, RDT reloads it once the file has been unchanged for 0.5 s. If the rebuilt file can't be read, it keeps the old symbols.
+- Parsed results are cached on disk, keyed by the ELF's hash, in `%LOCALAPPDATA%\rdt\cache` (or the folder in `RDT_CACHE_DIR`).
 
 ## SCPI profile
 
