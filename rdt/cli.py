@@ -474,8 +474,11 @@ def cmd_watch(t: Target, args, out) -> int:
                             locs[i], note = t.remap(loc)
                             if note:
                                 print(f"# {note}", file=out, flush=True)
+            # Due times follow the planned ticks, not the clock, so a coarse clock (Windows' is
+            # about 16 ms) or an early wake-up can't skip an item that is due at every tick.
+            planned = next_at
             todo = [i for i in range(len(items)) if locs[i] is not None
-                    and (n == 0 or (periods[i] is not None and now + tick / 2 >= due[i]))]
+                    and (n == 0 or (periods[i] is not None and planned + tick / 2 >= due[i]))]
             for i in range(len(items)):
                 if locs[i] is None:
                     last[i] = "gone"
@@ -483,7 +486,7 @@ def cmd_watch(t: Target, args, out) -> int:
             values: dict[str, object] = {}
             when = time.time()
             for i, r in zip(todo, readings):
-                due[i] = now + (periods[i] or 0) / 1000.0
+                due[i] = planned + (periods[i] or 0) / 1000.0
                 when = min(when, r.time) if r.time else when
                 if r.error is not None:
                     last[i] = _failure(r.error)
