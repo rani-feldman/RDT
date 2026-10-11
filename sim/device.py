@@ -50,7 +50,7 @@ class Device:
         profile: Profile | None = None,
         idn: str = "RDT,Simulator,0,0.1",
         internal_timeout_ms: float = 50.0,
-        error_reply: bool = True,
+        error_reply: bool = False,
     ):
         ids = [m.id for m in mcus]
         if 0 not in ids:

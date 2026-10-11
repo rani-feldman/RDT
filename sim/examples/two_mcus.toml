@@ -2,7 +2,7 @@
 idn                 = "RDT,Simulator,SIM0001,0.1.0"
 profile             = "default_profile.toml"
 internal_timeout_ms = 50      # how long the main MCU waits for a secondary MCU before -240
-error_reply         = true    # a failed query replies with its error instead of staying silent
+error_reply         = false   # as the firmware: a failed command sends no reply; true replies with the error text
 
 [transport]
 tcp      = "127.0.0.1:5025"
