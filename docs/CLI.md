@@ -88,14 +88,19 @@ A bit field is written by reading the word that holds it, changing the field and
 | `info` | Device identity, max response size, and each MCU's memory map |
 | `symbols MCU [PATTERN]` | List an MCU's variables with address, size and type. `PATTERN` is a glob such as `motor*`, or any part of the name. Needs no device |
 | `ptype EXPR` | Where a variable is, and its type's layout: member offsets, bit positions, enum values. Also takes a type, such as `main:motor_t`. Needs no device |
-| `read EXPR... [--max-cells N]` | Read values; structs and arrays open to every field and cell |
-| `write EXPR VALUE` | Write one value, then read it back to confirm it |
+| `read [EXPR...] [--max-cells N]` | Read values; structs and arrays open to every field and cell. With no names, the workspace's watch list |
+| `write EXPR VALUE [-y]` | Write one value, then read it back to confirm it. Goes through the workspace's scaling and write safety; `-y` answers yes when it asks |
 | `dump EXPR [LEN]` or `dump MCU ADDR LEN` | Hex and ASCII dump of a variable or of a memory range |
 | `poke MCU ADDR HEX` | Write raw bytes, lowest address first, and confirm them |
 | `send COMMAND` | Send one SCPI command. A query (header ending in `?`) waits for its reply; `--reply` and `--no-reply` override that |
 | `errors` | Read the SCPI error queue until it is empty |
-| `watch EXPR... [-i MS] [-n N]` | Poll values and print one line per sample. A struct or array becomes one column per field and cell |
+| `watch [EXPR...] [-i MS] [-n N]` | Poll values and print one line per sample. A struct or array becomes one column per field and cell. With no names, the workspace's watch list, each item at its own interval |
 | `console` | Interactive SCPI console. `.read EXPR` reads, `.write EXPR VALUE` writes, `.err` reads the error queue, `.quit` leaves |
+| `press BUTTON [VALUE]` | Send a workspace button's command |
+| `init FILE` | Save the current target (file and command-line options) as a new workspace. Needs no device |
+| `list` | Show the workspace's watch list and buttons. Needs no device |
+| `add EXPR [options]` | Add an item to the watch list, or change one: `--format`, `--q`, `--scale`, `--offset`, `--unit`, `--poll`, `--read-only`, `--min`, `--max`, `--confirm`. Needs no device |
+| `remove EXPR` | Remove an item from the watch list. Needs no device |
 
 `-v` logs link events and `-vv` logs every command and reply, which is the first thing to turn on when trying a new firmware. The exit code is 0 on success and 1 if anything failed.
 
@@ -141,7 +146,54 @@ The command line can override or replace it: `--tcp HOST:PORT`, `--udp HOST:PORT
 rdt --serial COM5 --profile fw_profile.toml --mcu main=0:build/main.elf read main:motor
 ```
 
-The target file is the start of the `.rdtw` workspace that comes later in M3.
+A target file is also a workspace with an empty watch list; see [Workspace](#workspace).
+
+## Workspace
+
+A workspace (`.rdtw`) is a target file plus everything set up on top of it: the watch list with each item's format, scaling, polling and write safety, the command buttons, and the chart layout. Give it with `-w` (`-t` is the same option). [`examples/sim_bench.rdtw`](../examples/sim_bench.rdtw) is one for the simulator:
+
+```
+rdt -w examples/sim_bench.rdtw read                 # the whole watch list, scaled
+rdt -w examples/sim_bench.rdtw watch                # each item at its own interval
+rdt -w examples/sim_bench.rdtw write main:motor.target 2500    # asks first, checks 0..3000
+rdt -w examples/sim_bench.rdtw press identify
+```
+
+Start one from a target file or command-line options with `rdt init bench.rdtw`, then build the watch list with `add` and `remove`, or edit the file. RDT rewrites the whole file when it saves, so comments are not kept, and paths are saved relative to the file.
+
+```toml
+profile = "fw_profile.toml"   # or an inline [scpi] table, as in a target file
+poll_ms = 500                 # global polling interval; 0 turns polling off
+
+[connection]                  # and [[mcu]] tables: the same as a target file
+...
+
+[[watch]]
+expr      = "main:motor.speed"
+poll      = 100               # "global" (the default), "manual", or ms
+format    = "dec"             # dec | hex | bin | char, for integers
+q         = "Q15"             # fixed point: Q15, Q31, Q3.12 ...
+scale     = 0.5               # shown = raw / 2^q * scale + offset
+offset    = 0
+unit      = "rpm"
+read_only = false
+min       = 0                 # write limits, in shown units
+max       = 3000
+confirm   = true              # ask before writing
+
+[[button]]
+name    = "Set speed"
+command = "MOTor:SPEed {param}"   # {param} is asked for when pressed
+param   = "rpm"
+
+[chart]                       # the GUI's chart layout; kept as written
+```
+
+Every key in a `[[watch]]` but `expr` is optional.
+
+- **Scaling** applies to a single value, not to a struct or array. A write takes the value in shown units and writes the nearest raw value. A value whose raw form doesn't fit the type is refused, and a float variable keeps the fraction.
+- **Write safety.** A `read_only` item refuses writes, `min` and `max` are checked in shown units, and `confirm` asks before writing. Without a terminal to ask, or `-y`, the write is refused. A read-only or confirm-first struct or array covers its fields and cells too.
+- **Polling.** `poll_ms` is the global interval, and each item can have its own interval or be `manual`. In `watch`, `-i` replaces the global interval, and a manual item is read once at the start.
 
 ## SCPI profile
 
@@ -187,7 +239,20 @@ with Target.from_file("examples/sim_target.toml") as t:
 
 `read_value` returns a number or bool for a scalar, an `EnumValue` (an `int` with a `.name`) for an enum, `bytes` for a `char` array, a dict for a struct and a list for an array. `read_rows` gives the display rows `rdt read` prints, which the GUI's variable view will use too. `refresh_elfs()` reloads rebuilt ELFs and `remap(loc)` finds a watched item again by name.
 
-Errors are all `rdt.RdtError`: `AccessRefused`, `SymbolError` (a name, member or index that doesn't resolve), `CommandTimeout` (with `.hint`), `WriteNotConfirmed`, `McuSilent`, `LinkDown`, `ConfigError` and a few more in [`rdt/errors.py`](../rdt/errors.py).
+A workspace adds its watch list, scaling and write safety on top:
+
+```python
+from rdt import Target, Workspace
+
+ws = Workspace.load("examples/sim_bench.rdtw")
+with Target(ws.config) as t:
+    for w in ws.watches:
+        loc, shown = ws.read(t, w)                         # scaled, in the item's format
+    ws.write(t, "main:motor.target", "2500", confirm=lambda q: input(q) == "y")
+    ws.save()
+```
+
+Errors are all `rdt.RdtError`: `AccessRefused`, `WriteRefused` (the workspace's write safety), `SymbolError` (a name, member or index that doesn't resolve), `CommandTimeout` (with `.hint`), `WriteNotConfirmed`, `McuSilent`, `LinkDown`, `ConfigError` and a few more in [`rdt/errors.py`](../rdt/errors.py).
 
 ## Code layout
 
@@ -201,6 +266,7 @@ rdt/
   symbols/     elf.py, types.py, expr.py, values.py DWARF symbol table, type model, expressions, typed values
   codec.py                                          raw scalar types
   target.py                                         Target API and target file
+  workspace.py, scaling.py, tomlw.py                workspace files, display formats and scaling, write safety
   cli.py                                            command line
 ```
 

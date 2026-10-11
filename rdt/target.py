@@ -60,6 +60,7 @@ class TargetConfig:
     connection: ConnectionConfig = field(default_factory=ConnectionConfig)
     profile: Profile = field(default_factory=Profile)
     mcus: list[McuConfig] = field(default_factory=list)
+    profile_path: Path | None = None   # where the profile came from, if it is a file of its own
 
     @classmethod
     def load(cls, path: str | Path) -> TargetConfig:
@@ -87,8 +88,10 @@ class TargetConfig:
         if kind not in KINDS:
             raise ConfigError(f"[connection] transport must be one of {', '.join(KINDS)}")
 
+        profile_path = None
         if isinstance(raw.get("profile"), str):
-            profile = Profile.load(base / raw["profile"])
+            profile_path = base / raw["profile"]
+            profile = Profile.load(profile_path)
         else:
             profile = Profile.from_dict(raw.get("scpi", {}), raw.get("ranges", []))
 
@@ -104,7 +107,7 @@ class TargetConfig:
                 byte_order=t.get("byte_order"),
                 ranges=[Range.from_dict(r) for r in t.get("ranges", [])],
             ))
-        return cls(connection, profile, mcus)
+        return cls(connection, profile, mcus, profile_path)
 
 
 class Mcu:

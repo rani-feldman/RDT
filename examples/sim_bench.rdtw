@@ -1,0 +1,64 @@
+# RDT workspace for the simulated device (python -m sim): the target file's connection, profile
+# and MCUs, plus a watch list, buttons and polling. Paths are relative to this file.
+# rdt -w examples/sim_bench.rdtw read | watch | write EXPR VALUE | press NAME [VALUE] | list
+profile = "../sim/examples/default_profile.toml"
+poll_ms = 500                 # global polling interval; 0 turns polling off
+
+[connection]
+transport = "tcp"
+address   = "127.0.0.1:5025"
+
+[[mcu]]
+id   = 0
+name = "main"
+elf  = "../sim/examples/firmware/main.elf"
+
+  [[mcu.ranges]]
+  name  = "GPIOA"
+  start = 0x48000000
+  size  = 0x400
+
+[[mcu]]
+id         = 1
+name       = "motorctl"
+elf        = "../sim/examples/firmware/motorctl.elf"
+timeout_ms = 1000
+
+[[watch]]
+expr    = "main:motor.speed"
+unit    = "rpm"
+poll    = 100                 # this item every 100 ms; "global" (the default) or "manual"
+
+[[watch]]
+expr    = "main:motor.target"
+unit    = "rpm"
+min     = 0                   # write limits, in shown units
+max     = 3000
+confirm = true                # ask before writing
+
+[[watch]]
+expr    = "main:motor.current_ma"
+scale   = 0.001               # shown = raw * scale + offset
+unit    = "A"
+
+[[watch]]
+expr      = "main:motor.mode"
+read_only = true
+
+[[watch]]
+expr    = "main:tick_count"
+format  = "hex"               # dec | hex | bin | char
+
+[[watch]]
+expr    = "motorctl:temperature"
+unit    = "degC"
+poll    = "manual"
+
+[[button]]
+name    = "Identify"
+command = "*IDN?"
+
+[[button]]
+name    = "Silence MCU"       # a simulator command: make a secondary MCU stop answering
+command = "SIM:MCU:SIL {param},ON"
+param   = "MCU id"
