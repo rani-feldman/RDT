@@ -5,6 +5,17 @@ Remote debugger tool: read and write firmware variables and memory over a COM po
 
 See [docs/DESIGN.md](docs/DESIGN.md) for the design.
 
+## Host and CLI
+
+```
+python -m pip install -e .[dev]
+python -m sim &          # the simulated device, in its own terminal
+rdt -t examples/sim_target.toml info
+rdt -t examples/sim_target.toml read @main:0x20000010:u32
+```
+
+See [docs/CLI.md](docs/CLI.md) for the commands, the target file, and how the host handles timeouts, write confirmation, silent MCUs and link loss.
+
 ## Simulated device
 
 Until the firmware has the memory commands, RDT is developed against a simulated device that runs on the same PC:
