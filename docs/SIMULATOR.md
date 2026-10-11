@@ -53,7 +53,7 @@ Read reply formats (`data_format`):
 
 ## Errors
 
-A failed command adds an error to the SCPI error queue, which all clients share. A failed **read** (or any query) also replies at once with the same error text, so the host doesn't wait for a timeout. Set `error_reply = false` to make failed queries stay silent instead, as a strict SCPI device would. Error replies start with `-` and data replies never do, so the two can't be confused.
+As in the firmware, a failed command sends no reply at all, so a failed read ends in a timeout. The error goes to the SCPI error queue, which all clients share, and `SYSTem:ERRor?` reads it. For experiments, `error_reply = true` makes a failed query reply at once with its error text instead. Error replies start with `-` and data replies never do, so the two can't be confused.
 
 | Error | When |
 | --- | --- |
@@ -63,7 +63,7 @@ A failed command adds an error to the SCPI error queue, which all clients share.
 | `-222,"Data out of range"` | Address not mapped, write to read-only memory, or value too wide for its size |
 | `-223,"Too much data"` | Read longer than `max_response` |
 | `-224,"Illegal parameter value"` | Unknown MCU, bad length or write size |
-| `-240,"MCU not responding"` | A secondary MCU is silent. The main MCU waits `internal_timeout_ms` first |
+| `-240,"MCU not responding"` | A secondary MCU is silent. The main MCU waits `internal_timeout_ms`, then queues this error |
 | `-350,"Queue overflow"` | More than 16 errors queued |
 
 ## Config
@@ -72,7 +72,7 @@ A failed command adds an error to the SCPI error queue, which all clients share.
 idn                 = "RDT,Simulator,SIM0001,0.1.0"
 profile             = "default_profile.toml"   # or an inline [scpi] table
 internal_timeout_ms = 50
-error_reply         = true
+error_reply         = false
 
 [transport]
 tcp      = "127.0.0.1:5025"

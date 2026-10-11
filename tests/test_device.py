@@ -48,8 +48,8 @@ def test_write_negative_value_is_twos_complement(device):
     ("MEM:READ? 0,0x20000000", -102),
     ("FOO:BAR?", -113),
 ])
-def test_query_errors_reply_and_queue(device, line, code):
-    assert q(device, line).startswith(f"{code},")
+def test_failed_query_sends_no_reply_and_queues_the_error(device, line, code):
+    assert q(device, line) is None
     assert q(device, "SYST:ERR?").startswith(f"{code},")
     assert q(device, "SYST:ERR?") == '0,"No error"'
 
@@ -70,8 +70,9 @@ def test_silent_secondary_mcu(device):
     q(device, "SIM:MCU:SIL 1,ON")
     assert q(device, "SIM:MCU:SIL? 1") == "1"
     start = time.perf_counter()  # time.monotonic ticks every ~16 ms on Windows
-    assert q(device, "MEM:READ? 1,0x20000084,4") == '-240,"MCU not responding"'
+    assert q(device, "MEM:READ? 1,0x20000084,4") is None
     assert time.perf_counter() - start >= 0.018  # the main MCU waited out its internal timeout
+    assert q(device, "SYST:ERR?") == '-240,"MCU not responding"'
     assert q(device, "MEM:READ? 0,0x20000000,4") == "0000C03F"  # the others keep working
     q(device, "SIM:MCU:SIL 1,OFF")
     assert q(device, "MEM:READ? 1,0x20000084,4") == "F4010000"
@@ -97,10 +98,11 @@ def test_error_queue_overflow():
     assert errors[16] == '0,"No error"'
 
 
-def test_errors_can_stay_silent():
-    d = Device([ram_mcu()], error_reply=False)
-    assert d.handle("MEM:READ? 0,0x30000000,4") is None
+def test_error_reply_option():
+    d = Device([ram_mcu()], error_reply=True)
+    assert q(d, "MEM:READ? 0,0x30000000,4").startswith("-222,")
     assert q(d, "SYST:ERR?").startswith("-222,")
+    assert d.handle("MEM:WRITE 0,0x30000000,1,1") is None  # a write never replies
 
 
 @pytest.mark.parametrize("fmt,expected", [
@@ -122,7 +124,8 @@ def test_user_defined_templates():
     assert d.handle("write 2,20000010,DEADBEEF,4") is None
     assert d.handle("read 2,20000010,4") == b"EFBEADDE"
     assert q(d, "SYST:ERR?") == '0,"No error"'
-    assert d.handle("read 2,30000000,4").startswith(b"-222,")  # read replies even without "?"
+    assert d.handle("read 2,30000000,4") is None
+    assert q(d, "SYST:ERR?").startswith("-222,")
 
 
 def test_big_endian_mcu():

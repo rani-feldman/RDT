@@ -76,7 +76,7 @@ def load_config(path: str | Path) -> SimConfig:
         profile,
         idn=raw.get("idn", "RDT,Simulator,0,0.1"),
         internal_timeout_ms=float(raw.get("internal_timeout_ms", 50.0)),
-        error_reply=bool(raw.get("error_reply", True)),
+        error_reply=bool(raw.get("error_reply", False)),
     )
     transport = TransportConfig(**raw.get("transport", {}))
     return SimConfig(device, transport)
