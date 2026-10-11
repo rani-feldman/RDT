@@ -1,0 +1,62 @@
+# Simulated device with a main MCU and one secondary MCU, each loaded from its own ELF.
+idn                 = "RDT,Simulator,SIM0001,0.1.0"
+profile             = "default_profile.toml"
+internal_timeout_ms = 50      # how long the main MCU waits for a secondary MCU before -240
+error_reply         = true    # a failed query replies with its error instead of staying silent
+
+[transport]
+tcp      = "127.0.0.1:5025"
+udp      = "127.0.0.1:5025"
+# serial = "COM11"            # one end of a com0com pair on Windows; "pty" on Linux
+baud     = 115200
+udp_drop = 0.0
+
+[[mcu]]
+id   = 0
+name = "main"
+elf  = "firmware/main.elf"
+
+  [[mcu.ranges]]              # a peripheral block with no ELF section behind it
+  name  = "GPIOA"
+  start = 0x48000000
+  size  = 0x400
+
+  [[mcu.signals]]
+  name      = "tick_count"
+  addr      = 0x20000010
+  type      = "u32"
+  kind      = "counter"
+  period_ms = 1
+
+  [[mcu.signals]]
+  name      = "motor.speed"
+  addr      = 0x20000000
+  type      = "f32"
+  kind      = "sine"
+  period_ms = 2000
+  amplitude = 1500
+  offset    = 1500
+
+[[mcu]]
+id               = 1
+name             = "motorctl"
+elf              = "firmware/motorctl.elf"
+frame_size       = 64         # internal channel frame; larger reads are split
+frame_latency_ms = 1
+silent           = false      # also switchable at run time: SIM:MCU:SIL 1,ON
+
+  [[mcu.signals]]
+  name      = "adc_log.count"
+  addr      = 0x20000080
+  type      = "u32"
+  kind      = "counter"
+  period_ms = 1
+
+  [[mcu.signals]]
+  name      = "temperature"
+  addr      = 0x20000088
+  type      = "f32"
+  kind      = "sawtooth"
+  period_ms = 5000
+  amplitude = 10
+  offset    = 30
