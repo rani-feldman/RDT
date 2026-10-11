@@ -293,15 +293,9 @@ def test_symbols_are_cached_by_hash(tmp_path, monkeypatch):
     assert load_symbols(CORPUS / "corpus-clang.elf").lookup("dev").address == first.lookup("dev").address
 
 
-def test_elf_without_debug_info(tmp_path):
-    elf = tmp_path / "stripped.elf"
-    import subprocess
-    if shutil.which("llvm-strip") is None and shutil.which("strip") is None:
-        pytest.skip("no strip tool")
-    subprocess.run([shutil.which("llvm-strip") or "strip", "-g", "-o", str(elf), str(CORPUS / "corpus-clang.elf")],
-                   check=True)
+def test_elf_without_debug_info():
     with pytest.raises(ConfigError, match="has no debug info; build it with -g"):
-        load_symbols(elf, use_cache=False)
+        load_symbols(CORPUS / "corpus-nodebug.elf", use_cache=False)
 
 
 def test_reload_remaps_by_name(tmp_path):
