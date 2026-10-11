@@ -25,13 +25,14 @@ from datetime import datetime
 from pathlib import Path
 
 from . import __version__, codec
+from .csvlog import CsvLog
 from .errors import CommandTimeout, ConfigError, LinkDown, RdtError, SymbolError
 from .profile import Profile, parse_int
 from .symbols import Location
 from .symbols.types import ArrayType, EnumType, StructType, Type, is_char_array
 from .scaling import FORMATS
 from .target import ConnectionConfig, McuConfig, Target, TargetConfig
-from .workspace import Shown, Watch, Workspace
+from .workspace import Reading, Shown, Watch, Workspace
 
 
 def _int(text: str) -> int:
@@ -116,6 +117,7 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("-i", "--interval", type=float, metavar="MS",
                    help="poll interval (default: the workspace's poll_ms, else 500)")
     p.add_argument("-n", "--count", type=int, default=0, help="stop after this many samples (default: run until Ctrl+C)")
+    p.add_argument("--csv", type=Path, metavar="FILE", help="also log every value read to a CSV file")
 
     sub.add_parser("console", help="interactive SCPI console")
 
@@ -403,10 +405,13 @@ def cmd_errors(t: Target, args, out) -> int:
     return 0
 
 
-def _watch_cells(t: Target, ws: Workspace, w: Watch) -> dict[str, str]:
-    """The leaf values of one watched item, by path. A struct or array is read in one block."""
-    _, shown = ws.read(t, w, max_cells=1 << 30, compact=True)
-    return {s.path: s.text for s in shown if s.raw is not None}
+def _cells(r: Reading) -> dict[str, Shown]:
+    """The leaf values of one watched item from one poll, by path."""
+    return {s.path: s for s in r.shown or [] if s.raw is not None}
+
+
+def _failure(e: Exception) -> str:
+    return "link-down" if isinstance(e, LinkDown) else type(e).__name__
 
 
 def cmd_watch(t: Target, args, out) -> int:
@@ -415,15 +420,23 @@ def cmd_watch(t: Target, args, out) -> int:
     interval = args.interval if args.interval is not None else (ws.poll_ms or None)
     if interval is None:
         raise ConfigError("the workspace's polling is off (poll_ms = 0); give -i MS")
-    locs: list[Location | None] = [t.resolve(w.expr) for w in items]
+    every = 1 << 30
+    first = ws.read_many(t, items, every, compact=True)
     columns: list[tuple[int, str]] = []
-    last: list[dict[str, str] | str] = []
-    for i, w in enumerate(items):
-        cells = _watch_cells(t, ws, w)
+    last: list[dict[str, Shown] | str] = []
+    locs: list[Location | None] = []
+    units: dict[str, str] = {}
+    for i, r in enumerate(first):
+        if r.error is not None:
+            raise r.error
+        cells = _cells(r)
         if not cells:
-            raise ConfigError(f"{w.expr} has nothing to show")
+            raise ConfigError(f"{r.watch.expr} has nothing to show")
         columns += [(i, p) for p in cells]
+        units.update({p: r.watch.display.unit for p in cells if r.watch.display.unit})
         last.append(cells)
+        locs.append(r.loc)
+    log = CsvLog(args.csv, [p for _, p in columns], units) if args.csv else None
     # Each item's own interval (-i replaces the global one); the line is printed at the fastest.
     periods = [w.interval_ms(max(1, int(interval))) for w in items]
     tick = max(min((p for p in periods if p), default=interval), 1) / 1000.0
@@ -432,32 +445,45 @@ def cmd_watch(t: Target, args, out) -> int:
     n = 0
     next_at = time.monotonic()
     next_elf_check = next_at + 1.0
+    link_up = True
     try:
         while not args.count or n < args.count:
             now = time.monotonic()
+            event = []
             if now >= next_elf_check:
                 next_elf_check = now + 1.0
                 for name in t.refresh_elfs():
+                    event.append(f"ELF rebuilt for {name}")
                     for i, loc in enumerate(locs):
                         if loc is not None and loc.mcu == name:
                             locs[i], note = t.remap(loc)
                             if note:
                                 print(f"# {note}", file=out, flush=True)
-            stamp = datetime.now().strftime("%H:%M:%S.%f")[:-3]
-            for i, w in enumerate(items):
+            todo = [i for i in range(len(items)) if locs[i] is not None
+                    and (n == 0 or (periods[i] is not None and now + tick / 2 >= due[i]))]
+            for i in range(len(items)):
                 if locs[i] is None:
                     last[i] = "gone"
-                    continue
-                if n and (periods[i] is None or now + tick / 2 < due[i]):
-                    continue   # manual, or not due yet: keep the last value
+            readings = first if n == 0 else ws.read_many(t, [items[i] for i in todo], every, compact=True)
+            values: dict[str, object] = {}
+            when = time.time()
+            for i, r in zip(todo, readings):
                 due[i] = now + (periods[i] or 0) / 1000.0
-                try:
-                    last[i] = _watch_cells(t, ws, w)
-                except LinkDown:
-                    last[i] = "link-down"
-                except RdtError as e:
-                    last[i] = type(e).__name__
-            cells = [g if isinstance(g, str) else g.get(p, "gone") for g, p in ((last[i], p) for i, p in columns)]
+                when = min(when, r.time) if r.time else when
+                if r.error is not None:
+                    last[i] = _failure(r.error)
+                    continue
+                last[i] = _cells(r)
+                values.update({p: s.value for p, s in last[i].items()})
+            down = any(isinstance(r.error, LinkDown) for r in readings)
+            if down == link_up:
+                link_up = not down
+                event.append("link down" if down else "link up")
+            if log is not None and (values or event):
+                log.write(when, values, "; ".join(event))
+            stamp = datetime.fromtimestamp(when).strftime("%H:%M:%S.%f")[:-3]
+            cells = [g if isinstance(g, str) else (g[p].text if p in g else "gone")
+                     for g, p in ((last[i], p) for i, p in columns)]
             print(f"{stamp}  " + "  ".join(f"{c:>{len(p)}}" for c, (_, p) in zip(cells, columns)), file=out, flush=True)
             n += 1
             next_at += tick
@@ -468,6 +494,10 @@ def cmd_watch(t: Target, args, out) -> int:
                 next_at = time.monotonic()  # fall behind instead of queueing
     except KeyboardInterrupt:
         pass
+    finally:
+        if log is not None:
+            log.close()
+            print(f"# {log.rows} rows logged to {log.path}", file=out)
     return 0
 
 

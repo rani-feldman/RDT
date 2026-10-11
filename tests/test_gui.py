@@ -92,14 +92,14 @@ def test_struct_expands_and_collapsed_struct_is_not_read(qtbot, win, monkeypatch
     assert st.item.text(COL_VALUE) == "{...}"
     # collapsed: the poll leaves it alone
     reads = []
-    real = win.device.submit
-    monkeypatch.setattr(win.device, "submit",
-                        lambda fn, *a, key=None, **kw: (reads.append(key), real(fn, *a, key=key, **kw))[1])
+    real = win.ws.read_many
+    monkeypatch.setattr(win.ws, "read_many",
+                        lambda t, items, *a, **kw: (reads.extend(w.expr for w in items), real(t, items, *a, **kw))[1])
     qtbot.wait(700)
-    assert "watch:main:motor" not in reads
-    assert "watch:main:motor.speed" in reads
+    assert "main:motor" not in reads
+    assert "main:motor.speed" in reads
     st.item.setExpanded(True)
-    qtbot.waitUntil(lambda: "watch:main:motor" in reads, timeout=2000)
+    qtbot.waitUntil(lambda: "main:motor" in reads, timeout=2000)
 
 
 def test_write_inline_with_limits_and_confirm(qtbot, win, monkeypatch):
@@ -245,3 +245,138 @@ def test_link_down_greys_panels(qtbot, win, sim):
     qtbot.waitUntil(lambda: win.bar.connect_button.text() == "Connect", timeout=3000)
     assert not win.console.isEnabled()
     assert win.bar.transport.isEnabled()
+
+
+# --- M4: chart, statistics, CSV log ------------------------------------------------------------
+
+def test_one_poll_reads_many_items(qtbot, win, monkeypatch):
+    polls = []
+    real = win.ws.read_many
+    monkeypatch.setattr(win.ws, "read_many",
+                        lambda t, items, *a, **kw: (polls.append([w.expr for w in items]), real(t, items, *a, **kw))[1])
+    connect(qtbot, win)
+    qtbot.waitUntil(lambda: len(polls) >= 3, timeout=5000)
+    # on connect every item is read, in one poll
+    assert set(polls[0]) == {w.expr for w in win.ws.watches}
+
+
+def test_chart_follows_values(qtbot, win):
+    connect(qtbot, win)
+    tree, chart = win.watch_tree, win.chart
+    tree.add_watch("motorctl:adc_log.count")   # a counter in the simulator
+    wait_value(qtbot, win, "motorctl:adc_log.count", lambda v: True)
+    tree.chart("motorctl:adc_log.count")
+    tree.chart("main:motor.speed")
+    assert set(chart.series) == {"motorctl:adc_log.count", "main:motor.speed"}
+    # a different unit gets its own axis; the unit labels it
+    assert chart.series["main:motor.speed"].unit == "rpm"
+    assert chart.series["main:motor.speed"].axis != chart.series["motorctl:adc_log.count"].axis
+    s = chart.series["motorctl:adc_log.count"]
+    qtbot.waitUntil(lambda: len(s.trace) >= 4, timeout=5000)
+    t, v = s.trace.t, s.trace.v
+    assert (t[1:] >= t[:-1]).all() and v[-1] > v[0]
+    qtbot.waitUntil(lambda: s.curve.xData is not None and len(s.curve.xData) >= 4, timeout=2000)
+    # following: the view ends now; paused: it stays put
+    x0, x1 = chart.views[0].viewRange()[0]
+    assert abs(x1 - time.time()) < 1 and abs((x1 - x0) - chart.window_s) < 0.5
+    chart.set_paused(True)
+    before = chart.views[0].viewRange()[0]
+    qtbot.wait(300)
+    assert chart.views[0].viewRange()[0] == before
+    # cursors read every signal
+    chart.cursor_button.setChecked(True)
+    chart.cursors[0].setValue(t[1])
+    chart.cursors[1].setValue(t[-1])
+    assert s.item.text(5) != "" and "Δt" in chart.readout.text()
+    chart.set_paused(False)
+    assert chart.series["main:motor.speed"].item.text(2) == "1.5 rpm"
+
+
+def test_charted_field_of_a_collapsed_struct_is_read(qtbot, win):
+    connect(qtbot, win)
+    tree = win.watch_tree
+    tree.add_watch("main:motor")
+    st = tree.states["main:motor"]
+    qtbot.waitUntil(lambda: st.aggregate is not None, timeout=5000)
+    assert not st.item.isExpanded()
+    tree.chart("main:motor.mode")
+    s = win.chart.series["main:motor.mode"]
+    qtbot.waitUntil(lambda: len(s.trace) >= 3, timeout=5000)
+    assert s.trace.last() == 1   # MODE_RUN
+
+
+def test_chart_layout_is_saved(qtbot, win, tmp_path):
+    connect(qtbot, win)
+    wait_value(qtbot, win, "main:motor.current_ma", lambda v: True)
+    win.watch_tree.chart("main:motor.current_ma")
+    win.chart.set_axis("main:motor.current_ma", 3)
+    win.chart.set_color("main:motor.current_ma", "#123456")
+    win.chart.window.setCurrentIndex(5)   # 2 min
+    assert win.dirty
+    out = tmp_path / "saved.rdtw"
+    assert win._save_to(out)
+    ws = Workspace.load(out)
+    assert ws.chart == {"window_s": 120, "series": [{"expr": "main:motor.current_ma", "axis": 3, "color": "#123456",
+                                                      "unit": "A"}]}
+    win.disconnect()
+    assert win.open_path(out)
+    s = win.chart.series["main:motor.current_ma"]
+    assert (s.axis, s.color, s.unit, win.chart.window_s) == (3, "#123456", "A", 120)
+
+
+def test_statistics(qtbot, win):
+    from rdt.gui.variables import COL_COUNT, COL_MAX, COL_MEAN, COL_MIN
+    connect(qtbot, win)
+    tree = win.watch_tree
+    item = tree.states["main:motor.speed"].item
+    qtbot.waitUntil(lambda: item.text(COL_COUNT) != "" and int(item.text(COL_COUNT)) >= 3, timeout=5000)
+    assert item.text(COL_MIN) == item.text(COL_MAX) == item.text(COL_MEAN) == "1.5"
+    assert tree.isColumnHidden(COL_MIN)
+    tree.show_stats(True)
+    assert not tree.isColumnHidden(COL_MIN)
+    tree.reset_stats("main:motor.speed")
+    assert item.text(COL_COUNT) == ""
+    qtbot.waitUntil(lambda: item.text(COL_COUNT) != "", timeout=3000)
+
+
+def test_csv_log(qtbot, win, tmp_path):
+    import csv
+    path = tmp_path / "log.csv"
+    assert not win.start_log(path)   # not connected yet
+    connect(qtbot, win)
+    wait_value(qtbot, win, "motorctl:temperature", lambda v: True)
+    assert win.start_log(path)
+    assert win.bar.log_button.isChecked()
+    qtbot.waitUntil(lambda: win.log.rows >= 4, timeout=5000)
+    win.stop_log()
+    assert not win.bar.log_button.isChecked()
+    rows = list(csv.reader(path.read_text(encoding="utf-8-sig").splitlines()))
+    head = rows[0]
+    assert head[:3] == ["time", "seconds", "main:motor.speed [rpm]"]
+    assert "main:motor.current_ma [A]" in head and "motorctl:temperature [degC]" in head and head[-1] == "event"
+    first = dict(zip(head, rows[1]))   # the first row has everything
+    assert first["main:motor.speed [rpm]"] == "1.5" and first["main:motor.current_ma [A]"] == "-0.12"
+    assert first["main:motor.mode"] == "1" and first["main:tick_count"] != ""
+    later = [dict(zip(head, r)) for r in rows[2:]]
+    assert any(r["main:motor.speed [rpm]"] for r in later)
+    assert all(r["motorctl:temperature [degC]"] == "" for r in later)   # manual: read once only
+
+
+def test_csv_log_marks_link_loss(qtbot, win, tmp_path):
+    from rdt.errors import LinkDown
+    from rdt.workspace import Reading
+    connect(qtbot, win)
+    wait_value(qtbot, win, "main:motor.speed", lambda v: True)
+    path = tmp_path / "log.csv"
+    assert win.start_log(path)
+    w = win.ws.watch("main:motor.speed")
+    win.watch_tree.chart("main:motor.speed")
+    s = win.chart.series["main:motor.speed"]
+    qtbot.waitUntil(lambda: len(s.trace) >= 1, timeout=3000)
+    win._log_readings([Reading(w, time.time(), error=LinkDown("down"))])
+    win.chart.feed([Reading(w, time.time(), error=LinkDown("down"))])
+    assert s.trace.v[-1] != s.trace.v[-1]   # NaN: a gap in the line
+    qtbot.waitUntil(lambda: win._log_link_up, timeout=3000)
+    win.stop_log()
+    events = [r[-1] for r in __import__("csv").reader(path.read_text(encoding="utf-8-sig").splitlines())]
+    assert "link down" in events and "link up" in events
