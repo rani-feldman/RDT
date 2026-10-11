@@ -67,7 +67,13 @@ The firmware only ever sees an address and a byte count. Everything that knows a
 - The type model covers base types, pointers, arrays, structs and unions with member offsets, enums with their names, bit fields, and typedefs.
 - Supported expressions: `name`, `a.b.c`, `arr[3]`, `arr[2][5]`, `*ptr`, `ptr->m`, `file.c:name`, and the raw form `@0x20000418:u32`.
 - Every expression starts with the MCU's name, always, with no default: `main:motor.speed`, `@motorctl:0x20000418:u32`. The name is the MCU's display name from the workspace, and the watch list, chart legend and CSV columns show it too.
-- Parsed results are cached on disk, keyed by the ELF's hash.
+- A raw address can take any ELF type, then members or cells: `@main:0x48000000:GPIO_TypeDef.ODR`. The type can be a typedef or a struct, union or enum tag.
+- An expression that goes through a pointer is re-resolved before every read, so a watch follows the pointer when it moves.
+- Not supported: local variables, function-static variables, and variables the compiler kept only as constants.
+- Only `char` arrays show as strings; `uint8_t` and `int8_t` arrays stay numbers.
+- A bit-field write reads the holding word, changes the field, writes the word back and confirms it by read-back. If the firmware changes a neighbouring field in that moment, that change is lost.
+- When the ELF changes, RDT reloads it once the file has been unchanged for 0.5 s. If the rebuilt file can't be read, it keeps the old symbols.
+- Parsed results are cached on disk, keyed by the ELF's hash, in `%LOCALAPPDATA%\rdt\cache` (or the folder in `RDT_CACHE_DIR`).
 
 ## SCPI profile
 
@@ -88,8 +94,12 @@ max_response = 1024            # bytes of data the firmware can put in one reply
 error_query  = "SYST:ERR?"     # sent once after a timeout, to learn the cause
 terminator   = "\n"
 timeout_ms   = 500
+retries      = 2               # host only; re-sends of a timed-out read
+probe        = "*IDN?"         # host only; sent on connect and every reconnect
+# reply_regex = "^VAL (?P<data>[0-9A-F]+)$"   # optional; group "data" holds the read data
 
 [[ranges]]                     # extra ranges RDT may access beyond the ELF's RAM and flash
+mcu   = "main"                 # the MCU this range belongs to
 name  = "GPIOA"                # peripheral ranges are never block-merged
 start = 0x48000000
 size  = 0x400
@@ -97,13 +107,13 @@ size  = 0x400
 
 - **Reads:** on each poll cycle, the watched items are sorted by address and nearby items are merged into blocks no larger than `max_response`. Each block is one read, and every value is decoded from it. There is no multi-address read command.
   - Items in a peripheral range are never merged, because reading a register can clear a flag or pop a FIFO. Each is read on its own at its exact size.
-  - Addresses outside the ELF's RAM and flash and the profile's `ranges` are refused before anything is sent.
-- **Writes:** the value is sent as the raw integer in hex, so a float like 1.5 becomes `0x3FC00000` and the firmware never parses floats.
+  - Addresses outside the ELF's RAM and flash and the profile's `ranges` are refused before anything is sent. An access that touches a listed range must stay inside it.
+- **Writes:** writes to read-only ELF sections (`.text`, `.rodata`) are refused. The value is sent as the raw integer in hex, so a float like 1.5 becomes `0x3FC00000` and the firmware never parses floats.
   - Struct and array edits become one write per field or cell. These are not atomic, and the GUI says so.
   - Values wider than `max_write` are split into pieces.
   - A write sends no reply whether it succeeds or fails, so RDT reads the value back after every write to confirm it.
-- **Errors:** a failed command sends no reply at all; its error goes only to the error queue. RDT sees a timeout, sends the error query once, and shows the cause if it finds one.
-- **Replies:** a reply format that the fixed options cannot describe can be matched with a regular expression instead.
+- **Errors:** a failed command sends no reply at all; its error goes only to the error queue. RDT sees a timeout, sends the error query once, and shows the cause if it finds one. If the error query gets no reply either, the device counts as not answering: the link is marked down and RDT reconnects.
+- **Replies:** a reply format that the fixed options cannot describe can be matched with `reply_regex`, whose group named `data` holds the read data.
 - **UDP:** a timed-out read is re-sent. A timed-out write is never blindly repeated; RDT first confirms it by reading the value back.
 - **Link loss:** values grey out, writes are refused, and RDT retries in the background with a growing delay. Once the link is back, it re-reads every watched value, marks the gap in the chart and the CSV log, and resumes polling.
 
@@ -143,15 +153,48 @@ The device has several MCUs, each with its own ELF. The main MCU owns the USB/LA
 - Symbols, memory ranges, the ELF watcher and the build check all work per MCU.
 - On MCUs 1 and up, a struct or array larger than 64 bytes is read in pieces, so its fields may not come from the same moment. The variable view marks such items.
 
+### Target file
+
+M2 keeps the connection, the SCPI profile and the MCUs in one TOML target file, which becomes the start of the M3 `.rdtw` workspace.
+
+```toml
+[connection]
+transport = "tcp"
+host      = "192.168.1.50"
+port      = 5025
+
+[profile]
+read  = "read {mcu},{addr},{len}"
+write = "write {mcu},{addr},{value},{size}"
+
+[[mcu]]
+id   = 0
+name = "main"
+elf  = "build/main.elf"
+
+[[mcu]]
+id         = 1
+name       = "motorctl"
+elf        = "build/motorctl.elf"
+timeout_ms = 1500               # overrides the profile timeout for this MCU
+
+[[mcu.ranges]]
+name  = "TIM1"
+start = 0x40012C00
+size  = 0x400
+```
+
+A range can sit in the profile with `mcu = "name"`, or under its MCU entry; both mean the same.
+
 ## GUI
 
 | Panel | Purpose | Milestone |
 | --- | --- | --- |
-| Connection bar | COM (port, baud) or TCP/UDP (IP, port), profile selection, connect | M2 |
-| SCPI profile editor | Define and test the command templates | M2 |
-| SCPI console | Send any command by hand, see the raw reply, history | M2 |
-| Command buttons | User-defined buttons that each send one SCPI command, with an optional parameter | M2 |
-| Memory view | Hex/ASCII dump of any range, editable | M2 |
+| Connection bar | COM (port, baud) or TCP/UDP (IP, port), profile selection, connect | M3 |
+| SCPI profile editor | Define and test the command templates | M3 |
+| SCPI console | Send any command by hand, see the raw reply, history | M3 |
+| Command buttons | User-defined buttons that each send one SCPI command, with an optional parameter | M3 |
+| Memory view | Hex/ASCII dump of any range, editable | M3 |
 | Variable view | Debugger-style watch tree from the ELF | M3 |
 | Live chart | Oscilloscope of watched values: pause, zoom, cursors | M4 |
 
@@ -220,8 +263,8 @@ tests/
 | --- | --- | --- |
 | M0 | Spec and skeleton | This design, repo layout, CI |
 | M1 | Simulated device | SCPI over TCP, UDP and a virtual COM port; several MCUs, each with memory loaded from its ELF; 64-byte split; failed commands send no reply |
-| M2 | Host core and first GUI | Transports, session, SCPI profiles, reconnect; connection bar, profile editor, console, command buttons, memory view; CLI; a test with a second SCPI client |
-| M3 | Symbols | ELF/DWARF, types, expressions, codec, variable view, formats and scaling, write safety, workspace, ELF rebuild detection |
+| M2 | Host core and CLI | Transports, session, SCPI profiles, the target file with several MCUs, reconnect; CLI; a test with a second SCPI client. No GUI yet |
+| M3 | First GUI and symbols | Connection bar, profile editor, console, command buttons, memory view; ELF/DWARF, types, expressions, codec, variable view, formats and scaling, write safety, workspace, ELF rebuild detection |
 | M4 | Watch | Polling scheduler, live chart, statistics, CSV logging |
 | M5 | Binary protocol | Faster path for a future firmware agent |
 | M6 | Application release | Windows installer, user docs, firmware command spec |
