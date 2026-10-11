@@ -1,4 +1,4 @@
-"""Variable view: the watch tree, the symbol browser, and the watch item settings dialog."""
+"""Variable view: the watch tabs and their trees, the symbol browser, and the watch item settings dialog."""
 
 from __future__ import annotations
 
@@ -9,15 +9,15 @@ from PySide6.QtCore import Qt, Signal
 from PySide6.QtGui import QAction, QBrush, QColor
 from PySide6.QtWidgets import (
     QAbstractItemView, QCheckBox, QComboBox, QDialog, QDialogButtonBox, QFormLayout, QHBoxLayout,
-    QHeaderView, QLabel, QLineEdit, QMenu, QMessageBox, QPushButton, QSpinBox, QTreeWidget, QTreeWidgetItem,
-    QVBoxLayout, QWidget,
+    QHeaderView, QInputDialog, QLabel, QLineEdit, QMenu, QMessageBox, QPushButton, QSpinBox, QTabWidget,
+    QToolButton, QTreeWidget, QTreeWidgetItem, QVBoxLayout, QWidget,
 )
 
 from ..errors import ConfigError, LinkDown, McuSilent, RdtError
 from ..scaling import FORMATS, Display
 from ..stats import StatsBook, numeric
 from ..symbols import Location, load_symbols
-from ..workspace import Reading, Shown, Watch, Workspace
+from ..workspace import Reading, Shown, Tab, Watch, Workspace
 from .device import describe_error
 
 COL_NAME, COL_VALUE, COL_TYPE, COL_ADDR, COL_RATE, COL_MIN, COL_MAX, COL_MEAN, COL_COUNT = range(9)
@@ -50,16 +50,17 @@ class _ItemState:
 
 
 class WatchTree(QTreeWidget):
-    """Debugger-style watch tree. Top-level rows are the workspace's watch list; structs and arrays
-    open to every field and cell. A collapsed struct or array is not read."""
+    """Debugger-style watch tree for one watch tab. Top-level rows are the tab's items; structs and
+    arrays open to every field and cell. A collapsed struct or array is not read. The trees don't
+    poll on their own: the tabs widget reads what every tree has due in one poll."""
 
     changed = Signal()            # the watch list or an item's settings changed
-    sampled = Signal(object)      # list[Reading]: everything one poll read, for the chart and the log
     chart_requested = Signal(str, str)   # path, unit: the user asked to chart this value
 
-    def __init__(self, main):
+    def __init__(self, main, tab: Tab):
         super().__init__()
         self.main = main
+        self.tab = tab
         self.setColumnCount(9)
         self.setHeaderLabels(["Name", "Value", "Type", "Address", "Rate", "Min", "Max", "Mean", "Samples"])
         for c in STATS_COLUMNS:
@@ -92,7 +93,7 @@ class WatchTree(QTreeWidget):
         self.blockSignals(True)
         self.clear()
         self.states.clear()
-        for w in self.ws.watches:
+        for w in self.tab.watches:
             self._add_row(w)
         self.blockSignals(False)
 
@@ -107,7 +108,7 @@ class WatchTree(QTreeWidget):
 
     def add_watch(self, expr: str) -> Watch | None:
         try:
-            w = self.ws.add(Watch(expr))
+            w = self.ws.add(Watch(expr), self.tab.name)
         except ConfigError as e:
             self.main.status(str(e))
             return None
@@ -119,20 +120,25 @@ class WatchTree(QTreeWidget):
         st = self.states.pop(expr, None)
         if st is None:
             return
-        self.ws.remove(expr)
+        self.ws.remove(expr, self.tab.name)
         self.stats.reset(expr)
         self.takeTopLevelItem(self.indexOfTopLevelItem(st.item))
         self.changed.emit()
 
     def replace_watch(self, old: Watch, new: Watch) -> None:
-        i = self.ws.watches.index(old)
-        self.ws.watches[i] = new
-        st = self.states[old.expr]
+        """New settings for an item, in this tab and every other tab that has it."""
+        self.ws.replace(new)
+        self.main.watch_tabs.replaced(old, new)
+        self.changed.emit()
+
+    def replaced(self, old: Watch, new: Watch) -> None:
+        st = self.states.get(new.expr)
+        if st is None:
+            return
         st.watch, st.force = new, True
         if new.display != old.display:
             self.reset_stats(new.expr)   # the old numbers were in other units
         self._decorate(st)
-        self.changed.emit()
 
     def _decorate(self, st: _ItemState) -> None:
         w = st.watch
@@ -151,15 +157,9 @@ class WatchTree(QTreeWidget):
 
     # --- polling -----------------------------------------------------------------------------
 
-    def tick(self, now: float | None = None) -> None:
-        """Read every item that is due, all in one poll. Called by the main window's poll timer.
-        While a poll is still running nothing new starts, so a slow link falls behind instead of
-        queueing reads."""
-        device = self.main.device
-        if device.target is None or device.busy(POLL_KEY):
-            return
-        now = time.monotonic() if now is None else now
-        due = []
+    def due(self, now: float) -> list[_ItemState]:
+        """The items that should be read now."""
+        out = []
         for expr, st in self.states.items():
             if st.gone:
                 continue
@@ -168,20 +168,20 @@ class WatchTree(QTreeWidget):
                 continue
             if st.aggregate and not st.item.isExpanded() and not st.force and not self.main.reads_closed(expr):
                 continue   # a collapsed struct or array is not read
-            due.append(st)
-        if not due:
+            out.append(st)
+        return out
+
+    def polled(self, expr: str, now: float) -> None:
+        """A read of this item was started: keep its cadence; one that fell behind starts again from now."""
+        st = self.states.get(expr)
+        if st is None:
             return
-        ws = self.ws
-        watches = [st.watch for st in due]
-        cells = {st.watch.expr: st.max_cells for st in due}
-        job = device.submit(lambda t: ws.read_many(t, watches, cells, headers=True), self._polled,
-                            self._poll_failed, key=POLL_KEY)
-        if job is not None:
-            for st in due:
-                st.force = False
-                # keep the item's cadence; one that fell behind starts again from now
-                step = (st.watch.interval_ms(ws.poll_ms) or 0) / 1000.0
-                st.due = st.due + step if now - st.due < step else now + step
+        st.force = False
+        step = (st.watch.interval_ms(self.ws.poll_ms) or 0) / 1000.0
+        st.due = st.due + step if now - st.due < step else now + step
+
+    def tick(self) -> None:
+        self.main.watch_tabs.tick()
 
     def read_now(self, expr: str) -> None:
         st = self.states.get(expr)
@@ -189,19 +189,14 @@ class WatchTree(QTreeWidget):
             st.force = True
             self.tick()
 
-    def _polled(self, readings: list[Reading]) -> None:
-        for r in readings:
-            st = self.states.get(r.watch.expr)
-            if st is None:
-                continue   # removed while it was being read
-            if r.error is not None:
-                self._failed(st, r.error)
-            else:
-                self._done(st, (r.loc, r.shown))
-        self.sampled.emit(readings)
-
-    def _poll_failed(self, e: Exception) -> None:
-        self.main.status(f"poll: {describe_error(e)}", error=True)
+    def deliver(self, r: Reading) -> None:
+        st = self.states.get(r.watch.expr)
+        if st is None:
+            return   # removed while it was being read
+        if r.error is not None:
+            self._failed(st, r.error)
+        else:
+            self._done(st, (r.loc, r.shown))
 
     def _done(self, st: _ItemState, result) -> None:
         loc, rows = result
@@ -329,31 +324,17 @@ class WatchTree(QTreeWidget):
 
     # --- after an ELF rebuild ----------------------------------------------------------------
 
-    def remap(self, mcus: list[str]) -> None:
-        """Find the items of the reloaded MCUs again by name, and flag what changed."""
-        items = [(expr, st.loc) for expr, st in self.states.items() if st.loc is not None and st.loc.mcu in mcus]
-        if not items:
+    def remapped(self, expr: str, new, note: str | None) -> None:
+        st = self.states.get(expr)
+        if st is None:
             return
-
-        def job(t):
-            return [(expr, *t.remap(loc)) for expr, loc in items]
-
-        self.main.device.submit(job, self._remapped, lambda e: self.main.status(describe_error(e)))
-
-    def _remapped(self, results) -> None:
-        for expr, new, note in results:
-            st = self.states.get(expr)
-            if st is None:
-                continue
-            st.note = note
-            st.gone = new is None
-            st.force = True
-            if st.gone:
-                st.item.setText(COL_VALUE, "gone")
-                st.item.setForeground(COL_VALUE, GREY)
-            self._decorate(st)
-            if note:
-                self.main.status(note)
+        st.note = note
+        st.gone = new is None
+        st.force = True
+        if st.gone:
+            st.item.setText(COL_VALUE, "gone")
+            st.item.setForeground(COL_VALUE, GREY)
+        self._decorate(st)
 
     # --- writing -----------------------------------------------------------------------------
 
@@ -469,7 +450,12 @@ class WatchTree(QTreeWidget):
                 fmt.addAction(a)
             menu.addAction("Settings...", lambda: self.edit_settings(st.watch.expr))
             menu.addAction("Reset statistics", lambda: self.reset_stats(st.watch.expr))
-            menu.addAction("Remove from watch list", lambda: self.remove_watch(st.watch.expr))
+            others = [t for t in self.ws.tabs if t is not self.tab and not t.watch(st.watch.expr)]
+            if others:
+                copy = menu.addMenu("Also show in tab")
+                for t in others:
+                    copy.addAction(t.name, lambda t=t: self.main.watch_tabs.tree(t).add_watch(st.watch.expr))
+            menu.addAction("Remove from this tab", lambda: self.remove_watch(st.watch.expr))
         menu.exec(self.viewport().mapToGlobal(pos))
 
     def _more_cells(self, st: _ItemState) -> None:
@@ -498,6 +484,231 @@ class WatchTree(QTreeWidget):
 
     def selected_exprs(self) -> list[str]:
         return [i.data(COL_NAME, PATH_ROLE) for i in self.selectedItems() if i.parent() is None]
+
+
+class WatchTabs(QTabWidget):
+    """The watch tabs: one watch tree per tab of the workspace. Every tab keeps polling, not only
+    the one in front, and one poll reads what all of them have due: an item in several tabs is
+    read once and shown in each."""
+
+    changed = Signal()                   # tabs, their items or an item's settings changed
+    sampled = Signal(object)             # list[Reading]: everything one poll read, for the chart and the log
+    chart_requested = Signal(str, str)
+
+    def __init__(self, main):
+        super().__init__()
+        self.main = main
+        self.trees: list[WatchTree] = []
+        self._stats_shown = False
+        self.setMovable(True)
+        self.setDocumentMode(True)
+        self.tabBar().tabMoved.connect(self._moved)
+        self.tabBar().tabBarDoubleClicked.connect(lambda i: self.rename_tab(i) if i >= 0 else self.new_tab())
+        self.tabBar().setContextMenuPolicy(Qt.CustomContextMenu)
+        self.tabBar().customContextMenuRequested.connect(self._menu)
+        plus = QToolButton()
+        plus.setText("+")
+        plus.setToolTip("New watch tab (Ctrl+Shift+T)")
+        plus.setAutoRaise(True)
+        plus.clicked.connect(lambda: self.new_tab())
+        self.setCornerWidget(plus, Qt.TopRightCorner)
+
+    @property
+    def ws(self) -> Workspace:
+        return self.main.ws
+
+    # --- tabs --------------------------------------------------------------------------------
+
+    def rebuild(self) -> None:
+        self.blockSignals(True)
+        while self.count():
+            w = self.widget(0)
+            self.removeTab(0)
+            w.deleteLater()
+        self.trees = []
+        self.ws.ensure_tab()
+        for tab in self.ws.tabs:
+            self._add_tree(tab)
+        self.setCurrentIndex(0)
+        self.blockSignals(False)
+
+    def _add_tree(self, tab: Tab, index: int | None = None) -> WatchTree:
+        tree = WatchTree(self.main, tab)
+        tree.changed.connect(self.changed)
+        tree.chart_requested.connect(self.chart_requested)
+        tree.show_stats(self._stats_shown)
+        tree.rebuild()
+        index = len(self.trees) if index is None else index
+        self.trees.insert(index, tree)
+        self.insertTab(index, tree, tab.name)
+        return tree
+
+    def current(self) -> WatchTree:
+        return self.currentWidget()
+
+    def tree(self, tab: Tab) -> WatchTree:
+        return next(t for t in self.trees if t.tab is tab)
+
+    def new_tab(self, name: str | None = None) -> WatchTree | None:
+        if name is None:
+            n = len(self.ws.tabs) + 1
+            while self.ws.has_tab(f"Watch {n}"):
+                n += 1
+            name, ok = QInputDialog.getText(self, "New watch tab", "Name:", text=f"Watch {n}")
+            if not ok:
+                return None
+        try:
+            tab = self.ws.add_tab(name)
+        except ConfigError as e:
+            self.main.status(str(e), error=True)
+            return None
+        tree = self._add_tree(tab)
+        self.setCurrentWidget(tree)
+        self.changed.emit()
+        return tree
+
+    def rename_tab(self, index: int | None = None, name: str | None = None) -> None:
+        index = self.currentIndex() if index is None else index
+        tree = self.trees[index]
+        if name is None:
+            name, ok = QInputDialog.getText(self, "Rename watch tab", "Name:", text=tree.tab.name)
+            if not ok:
+                return
+        try:
+            self.ws.rename_tab(tree.tab.name, name)
+        except ConfigError as e:
+            self.main.status(str(e), error=True)
+            return
+        self.setTabText(index, tree.tab.name)
+        self.changed.emit()
+
+    def close_tab(self, index: int | None = None, ask: bool = True) -> None:
+        index = self.currentIndex() if index is None else index
+        tree = self.trees[index]
+        if len(self.trees) == 1:
+            self.main.status("The last watch tab can't be removed; rename it or remove its items instead")
+            return
+        n = len(tree.tab.watches)
+        if ask and n and QMessageBox.question(
+                self, "Remove watch tab", f"Remove tab {tree.tab.name!r} and its {n} items?") != QMessageBox.Yes:
+            return
+        self.ws.remove_tab(tree.tab.name)
+        self.trees.remove(tree)
+        self.removeTab(index)
+        tree.deleteLater()
+        self.changed.emit()
+
+    def _moved(self, frm: int, to: int) -> None:
+        tree = self.trees.pop(frm)
+        self.trees.insert(to, tree)
+        self.ws.tabs[:] = [t.tab for t in self.trees]
+        self.changed.emit()
+
+    def _menu(self, pos) -> None:
+        index = self.tabBar().tabAt(pos)
+        menu = QMenu(self)
+        menu.addAction("New tab...", lambda: self.new_tab())
+        if index >= 0:
+            menu.addAction("Rename...", lambda: self.rename_tab(index))
+            a = menu.addAction("Remove", lambda: self.close_tab(index))
+            a.setEnabled(len(self.trees) > 1)
+        menu.exec(self.tabBar().mapToGlobal(pos))
+
+    # --- across every tab --------------------------------------------------------------------
+
+    def states(self):
+        """Every (tree, item state) pair, in tab order."""
+        for tree in self.trees:
+            for st in tree.states.values():
+                yield tree, st
+
+    def exprs(self) -> list[str]:
+        """Every watched expression once."""
+        return list(dict.fromkeys(st.watch.expr for _, st in self.states()))
+
+    def add_watch(self, expr: str) -> Watch | None:
+        return self.current().add_watch(expr)
+
+    def replaced(self, old: Watch, new: Watch) -> None:
+        for tree in self.trees:
+            tree.replaced(old, new)
+
+    def force(self, expr: str | None = None) -> None:
+        """Read an item (or everything) at the next tick."""
+        for _, st in self.states():
+            if expr is None or st.watch.expr == expr:
+                st.force = True
+
+    def read_all(self) -> None:
+        self.force()
+        self.tick()
+
+    def decorate(self) -> None:
+        for tree, st in self.states():
+            tree._decorate(st)
+
+    def show_stats(self, on: bool) -> None:
+        self._stats_shown = on
+        for tree in self.trees:
+            tree.show_stats(on)
+
+    def reset_stats(self) -> None:
+        for tree in self.trees:
+            tree.reset_stats()
+
+    def tick(self, now: float | None = None) -> None:
+        """Read every item that is due in any tab, all in one poll. Called by the main window's
+        poll timer. While a poll is still running nothing new starts, so a slow link falls behind
+        instead of queueing reads."""
+        device = self.main.device
+        if device.target is None or device.busy(POLL_KEY):
+            return
+        now = time.monotonic() if now is None else now
+        due: dict[str, Watch] = {}
+        cells: dict[str, int] = {}
+        for tree in self.trees:
+            for st in tree.due(now):
+                due.setdefault(st.watch.expr, st.watch)
+                cells[st.watch.expr] = max(cells.get(st.watch.expr, 0), st.max_cells)
+        if not due:
+            return
+        ws, watches = self.ws, list(due.values())
+        job = device.submit(lambda t: ws.read_many(t, watches, cells, headers=True), self._polled,
+                            self._poll_failed, key=POLL_KEY)
+        if job is not None:
+            for expr in due:
+                for tree in self.trees:
+                    tree.polled(expr, now)
+
+    def _polled(self, readings: list[Reading]) -> None:
+        for r in readings:
+            for tree in self.trees:
+                tree.deliver(r)
+        self.sampled.emit(readings)
+
+    def _poll_failed(self, e: Exception) -> None:
+        self.main.status(f"poll: {describe_error(e)}", error=True)
+
+    def remap(self, mcus: list[str]) -> None:
+        """Find the items of the reloaded MCUs again by name, and flag what changed."""
+        items = {}
+        for _, st in self.states():
+            if st.loc is not None and st.loc.mcu in mcus:
+                items.setdefault(st.watch.expr, st.loc)
+        if not items:
+            return
+
+        def job(t):
+            return [(expr, *t.remap(loc)) for expr, loc in items.items()]
+
+        self.main.device.submit(job, self._remapped, lambda e: self.main.status(describe_error(e)))
+
+    def _remapped(self, results) -> None:
+        for expr, new, note in results:
+            for tree in self.trees:
+                tree.remapped(expr, new, note)
+            if note:
+                self.main.status(note)
 
 
 def _deref(path: str) -> str:

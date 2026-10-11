@@ -1,6 +1,6 @@
 # RDT GUI
 
-The GUI works on one workspace (`.rdtw`, see [CLI.md](CLI.md#workspace)): the connection, the SCPI profile, the MCUs and their ELF files, the watch list, and the command buttons. Everything you change in the window is saved back to that file.
+The GUI works on one workspace (`.rdtw`, see [CLI.md](CLI.md#workspace)): the connection, the SCPI profile, the MCUs and their ELF files, the watch tabs, and the chart layout. Everything you change in the window is saved back to that file.
 
 ```
 python -m pip install -e .[dev]
@@ -14,7 +14,7 @@ rdt-gui examples/sim_bench.rdtw          # or: python -m rdt.gui examples/sim_be
 
 - **Transport**: `tcp` or `udp` with the device's IP address and port, or `serial` with a COM port and baud rate.
 - **Profile**: opens the SCPI profile editor (below). The button shows the profile's name and, when it comes from a file of its own, the file.
-- **Connect / Disconnect** (F5). The state next to it is green while the link is up, red while it is down and RDT is reconnecting, and grey when not connected. The console, memory view and buttons are disabled unless the link is up, and the connection fields can only be changed while disconnected.
+- **Connect / Disconnect** (F5). The state next to it is green while the link is up, red while it is down and RDT is reconnecting, and grey when not connected. The console and memory view are disabled unless the link is up, and the connection fields can only be changed while disconnected.
 - **Poll**: the global polling interval. `Off` (0) stops polling; items set to their own interval still poll.
 - **Log CSV** (Ctrl+L): log every watched value to a CSV file. See [CSV log](#csv-log).
 
@@ -22,9 +22,23 @@ rdt-gui examples/sim_bench.rdtw          # or: python -m rdt.gui examples/sim_be
 
 ## Variable view
 
-The **Variables** panel lists an MCU's globals from its ELF. Type in the search box to filter (`motor*`, `*count`), then double-click a variable or select several and press **Add to watch list**. **Watch > Add expression** (Ctrl+E) takes any expression the CLI takes, such as `main:motor.speed`, `main:gains[2]`, `main:*ptr` or `@main:0x20000000:u32`.
+The **Variables** panel lists an MCU's globals from its ELF. Type in the search box to filter (`motor*`, `*count`), then double-click a variable or select several and press **Add to watch list**; they go to the watch tab in front. **Watch > Add expression** (Ctrl+E) takes any expression the CLI takes, such as `main:motor.speed`, `main:gains[2]`, `main:*ptr` or `@main:0x20000000:u32`.
 
-The watch tree in the centre shows each watched item with its value, type, address and the rate it is actually read at:
+### Watch tabs
+
+The centre of the window holds the watch tabs. Each tab is its own watch list with its own tree, such as one for the motor and one for the system state, and the workspace saves them all. A new workspace starts with one tab, `Watch`.
+
+- **New tab**: the **+** at the right of the tabs, a double-click on the empty part of the tab bar, or **Watch > New tab...** (Ctrl+Shift+T).
+- **Rename**: double-click a tab, or right-click it > **Rename...**. Tab names are unique, whatever the case.
+- **Remove**: right-click a tab > **Remove**, or **Watch > Remove tab**. It asks first when the tab has items. The last tab can't be removed.
+- **Reorder**: drag a tab along the tab bar. Ctrl+PgDown and Ctrl+PgUp go to the next and previous tab.
+- **The same item in several tabs**: right-click an item > **Also show in tab**. It is still one item: its format, scaling, polling and write safety are the same in every tab, and changing them in one tab changes them in all. **Remove from this tab** takes it out of the tab in front only.
+
+**Every tab keeps polling**, not only the one in front, so the chart and the CSV log keep getting values from items in the other tabs. One poll reads what every tab has due, and an item in several tabs is read once.
+
+### Watch tree
+
+The watch tree of each tab shows each watched item with its value, type, address and the rate it is actually read at:
 
 - Structs and arrays open to every field and cell. A struct is read in one block. **A collapsed struct or array is not read**, so close what you aren't looking at to keep the link free. Arrays show 100 cells at a time; right-click and choose **Show 100 more cells** for the next page.
 - Enums show as `NAME (n)`, bit fields are extracted, `char` arrays show as strings, and pointers show their target's name. Right-click a pointer and choose **Watch what it points to** to follow it.
@@ -35,7 +49,7 @@ Polling: each item is read at the global interval, at its own interval, or only 
 
 ### Statistics
 
-**View > Statistics columns** (Ctrl+T) shows **Min**, **Max**, **Mean** and **Samples** for every numeric value in the tree, fields and cells included, in shown units. They count every value read since connecting or the last reset. **Watch > Reset statistics** starts them all again; right-click an item and choose **Reset statistics** for that item alone. Changing an item's scaling resets its statistics.
+**View > Statistics columns** (Ctrl+T) shows **Min**, **Max**, **Mean** and **Samples** for every numeric value in the tree, fields and cells included, in shown units. They count every value read since connecting or the last reset. **Watch > Reset statistics** starts them all again, in every tab; right-click an item and choose **Reset statistics** for that item alone. Changing an item's scaling resets its statistics.
 
 ### Writing
 
@@ -80,7 +94,7 @@ unit  = "rpm"
 
 ## CSV log
 
-**Log CSV** in the toolbar, or **Watch > Log to CSV...** (Ctrl+L), asks for a file (by default `rdt-<date>-<time>.csv` next to the workspace) and writes one row per poll until you press it again. The columns are every value the watch tree shows at that moment, struct fields and array cells included; while logging, collapsed structs and arrays are read too. Items added later are not logged until the log is started again. Starting the log reads everything once, so the first full row has every column. The status bar shows the file and the number of rows.
+**Log CSV** in the toolbar, or **Watch > Log to CSV...** (Ctrl+L), asks for a file (by default `rdt-<date>-<time>.csv` next to the workspace) and writes one row per poll until you press it again. The columns are every value the watch tabs show at that moment, in all tabs, struct fields and array cells included; while logging, collapsed structs and arrays are read too. Items added later are not logged until the log is started again. Starting the log reads everything once, so the first full row has every column. The status bar shows the file and the number of rows.
 
 The format is the same as `rdt watch --csv`; see [CSV log](CLI.md#csv-log). A lost link and its return are marked in the `event` column, and so is an ELF rebuild.
 
@@ -92,10 +106,6 @@ Choose the MCU, type an address (`0x20000000`) or a variable name (`motor`), a l
 
 Type any SCPI command and press Enter. Up and Down walk through earlier commands. Because the firmware sends nothing back when a command fails, a query with no reply shows `(no reply; error queue: ...)` with what `SYST:ERR?` said. **Error queue** reads `SYST:ERR?` until the queue is empty.
 
-## Command buttons
-
-The **Buttons** panel holds the workspace's buttons. Pressing one sends its command through the console. A command with `{param}` asks for a value first. **Add button...** makes a new one; right-click a button to edit or remove it.
-
 ## SCPI profile editor
 
 The profile says how the firmware spells a memory read and write and how it encodes the reply. The editor has every field of the `[scpi]` table (see [CLI.md](CLI.md#scpi-profile)), shows the read and write commands as they will be sent, and refuses a template that would not work (for example a read without `{len}`). While connected, **Test read** sends one read with the edited profile and shows the reply and the decoded bytes, before you apply it.
@@ -104,4 +114,4 @@ Pressing OK stores the edited profile inside the workspace (no longer pointing a
 
 ## Files
 
-**File > New, Open, Save, Save as**. Opening a plain target file (`.toml`) starts a new workspace from it, so Save asks where to put the `.rdtw` rather than overwriting the target file. The title shows `*` while there are unsaved changes, and closing the window asks whether to save them.
+**File > New, Open, Save, Save as**. Opening a plain target file (`.toml`) starts a new workspace from it, so Save asks where to put the `.rdtw` rather than overwriting the target file. A workspace from before watch tabs opens with its watch list in one tab, `Watch`. Command buttons are no longer part of RDT: a workspace that has them still opens, the status bar says they were dropped, and they are left out when it is saved. Type such commands in the SCPI console instead. The title shows `*` while there are unsaved changes, and closing the window asks whether to save them.

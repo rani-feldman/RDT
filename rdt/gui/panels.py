@@ -1,4 +1,4 @@
-"""The smaller panels: memory view, SCPI console, command buttons, and the dialogs for the SCPI
+"""The smaller panels: memory view, SCPI console, and the dialogs for the SCPI
 profile and the MCU list."""
 
 from __future__ import annotations
@@ -6,18 +6,18 @@ from __future__ import annotations
 from dataclasses import fields, replace
 from pathlib import Path
 
-from PySide6.QtCore import QEvent, QObject, Qt, QTimer, Signal
+from PySide6.QtCore import QEvent, QObject, Qt, QTimer
 from PySide6.QtGui import QFont, QFontDatabase, QTextCursor
 from PySide6.QtWidgets import (
     QAbstractItemView, QCheckBox, QComboBox, QDialog, QDialogButtonBox, QFileDialog, QFormLayout, QHBoxLayout,
-    QHeaderView, QInputDialog, QLabel, QLineEdit, QMenu, QMessageBox, QPlainTextEdit, QPushButton, QScrollArea,
-    QSpinBox, QTableWidget, QTableWidgetItem, QVBoxLayout, QWidget,
+    QHeaderView, QLabel, QLineEdit, QMessageBox, QPlainTextEdit, QPushButton, QSpinBox, QTableWidget,
+    QTableWidgetItem, QVBoxLayout, QWidget,
 )
 
 from ..errors import CommandTimeout, ConfigError, LinkDown, RdtError
 from ..profile import DATA_FORMATS, Profile, parse_int
 from ..target import McuConfig, Target
-from ..workspace import Button, Workspace
+from ..workspace import Workspace
 from .device import describe_error
 
 BYTES_PER_ROW = 16
@@ -132,115 +132,6 @@ class Console(QWidget):
         self.log("> error queue")
         self.main.device.submit(job, lambda lines: self.log("\n".join(lines)),
                                 lambda e: self.log(f"error: {describe_error(e)}"))
-
-
-# --- command buttons -------------------------------------------------------------------------
-
-
-class ButtonDialog(QDialog):
-    def __init__(self, b: Button | None, parent=None):
-        super().__init__(parent)
-        self.setWindowTitle("Command button")
-        form = QFormLayout(self)
-        self.name = QLineEdit(b.name if b else "")
-        self.command = QLineEdit(b.command if b else "")
-        self.command.setFont(mono())
-        self.command.setPlaceholderText("such as SYST:MODE {param}")
-        self.param = QLineEdit(b.param if b else "")
-        self.param.setPlaceholderText("label for {param}, such as Mode")
-        form.addRow("Name", self.name)
-        form.addRow("Command", self.command)
-        form.addRow("Value label", self.param)
-        form.addRow(QLabel("Put {param} in the command to ask for a value when the button is pressed."))
-        buttons = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
-        buttons.accepted.connect(self._accept)
-        buttons.rejected.connect(self.reject)
-        form.addRow(buttons)
-
-    def _accept(self) -> None:
-        if not self.name.text().strip() or not self.command.text().strip():
-            QMessageBox.warning(self, "Command button", "A button needs a name and a command.")
-            return
-        self.accept()
-
-    def result_button(self) -> Button:
-        return Button(self.name.text().strip(), self.command.text().strip(), self.param.text().strip())
-
-
-class ButtonPanel(QWidget):
-    """The workspace's command buttons. Pressing one sends its command through the console."""
-
-    changed = Signal()
-
-    def __init__(self, main):
-        super().__init__()
-        self.main = main
-        layout = QVBoxLayout(self)
-        layout.setContentsMargins(4, 4, 4, 4)
-        scroll = QScrollArea(widgetResizable=True)
-        self.inner = QWidget()
-        self.box = QVBoxLayout(self.inner)
-        self.box.setAlignment(Qt.AlignTop)
-        scroll.setWidget(self.inner)
-        layout.addWidget(scroll, 1)
-        add = QPushButton("Add button...")
-        add.clicked.connect(self.add)
-        layout.addWidget(add)
-        self.widgets: list[QPushButton] = []
-
-    @property
-    def ws(self) -> Workspace:
-        return self.main.ws
-
-    def rebuild(self) -> None:
-        for w in self.widgets:
-            w.deleteLater()
-        self.widgets = []
-        for b in self.ws.buttons:
-            w = QPushButton(b.name + ("..." if b.needs_param else ""))
-            w.setToolTip(b.command)
-            w.setContextMenuPolicy(Qt.CustomContextMenu)
-            w.clicked.connect(lambda _=False, b=b: self.press(b))
-            w.customContextMenuRequested.connect(lambda pos, w=w, b=b: self._menu(w, b, pos))
-            self.box.addWidget(w)
-            self.widgets.append(w)
-
-    def press(self, b: Button, value: str | None = None) -> None:
-        if b.needs_param and value is None:
-            value, ok = QInputDialog.getText(self, b.name, (b.param or "Value") + ":")
-            if not ok:
-                return
-        try:
-            text = b.fill(value)
-        except ConfigError as e:
-            self.main.status(str(e), error=True)
-            return
-        self.main.console.send(text)
-
-    def _menu(self, w: QPushButton, b: Button, pos) -> None:
-        menu = QMenu(self)
-        menu.addAction("Edit...", lambda: self.edit(b))
-        menu.addAction("Remove", lambda: self.remove(b))
-        menu.exec(w.mapToGlobal(pos))
-
-    def add(self) -> None:
-        dlg = ButtonDialog(None, self)
-        if dlg.exec() == QDialog.Accepted:
-            self.ws.buttons.append(dlg.result_button())
-            self.rebuild()
-            self.changed.emit()
-
-    def edit(self, b: Button) -> None:
-        dlg = ButtonDialog(b, self)
-        if dlg.exec() == QDialog.Accepted:
-            self.ws.buttons[self.ws.buttons.index(b)] = dlg.result_button()
-            self.rebuild()
-            self.changed.emit()
-
-    def remove(self, b: Button) -> None:
-        self.ws.buttons.remove(b)
-        self.rebuild()
-        self.changed.emit()
 
 
 # --- memory view -----------------------------------------------------------------------------

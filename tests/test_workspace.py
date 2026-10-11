@@ -12,7 +12,7 @@ from rdt.cli import main
 from rdt.scaling import Display
 from rdt.target import ConnectionConfig, McuConfig, TargetConfig
 from rdt.tomlw import Hex, dumps
-from rdt.workspace import Button, Watch, Workspace, canonical
+from rdt.workspace import Tab, Watch, Workspace, canonical
 from sim import Simulator, TransportConfig, load_config
 
 from host_helpers import make_target
@@ -21,6 +21,10 @@ ROOT = Path(__file__).resolve().parent.parent
 FIRMWARE = ROOT / "sim" / "examples" / "firmware"
 EXAMPLE_TARGET = ROOT / "examples" / "sim_target.toml"
 EXAMPLE_WORKSPACE = ROOT / "examples" / "sim_bench.rdtw"
+
+
+def one_tab(*watches: Watch) -> list[Tab]:
+    return [Tab("Watch", list(watches))]
 
 
 # --- the TOML writer -------------------------------------------------------------------------
@@ -89,20 +93,71 @@ def test_watch_items_are_canonical_and_checked():
 
 
 def test_guard_for_finds_the_watched_parent():
-    ws = Workspace(watches=[Watch("main:motor", read_only=True), Watch("main:motor.speed"), Watch("main:gains")])
+    ws = Workspace(tabs=one_tab(Watch("main:motor", read_only=True), Watch("main:motor.speed"), Watch("main:gains")))
     assert [w and w.expr for w in ws.guard_for("main:motor.speed")] == ["main:motor.speed", "main:motor"]
     assert [w and w.expr for w in ws.guard_for("main:motor.target")] == [None, "main:motor"]
     assert [w and w.expr for w in ws.guard_for("main:gains[1]")] == [None, "main:gains"]
     assert ws.guard_for("main:motorx") == (None, None)
 
 
-def test_buttons():
-    b = Button("Speed", "MOT:SPE {param}", "rpm")
-    assert b.fill("1500") == "MOT:SPE 1500"
-    with pytest.raises(ConfigError, match=r"needs a value \(rpm\)"):
-        b.fill(None)
-    with pytest.raises(ConfigError, match="takes no value"):
-        Button("Reset", "*RST").fill("1")
+def test_tabs():
+    ws = Workspace()
+    assert ws.watches == [] and ws.tabs == []
+    ws.add(Watch("main:motor.speed", Display(unit="rpm")))   # the first tab is made when needed
+    assert [t.name for t in ws.tabs] == ["Watch"]
+    ws.add_tab("Motor")
+    with pytest.raises(ConfigError, match="already a tab"):
+        ws.add_tab("motor")
+    with pytest.raises(ConfigError, match="needs a name"):
+        ws.add_tab("  ")
+    shared = ws.add(Watch("main:motor.speed"), "motor")   # the item is shared, with its settings
+    assert shared is ws.tab("Watch").watches[0] and shared.display.unit == "rpm"
+    ws.add(Watch("main:tick_count"), "Motor")
+    with pytest.raises(ConfigError, match="already in tab 'Motor'"):
+        ws.add(Watch("main: tick_count"), "Motor")
+    assert [w.expr for w in ws.watches] == ["main:motor.speed", "main:tick_count"]   # each once
+    ws.replace(Watch("main:motor.speed", Display(unit="rad/s")))
+    assert all(t.watches[0].display.unit == "rad/s" for t in ws.tabs)
+    assert [t.name for t in ws.tabs_with("main:motor.speed")] == ["Watch", "Motor"]
+    ws.remove("main:motor.speed", "Watch")
+    assert [t.name for t in ws.tabs_with("main:motor.speed")] == ["Motor"]
+    with pytest.raises(ConfigError, match="not in tab 'Watch'"):
+        ws.remove("main:motor.speed", "Watch")
+    ws.rename_tab("motor", "Drive")
+    with pytest.raises(ConfigError, match="no tab 'Motor'"):
+        ws.tab("Motor")
+    ws.remove("main:motor.speed")   # from every tab
+    assert ws.remove_tab("Drive").watches[0].expr == "main:tick_count"
+    assert [t.name for t in ws.tabs] == ["Watch"] and ws.watches == []
+
+
+def test_tabs_save_and_load(tmp_path):
+    speed = Watch("main:motor.speed", Display(unit="rpm"), poll=100)
+    ws = Workspace(tabs=[Tab("Motor", [speed, Watch("main:motor.mode", read_only=True)]),
+                         Tab("Empty"), Tab("Overview", [Watch("main:tick_count"), speed])])
+    path = ws.save(tmp_path / "tabs.rdtw")
+    raw = tomllib.loads(path.read_text())
+    assert [t["name"] for t in raw["tab"]] == ["Motor", "Empty", "Overview"]
+    assert raw["tab"][2]["watch"][1] == {"expr": "main:motor.speed"}   # settings at the first place only
+    back = Workspace.load(path)
+    assert [(t.name, [w.expr for w in t.watches]) for t in back.tabs] == \
+           [(t.name, [w.expr for w in t.watches]) for t in ws.tabs]
+    assert back.tabs[2].watches[1] is back.tabs[0].watches[0] and back.tabs[0].watches[0] == speed
+
+
+def test_an_old_workspace_loads(tmp_path):
+    """A file from before tabs: its [[watch]] list is the tab "Watch", and buttons are dropped."""
+    path = tmp_path / "old.rdtw"
+    path.write_text('[[watch]]\nexpr = "main:a"\nunit = "V"\n\n'
+                    '[[button]]\nname = "Who"\ncommand = "*IDN?"\n')
+    ws = Workspace.load(path)
+    assert [(t.name, [w.expr for w in t.watches]) for t in ws.tabs] == [("Watch", ["main:a"])]
+    assert ws.watches[0].display.unit == "V"
+    assert "buttons are no longer supported" in ws.warnings[0]
+    ws.save()
+    text = path.read_text()
+    assert "button" not in text and "[[tab]]" in text and "[[tab.watch]]" in text
+    assert Workspace.load(path).warnings == []
 
 
 # --- files -----------------------------------------------------------------------------------
@@ -114,10 +169,10 @@ def test_save_and_load(tmp_path):
                        [McuConfig(0, "main", FIRMWARE / "main.elf",
                                   ranges=[Range("GPIOA", 0x48000000, 0x400, writable=False)]),
                         McuConfig(1, "motorctl", FIRMWARE / "motorctl.elf", timeout_ms=1500)])
-    ws = Workspace(cfg, [Watch("main:motor.speed", Display(k=0.1, unit="rpm"), poll=100, min=0, max=3000,
-                               confirm=True),
-                         Watch("main:tick_count", Display(format="hex"), poll="manual", read_only=True)],
-                   [Button("Reset", "*RST"), Button("Speed", "MOT:SPE {param}", "rpm")], poll_ms=250,
+    ws = Workspace(cfg, one_tab(Watch("main:motor.speed", Display(k=0.1, unit="rpm"), poll=100, min=0, max=3000,
+                                      confirm=True),
+                                Watch("main:tick_count", Display(format="hex"), poll="manual", read_only=True)),
+                   poll_ms=250,
                    chart={"window_s": 10, "axes": [{"items": ["main:motor.speed"]}]})
     (tmp_path / "sub").mkdir()
     path = ws.save(tmp_path / "sub" / "bench.rdtw")
@@ -133,8 +188,7 @@ def test_save_and_load(tmp_path):
     assert back.config.profile.ranges == profile.ranges
     assert [(m.id, m.name, m.elf.resolve(), m.timeout_ms, m.ranges) for m in back.config.mcus] == \
            [(m.id, m.name, m.elf.resolve(), m.timeout_ms, m.ranges) for m in cfg.mcus]
-    assert back.watches == ws.watches
-    assert back.buttons == ws.buttons
+    assert back.tabs == ws.tabs
     assert (back.poll_ms, back.chart) == (250, ws.chart)
     # Saving again changes nothing.
     back.save()
@@ -150,15 +204,20 @@ def test_a_target_file_is_a_workspace():
 
 def test_the_example_workspace_loads():
     ws = Workspace.load(EXAMPLE_WORKSPACE)
-    assert ws.watches and ws.buttons
+    assert [t.name for t in ws.tabs] == ["Motor", "System"]
+    assert ws.tab("System").watch("main:motor.mode") is ws.tab("Motor").watch("main:motor.mode")
     assert all(m.elf.exists() for m in ws.config.mcus)
 
 
 @pytest.mark.parametrize("text, message", [
-    ('[[watch]]\nexpr = "main:a"\n[[watch]]\nexpr = "main: a"\n', "in the watch list twice"),
+    ('[[watch]]\nexpr = "main:a"\n[[watch]]\nexpr = "main: a"\n', "in tab 'Watch' twice"),
+    ('[[tab]]\nname = "A"\n[[tab]]\nname = "a"\n', "two tabs named 'a'"),
+    ('[[tab]]\nwatch = []\n', "a tab needs a name"),
+    ('[[tab]]\nname = "A"\ncolor = "red"\n', "unknown keys color"),
+    ('[[tab]]\nname = "A"\n[[tab.watch]]\nexpr = "main:a"\nunit = "V"\n'
+     '[[tab]]\nname = "B"\n[[tab.watch]]\nexpr = "main:a"\nunit = "mV"\n', "different settings in two tabs"),
     ('[[watch]]\nformat = "hex"\n', "needs an expr"),
     ('poll_ms = -5\n', "poll_ms must be"),
-    ('[[button]]\nname = "x"\n', "needs a name and a command"),
     ('chart = 3\n', r"\[chart\] must be a table"),
 ])
 def test_bad_workspaces(tmp_path, text, message):
@@ -185,12 +244,12 @@ def target(sim):
 
 
 def test_read_with_scaling_and_formats(target):
-    ws = Workspace(watches=[
+    ws = Workspace(tabs=one_tab(
         Watch("main:motor.current_ma", Display(k=0.001, unit="A")),
         Watch("main:gains", Display(format="hex")),
         Watch("main:motor.target", Display(k=0.5, unit="rpm")),
         Watch("main:tick_count", Display(q="Q31")),
-    ])
+    ))
     _, shown = ws.read(target, "main:motor.current_ma")
     assert [(s.text, s.raw) for s in shown] == [("-0.12 A", -120)]
     _, shown = ws.read(target, "main:gains")
@@ -208,9 +267,9 @@ def test_read_with_scaling_and_formats(target):
 
 
 def test_write_applies_the_inverse_scaling(target):
-    ws = Workspace(watches=[Watch("main:gains[2]", Display(k=0.5, offset=1)),
-                            Watch("main:motor.current_ma", Display(q="Q3.12")),
-                            Watch("main:motor.target", Display(k=2, unit="rpm"))])
+    ws = Workspace(tabs=one_tab(Watch("main:gains[2]", Display(k=0.5, offset=1)),
+                                Watch("main:motor.current_ma", Display(q="Q3.12")),
+                            Watch("main:motor.target", Display(k=2, unit="rpm"))))
     assert ws.write(target, "main:gains[2]", "22")[1] == 42
     assert target.read_value("main:gains[2]") == 42
     assert ws.write(target, "main:motor.current_ma", "-0.5")[1] == -2048
@@ -222,12 +281,12 @@ def test_write_applies_the_inverse_scaling(target):
 
 
 def test_write_safety(target):
-    ws = Workspace(watches=[
+    ws = Workspace(tabs=one_tab(
         Watch("main:motor", read_only=True),
         Watch("main:gains", confirm=True),
         Watch("main:gains[0]", Display(unit="%"), min=-10, max=100),
         Watch("main:tick_count", confirm=True),
-    ])
+    ))
     with pytest.raises(WriteRefused, match="main:motor.target is read-only in the workspace .it is part of main:motor"):
         ws.write(target, "main:motor.target", "1")
     with pytest.raises(WriteRefused, match="101 is above its maximum 100"):
@@ -275,14 +334,27 @@ def test_cli_builds_a_workspace_without_a_device(tmp_path, capsys):
     out = io.StringIO()
     assert main(["-w", str(path), *off, "list"], out=out) == 0
     assert "main:tick_count    poll=manual format=hex" in out.getvalue()
+    assert "tab 'Watch': 2 items" in out.getvalue()
+
+    for argv in (["add", "main:motor.speed", "--tab", "Motor", "--unit", "rpm"],   # makes the tab
+                 ["add", "main:tick_count", "--tab", "motor"],   # shared with tab Watch
+                 ["add", "main:tick_count", "--format", "dec"],   # changed where it is, in both tabs
+                 ["tab", "add", "Spare"], ["tab", "rename", "spare", "Later"], ["tab", "remove", "Later"],
+                 ["remove", "main:tick_count", "--tab", "Watch"]):
+        assert main(["-w", str(path), *off, *argv], out=out) == 0, argv
+    assert main(["-w", str(path), *off, "tab", "remove", "nope"]) == 1
+    assert "no tab 'nope'" in capsys.readouterr().err
+    ws = Workspace.load(path)
+    assert [(t.name, [w.expr for w in t.watches]) for t in ws.tabs] == [
+        ("Watch", ["main:motor.target"]), ("Motor", ["main:motor.speed", "main:tick_count"])]
+    assert ws.watch("main:tick_count").display.format == "dec"
 
 
 def test_cli_reads_and_writes_the_watch_list(sim, tmp_path, capsys):
     path = tmp_path / "bench.rdtw"
     ws = Workspace.load(EXAMPLE_TARGET)
-    ws.watches = [Watch("main:motor.target", Display(k=0.5, unit="rpm"), max=2000, confirm=True),
-                  Watch("main:tick_count", Display(format="hex"))]
-    ws.buttons = [Button("Silence", "SIM:MCU:SIL {param},ON", "MCU id"), Button("Who", "*IDN?")]
+    ws.tabs = [Tab("Motor", [Watch("main:motor.target", Display(k=0.5, unit="rpm"), max=2000, confirm=True)]),
+               Tab("System", [Watch("main:tick_count", Display(format="hex"))])]
     ws.save(path)
     code, out = rdt(sim, path, "read")
     assert (code, out.splitlines()) == (0, ["main:motor.target = 1500 rpm", "main:tick_count = 0x12345678"])
@@ -296,6 +368,7 @@ def test_cli_reads_and_writes_the_watch_list(sim, tmp_path, capsys):
     lines = out.splitlines()
     assert lines[0].split() == ["time", "main:motor.target", "main:tick_count"]
     assert lines[1].split()[1:] == ["1000", "rpm", "0x12345678"]
-    assert rdt(sim, path, "press", "who")[1].startswith("RDT,Simulator")
-    assert rdt(sim, path, "press", "silence", "1")[0] == 0
+    code, out = rdt(sim, path, "read", "--tab", "system")
+    assert (code, out) == (0, "main:tick_count = 0x12345678\n")
+    assert rdt(sim, path, "send", "SIM:MCU:SIL 1,ON")[0] == 0
     assert "MCU motorctl is not responding" in rdt(sim, path, "read", "motorctl:pwm_duty")[1]
