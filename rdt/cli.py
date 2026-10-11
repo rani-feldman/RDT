@@ -27,9 +27,11 @@ from pathlib import Path
 from . import __version__, codec
 from .errors import CommandTimeout, ConfigError, LinkDown, RdtError, SymbolError
 from .profile import Profile, parse_int
-from .symbols import Location, values
+from .symbols import Location
 from .symbols.types import ArrayType, EnumType, StructType, Type, is_char_array
+from .scaling import FORMATS
 from .target import ConnectionConfig, McuConfig, Target, TargetConfig
+from .workspace import Shown, Watch, Workspace
 
 
 def _int(text: str) -> int:
@@ -58,7 +60,8 @@ def build_parser() -> argparse.ArgumentParser:
     )
     ap.add_argument("--version", action="version", version=f"rdt {__version__}")
     g = ap.add_argument_group("target")
-    g.add_argument("-t", "--target", type=Path, help="target file (TOML): connection, profile and MCUs")
+    g.add_argument("-w", "--workspace", "-t", "--target", dest="target", type=Path, metavar="FILE",
+                   help="workspace (.rdtw) or target file: connection, profile, MCUs and the watch list")
     link = g.add_mutually_exclusive_group()
     link.add_argument("--tcp", metavar="HOST:PORT", help="connect over LAN TCP")
     link.add_argument("--udp", metavar="HOST:PORT", help="connect over LAN UDP")
@@ -83,13 +86,14 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("expr", metavar="EXPR", help="a variable such as main:motor, or a type such as main:motor_t")
 
     p = sub.add_parser("read", help="read values; structs and arrays open to every field and cell")
-    p.add_argument("exprs", nargs="+", metavar="EXPR")
+    p.add_argument("exprs", nargs="*", metavar="EXPR", help="default: the workspace's watch list")
     p.add_argument("--max-cells", type=int, default=100, metavar="N", help="cells shown per array (default 100)")
 
     p = sub.add_parser("write", help="write one value and confirm it by reading it back")
     p.add_argument("expr", metavar="EXPR")
     p.add_argument("value", help="42, -7, 0x1F, 1.5, true, an enum name ... (a hex integer for a float is its "
-                                 "bit pattern)")
+                                 "bit pattern). For a scaled watch item, in its shown units")
+    p.add_argument("-y", "--yes", action="store_true", help="don't ask, for items the workspace confirms first")
 
     p = sub.add_parser("dump", help="hex and ASCII dump of a variable or a memory range")
     p.add_argument("what", nargs="+", metavar="EXPR [LEN] | MCU ADDR LEN")
@@ -108,18 +112,47 @@ def build_parser() -> argparse.ArgumentParser:
     sub.add_parser("errors", help="read the SCPI error queue until it is empty")
 
     p = sub.add_parser("watch", help="poll values and print one line per sample (Ctrl+C stops)")
-    p.add_argument("exprs", nargs="+", metavar="EXPR")
-    p.add_argument("-i", "--interval", type=float, default=500, metavar="MS", help="poll interval (default 500)")
+    p.add_argument("exprs", nargs="*", metavar="EXPR", help="default: the workspace's watch list")
+    p.add_argument("-i", "--interval", type=float, metavar="MS",
+                   help="poll interval (default: the workspace's poll_ms, else 500)")
     p.add_argument("-n", "--count", type=int, default=0, help="stop after this many samples (default: run until Ctrl+C)")
 
     sub.add_parser("console", help="interactive SCPI console")
+
+    p = sub.add_parser("press", help="send a workspace button's SCPI command")
+    p.add_argument("button")
+    p.add_argument("param", nargs="?", help="the value for a button whose command has {param}")
+
+    p = sub.add_parser("init", help="save the target as a new workspace file (no device needed)")
+    p.add_argument("file", type=Path)
+    p.add_argument("--force", action="store_true", help="overwrite the file if it exists")
+
+    sub.add_parser("list", help="show the workspace's watch list and buttons (no device needed)")
+
+    p = sub.add_parser("add", help="add an item to the workspace's watch list, or change one (no device needed)")
+    p.add_argument("expr", metavar="EXPR")
+    p.add_argument("--format", choices=FORMATS, help="integers as dec, hex, bin or char")
+    p.add_argument("--q", metavar="QFMT", help="fixed point, such as Q15, Q31 or Q3.12")
+    p.add_argument("--scale", type=float, metavar="K", help="shown = raw * K + OFFSET")
+    p.add_argument("--offset", type=float)
+    p.add_argument("--unit")
+    p.add_argument("--poll", metavar="MS|global|manual", help="polling for this item")
+    p.add_argument("--read-only", action=argparse.BooleanOptionalAction, default=None)
+    p.add_argument("--min", type=float, help="lowest value a write may set, in shown units")
+    p.add_argument("--max", type=float, help="highest value a write may set, in shown units")
+    p.add_argument("--confirm", action=argparse.BooleanOptionalAction, default=None, help="ask before writing")
+
+    p = sub.add_parser("remove", help="remove an item from the workspace's watch list (no device needed)")
+    p.add_argument("expr", metavar="EXPR")
     return ap
 
 
-def load_config(args: argparse.Namespace) -> TargetConfig:
-    cfg = TargetConfig.load(args.target) if args.target else TargetConfig()
+def load_workspace(args: argparse.Namespace) -> Workspace:
+    ws = Workspace.load(args.target) if args.target else Workspace()
+    cfg = ws.config
     if args.profile:
         cfg.profile = Profile.load(args.profile)
+        cfg.profile_path = args.profile.resolve()
     if args.tcp:
         cfg.connection = ConnectionConfig("tcp", args.tcp)
     elif args.udp:
@@ -133,10 +166,14 @@ def load_config(args: argparse.Namespace) -> TargetConfig:
         for m in cfg.mcus:
             m.timeout_ms = None
     if args.mcu:
-        cfg.mcus = args.mcu
+        cfg.mcus = [McuConfig(m.id, m.name, m.elf.resolve() if m.elf else None) for m in args.mcu]
     if not cfg.mcus:
-        raise ConfigError("no MCUs: give a target file (-t) or --mcu NAME=ID[:ELF], such as --mcu main=0:main.elf")
-    return cfg
+        raise ConfigError("no MCUs: give a workspace (-w) or --mcu NAME=ID[:ELF], such as --mcu main=0:main.elf")
+    return ws
+
+
+def load_config(args: argparse.Namespace) -> TargetConfig:
+    return load_workspace(args).config
 
 
 # --- commands --------------------------------------------------------------------------------
@@ -172,26 +209,58 @@ def print_rows(t: Target, loc: Location, data: bytes, out, max_cells: int = 100)
             print(f"{r.path:<{width}} = {r.text:<{vwidth}}  {r.type_name}", file=out)
 
 
+def print_shown(loc: Location, shown: list[Shown], out) -> None:
+    if len(shown) == 1 and shown[0].path == loc.path:
+        print(f"{loc.path} = {shown[0].text}", file=out)
+        return
+    print(f"{loc.path}  {loc.type_name}, {loc.size} bytes at 0x{loc.addr:08X}", file=out)
+    width = max((len(s.path) for s in shown), default=0)
+    for s in shown:
+        print(f"{s.path:<{width}} = {s.text}", file=out)
+
+
+def _exprs(args) -> list[str]:
+    if args.exprs:
+        return args.exprs
+    if not args.ws.watches:
+        raise ConfigError("name what to read, or give a workspace (-w) with a watch list")
+    return [w.expr for w in args.ws.watches]
+
+
 def cmd_read(t: Target, args, out) -> int:
     failed = 0
-    for text in args.exprs:
+    for text in _exprs(args):
         try:
-            loc = t.resolve(text)
-            data = t.read_location(loc)
+            w = args.ws.watch(text)
+            if w is not None:
+                loc, shown = args.ws.read(t, w, args.max_cells)
+            else:
+                loc = t.resolve(text)
+                data = t.read_location(loc)
         except RdtError as e:
             print(f"{text} : {e}", file=out)
             failed += 1
         else:
-            print_rows(t, loc, data, out, args.max_cells)
+            if w is not None:
+                print_shown(loc, shown, out)
+            else:
+                print_rows(t, loc, data, out, args.max_cells)
     return 1 if failed else 0
 
 
+def _ask(question: str) -> bool:
+    if not sys.stdin.isatty():
+        return False
+    try:
+        return input(f"{question} [y/N] ").strip().lower() in ("y", "yes")
+    except EOFError:
+        return False
+
+
 def cmd_write(t: Target, args, out) -> int:
-    loc = t.resolve(args.expr)
-    value = t.parse_value(loc, args.value)
-    t.write_value(loc, value)
-    row = t.rows(loc, t.read_location(loc))[0]
-    print(f"{loc.path} = {row.text} (confirmed by read-back)", file=out)
+    loc, _ = args.ws.write(t, args.expr, args.value, confirm=(lambda q: True) if args.yes else _ask)
+    _, shown = args.ws.read(t, args.ws.watch(loc.path) or loc.path)
+    print(f"{loc.path} = {shown[0].text} (confirmed by read-back)", file=out)
     return 0
 
 
@@ -334,31 +403,40 @@ def cmd_errors(t: Target, args, out) -> int:
     return 0
 
 
-def _watch_cells(t: Target, loc: Location) -> dict[str, str]:
+def _watch_cells(t: Target, ws: Workspace, w: Watch) -> dict[str, str]:
     """The leaf values of one watched item, by path. A struct or array is read in one block."""
-    loc = t.resolve(loc)
-    return {r.path: r.text if isinstance(r.value, bytes) else
-            values.format_scalar(r.type, r.value, r.bit_size, hex_too=False)
-            for r in t.rows(loc, t.read_location(loc), max_cells=1 << 30) if r.value is not None}
+    _, shown = ws.read(t, w, max_cells=1 << 30, compact=True)
+    return {s.path: s.text for s in shown if s.raw is not None}
 
 
 def cmd_watch(t: Target, args, out) -> int:
-    locs: list[Location | None] = [t.resolve(e) for e in args.exprs]
+    ws: Workspace = args.ws
+    items = [ws.watch(e) or Watch(e) for e in _exprs(args)]
+    interval = args.interval if args.interval is not None else (ws.poll_ms or None)
+    if interval is None:
+        raise ConfigError("the workspace's polling is off (poll_ms = 0); give -i MS")
+    locs: list[Location | None] = [t.resolve(w.expr) for w in items]
     columns: list[tuple[int, str]] = []
-    for i, loc in enumerate(locs):
-        leaves = list(_watch_cells(t, loc))
-        if not leaves:
-            raise ConfigError(f"{loc.path} has nothing to show")
-        columns += [(i, p) for p in leaves]
+    last: list[dict[str, str] | str] = []
+    for i, w in enumerate(items):
+        cells = _watch_cells(t, ws, w)
+        if not cells:
+            raise ConfigError(f"{w.expr} has nothing to show")
+        columns += [(i, p) for p in cells]
+        last.append(cells)
+    # Each item's own interval (-i replaces the global one); the line is printed at the fastest.
+    periods = [w.interval_ms(max(1, int(interval))) for w in items]
+    tick = max(min((p for p in periods if p), default=interval), 1) / 1000.0
+    due = [time.monotonic()] * len(items)
     print("time          " + "  ".join(p for _, p in columns), file=out)
-    period = max(args.interval, 1) / 1000.0
     n = 0
     next_at = time.monotonic()
     next_elf_check = next_at + 1.0
     try:
         while not args.count or n < args.count:
-            if time.monotonic() >= next_elf_check:
-                next_elf_check = time.monotonic() + 1.0
+            now = time.monotonic()
+            if now >= next_elf_check:
+                next_elf_check = now + 1.0
                 for name in t.refresh_elfs():
                     for i, loc in enumerate(locs):
                         if loc is not None and loc.mcu == name:
@@ -366,21 +444,23 @@ def cmd_watch(t: Target, args, out) -> int:
                             if note:
                                 print(f"# {note}", file=out, flush=True)
             stamp = datetime.now().strftime("%H:%M:%S.%f")[:-3]
-            got: list[dict[str, str] | str] = []
-            for loc in locs:
-                if loc is None:
-                    got.append("gone")
+            for i, w in enumerate(items):
+                if locs[i] is None:
+                    last[i] = "gone"
                     continue
+                if n and (periods[i] is None or now + tick / 2 < due[i]):
+                    continue   # manual, or not due yet: keep the last value
+                due[i] = now + (periods[i] or 0) / 1000.0
                 try:
-                    got.append(_watch_cells(t, loc))
+                    last[i] = _watch_cells(t, ws, w)
                 except LinkDown:
-                    got.append("link-down")
+                    last[i] = "link-down"
                 except RdtError as e:
-                    got.append(type(e).__name__)
-            cells = [g if isinstance(g, str) else g.get(p, "gone") for g, p in ((got[i], p) for i, p in columns)]
+                    last[i] = type(e).__name__
+            cells = [g if isinstance(g, str) else g.get(p, "gone") for g, p in ((last[i], p) for i, p in columns)]
             print(f"{stamp}  " + "  ".join(f"{c:>{len(p)}}" for c, (_, p) in zip(cells, columns)), file=out, flush=True)
             n += 1
-            next_at += period
+            next_at += tick
             delay = next_at - time.monotonic()
             if delay > 0:
                 time.sleep(delay)
@@ -388,6 +468,72 @@ def cmd_watch(t: Target, args, out) -> int:
                 next_at = time.monotonic()  # fall behind instead of queueing
     except KeyboardInterrupt:
         pass
+    return 0
+
+
+def cmd_press(t: Target, args, out) -> int:
+    b = args.ws.button(args.button)
+    return _send(t, b.fill(args.param), None, out)
+
+
+def _need_file(ws: Workspace) -> Workspace:
+    if ws.path is None:
+        raise ConfigError("give the workspace file with -w FILE (rdt init FILE makes one)")
+    return ws
+
+
+def cmd_init(t: Target, args, out) -> int:
+    if args.file.exists() and not args.force:
+        raise ConfigError(f"{args.file} exists; add --force to overwrite it")
+    path = args.ws.save(args.file)
+    print(f"saved workspace {path} ({len(args.ws.config.mcus)} MCUs, {len(args.ws.watches)} watched items)", file=out)
+    return 0
+
+
+def cmd_list(t: Target, args, out) -> int:
+    ws = _need_file(args.ws)
+    poll = f"every {ws.poll_ms} ms" if ws.poll_ms else "off"
+    print(f"{ws.path}: {len(ws.watches)} watched items, polling {poll}", file=out)
+    width = max((len(w.expr) for w in ws.watches), default=0)
+    for w in ws.watches:
+        notes = [f"{k}={v}" for k, v in w.to_dict().items() if k != "expr"]
+        print(f"  {w.expr:<{width}}  {' '.join(notes)}".rstrip(), file=out)
+    for b in ws.buttons:
+        print(f"  button {b.name!r}: {b.command}" + (f"  ({{param}}: {b.param})" if b.param else ""), file=out)
+    return 0
+
+
+def cmd_add(t: Target, args, out) -> int:
+    ws = _need_file(args.ws)
+    try:
+        t.describe(args.expr)
+    except SymbolError as e:
+        if "needs the device" not in str(e):
+            raise
+    old = ws.watch(args.expr)
+    d = old.to_dict() if old else {"expr": args.expr}
+    for key, value in (("format", args.format), ("q", args.q), ("scale", args.scale), ("offset", args.offset),
+                       ("unit", args.unit), ("read_only", args.read_only), ("min", args.min), ("max", args.max),
+                       ("confirm", args.confirm)):
+        if value is not None:
+            d[key] = value
+    if args.poll is not None:
+        d["poll"] = args.poll if args.poll in ("global", "manual") else _int(args.poll)
+    w = Watch.from_dict(d)
+    if old:
+        ws.watches[ws.watches.index(old)] = w
+    else:
+        ws.add(w)
+    ws.save()
+    print(f"{'changed' if old else 'added'} {w.expr} in {ws.path}", file=out)
+    return 0
+
+
+def cmd_remove(t: Target, args, out) -> int:
+    ws = _need_file(args.ws)
+    w = ws.remove(args.expr)
+    ws.save()
+    print(f"removed {w.expr} from {ws.path}", file=out)
     return 0
 
 
@@ -431,7 +577,7 @@ def cmd_console(t: Target, args, out) -> int:
                 parts = line.split(None, 2)
                 if len(parts) != 3:
                     raise ConfigError(".write takes EXPR VALUE")
-                args.expr, args.value = parts[1], parts[2]
+                args.expr, args.value, args.yes = parts[1], parts[2], False
                 cmd_write(t, args, out)
             else:
                 _send(t, line, None, out)
@@ -441,12 +587,13 @@ def cmd_console(t: Target, args, out) -> int:
 
 
 COMMANDS = {
+    "press": cmd_press, "init": cmd_init, "list": cmd_list, "add": cmd_add, "remove": cmd_remove,
     "info": cmd_info, "symbols": cmd_symbols, "ptype": cmd_ptype, "read": cmd_read, "write": cmd_write, "dump": cmd_dump, "poke": cmd_poke,
     "send": cmd_send, "errors": cmd_errors, "watch": cmd_watch, "console": cmd_console,
 }
 
 
-OFFLINE = ("symbols", "ptype")   # read only the ELF, never the device
+OFFLINE = ("symbols", "ptype", "init", "list", "add", "remove")   # never open the link
 
 
 def main(argv: list[str] | None = None, out=None) -> int:
@@ -455,7 +602,8 @@ def main(argv: list[str] | None = None, out=None) -> int:
     level = [logging.WARNING, logging.INFO, logging.DEBUG][min(args.verbose, 2)]
     logging.basicConfig(level=level, format="%(asctime)s %(name)s %(message)s", stream=sys.stderr)
     try:
-        cfg = load_config(args)
+        args.ws = load_workspace(args)
+        cfg = args.ws.config
         # One-shot commands fail at once on a broken link; watch and console keep reconnecting.
         target = Target(cfg, auto_reconnect=args.cmd in ("watch", "console"))
         if args.cmd in OFFLINE:
