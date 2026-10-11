@@ -4,6 +4,7 @@
 #   corpus-clang-be.elf clang, ARMv7 big endian, DWARF 5
 #   corpus-gcc.elf      host gcc, x86-64 (64-bit pointers), GCC's DWARF 5
 #   corpus-clang-v2.elf as corpus-clang.elf, "rebuilt" with CORPUS_V2 for the reload tests
+#   corpus-nodebug.elf  corpus-clang.elf without its debug info
 set -e
 cd "$(dirname "$0")"
 SRC="symbols.c other.c"
@@ -17,3 +18,4 @@ clang --target=armebv7r-none-eabi -ffreestanding -nostdlib -g -gdwarf-5 -O1 -fus
     -Wl,--entry=main -Wl,-z,max-page-size=16 -o corpus-clang-be.elf $SRC
 gcc -ffreestanding -nostdlib -static -fno-pie -no-pie -g -O1 -fno-asynchronous-unwind-tables \
     -Wl,-T,link.ld -Wl,--entry=main -Wl,--build-id=none -o corpus-gcc.elf $SRC
+llvm-strip -g -o corpus-nodebug.elf corpus-clang.elf   # no debug info, for the error test
