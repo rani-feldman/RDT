@@ -1,5 +1,6 @@
 """The host core end to end against the simulated device, over every transport."""
 
+import itertools
 import socket
 import sys
 import threading
@@ -100,7 +101,11 @@ def test_write_that_does_not_land_is_reported(sim):
 
 
 def test_write_to_a_value_the_firmware_changes_is_not_confirmed(two_mcus):
-    two_mcus[0].signals.append(Signal(addr=0x20000010, type="u32", kind="counter", period_ms=0.01))
+    # The clock moves on at every read, so the value never stays put; a wall clock could stand
+    # still between the write and its read-back (Windows' monotonic clock ticks every ~16 ms).
+    ticks = itertools.count()
+    two_mcus[0].clock = lambda: float(next(ticks))
+    two_mcus[0].signals.append(Signal(addr=0x20000010, type="u32", kind="counter", period_ms=1000, offset=100))
     with Simulator(Device(two_mcus), TransportConfig(tcp="127.0.0.1:0", udp=None)) as s:
         with make_target("tcp", s.tcp_address) as t:
             with pytest.raises(WriteNotConfirmed) as e:
