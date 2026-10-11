@@ -21,7 +21,7 @@ The full, living design document is [RDT Design Document](https://claude.ai/code
 | SCPI commands | Not hard-coded. The user defines them in an SCPI profile. |
 | Read | One command: `read startAddress,size`. |
 | Write | One value per command: `write address,value,size`. Buffer writes may come later. |
-| Host | Python with a Qt GUI (PySide6). The GUI is the primary interface, and the CLI and Python API sit on the same core. |
+| Host | Python with a Qt GUI (PySide6), and pyqtgraph for the live chart. The GUI is the primary interface, and the CLI and Python API sit on the same core. |
 | Authentication | None. RDT is a tool for trusted benches and networks. |
 | PC operating system | Windows only. The code stays portable, so Linux can be added later. |
 | Firmware language | C only. The symbol reader does not handle C++. |
@@ -211,7 +211,15 @@ name    = "Set speed"
 command = "MOTOR:SPEED {param}"
 param   = "rpm"                  # label for the {param} prompt
 
-[chart]                          # kept as written, for the GUI
+[chart]
+window_s = 30                    # visible history, 1 s to 600 s
+
+[[chart.series]]
+expr   = "main:motor.speed"
+axis   = 1                       # 1-4: 1 on the left, the rest on the right
+color  = "#1f77b4"
+unit   = "rpm"                   # optional, overrides the watch item's unit
+hidden = false                   # optional
 ```
 
 - The `[connection]`, `[profile]` and `[[mcu]]` tables are the same as in the target file.
@@ -241,6 +249,17 @@ param   = "rpm"                  # label for the {param} prompt
 - **ELF check:** every 1 s while connected, with re-mapping by name. Items that moved or changed type turn orange with a note; items that no longer exist turn grey and show "gone".
 - **Profile editor:** edits every SCPI field with a live preview of the commands and a test read using the edited profile before applying. Applying stores the profile inside the workspace and reconnects. MCUs and their ELFs have their own dialog.
 - **Link state:** the console, memory view and buttons are disabled unless the link is up, and the connection fields can be edited only while disconnected.
+
+### Watch, chart, statistics and CSV (M4)
+
+- **Poll scheduler:** items on one MCU that are at most 32 bytes apart merge into one read of up to `max_response` bytes. Peripheral ranges are never merged. A merged read that fails is re-read item by item. Only one poll runs at a time, so a slow link falls behind instead of queueing. Each sample carries the PC time its reply arrived.
+- **Chart:** `window_s` sets the visible history (1 s to 600 s). Each `[[chart.series]]` names an `expr`, an `axis` (1 to 4: axis 1 on the left, the rest on the right), a `color`, and optionally a `unit` and `hidden`. Signals with the same unit share an axis by default. A charted field of a collapsed struct is still read.
+- **Statistics:** Min, Max, Mean and Samples columns in the watch tree, hidden by default and shown with View > Statistics columns (Ctrl+T). Changing an item's scaling resets its statistics.
+- **CSV log:** `rdt watch --csv FILE` on the CLI, or from the GUI.
+  - Columns: `time` (ISO 8601 with UTC offset), seconds since start, one column per value named with ` [unit]`, and `event` (link down, link up, ELF rebuilt for an MCU).
+  - One row per poll. A cell is empty when that value was not read in that poll.
+  - Values are shown values in decimal, enums as numbers and bools as 0 or 1.
+  - UTF-8 with a BOM, so Excel opens it correctly.
 
 ### Variable view
 
@@ -288,7 +307,7 @@ rdt/
   symbols/     elf.py, types.py, expr.py            ELF/DWARF, expressions
   codec.py                                          bytes <-> typed values, scaling
   target.py                                         public API
-  gui/                                              PySide6 desktop app
+  gui/                                              PySide6 desktop app, pyqtgraph chart
   cli.py                                            command line
 sim/                                                simulated device
 tests/
