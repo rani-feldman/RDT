@@ -149,9 +149,13 @@ class Shown:
     """One value as the workspace shows it: a leaf of a watched item."""
 
     path: str
-    text: str
+    text: str | None  # None for a struct or array header row (only with ``headers=True``)
     value: object     # the shown value: scaled number, raw int, bool, EnumValue, bytes ...
     raw: object       # the value as read, before scaling
+    depth: int = 0    # 0 for the watched item itself, 1 for its fields and cells, and so on
+    type_name: str = ""
+    addr: int = 0
+    scalar: bool = True   # a value that can be written
 
 
 @dataclass
@@ -293,23 +297,28 @@ class Workspace:
 
     # --- values ------------------------------------------------------------------------------
 
-    def read(self, t: Target, item: Watch | str, max_cells: int = 100,
-             compact: bool = False) -> tuple[Location, list[Shown]]:
+    def read(self, t: Target, item: Watch | str, max_cells: int = 100, compact: bool = False,
+             headers: bool = False) -> tuple[Location, list[Shown]]:
         """Read a watched item (or any expression) and show it with its format and scaling.
-        ``compact`` drops the extras for narrow columns: no hex beside decimals, enum names alone."""
+        ``compact`` drops the extras for narrow columns: no hex beside decimals, enum names alone.
+        ``headers`` also returns a row for each struct and array, as a tree shows them."""
         w = item if isinstance(item, Watch) else (self.watch(item) or Watch(item))
         loc, rows = t.read_rows(w.expr, max_cells)
         if w.display.scaled and not is_scalar(loc.type) and loc.bit_size is None:
             raise ConfigError(f"{w.expr}: scaling needs a single value, not a {loc.type.name}")
         out = []
         for r in rows:
+            extra = dict(depth=r.depth, type_name=r.type_name, addr=r.addr,
+                         scalar=r.value is not None and not isinstance(r.value, bytes))
             if r.text is None:
+                if headers:
+                    out.append(Shown(r.path, None, None, None, **{**extra, "scalar": False}))
                 continue
             if r.value is None or isinstance(r.value, (bytes, EnumValue, bool)) or not _is_number(r.type):
                 text = r.text
                 if compact and r.value is not None and not isinstance(r.value, bytes):
                     text = format_scalar(r.type, r.value, r.bit_size, hex_too=False)
-                out.append(Shown(r.path, _with_unit(text, w.display), r.value, r.value))
+                out.append(Shown(r.path, _with_unit(text, w.display), r.value, r.value, **extra))
                 continue
             shown = w.display.to_shown(r.value)
             bits = r.bit_size if r.bit_size is not None else 8 * r.type.size
@@ -320,7 +329,7 @@ class Workspace:
                     text = _with_unit(r.text, w.display)
             else:
                 text = w.display.text(shown, bits)
-            out.append(Shown(r.path, text, shown, r.value))
+            out.append(Shown(r.path, text, shown, r.value, **extra))
         return loc, out
 
     def write(self, t: Target, expr: str, text: str,

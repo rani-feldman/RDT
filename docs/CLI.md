@@ -8,7 +8,7 @@ The host core (`rdt/`) is the part of RDT below the GUI: transports, the SCPI pr
 python -m pip install -e .[dev]
 ```
 
-This installs two commands: `rdt` (the host) and `rdt-sim` (the simulated device, the same as `python -m sim`). `python -m rdt` also works.
+This installs three commands: `rdt` (the host), `rdt-gui` (the window, see [GUI.md](GUI.md)) and `rdt-sim` (the simulated device, the same as `python -m sim`). `python -m rdt` and `python -m rdt.gui` also work.
 
 ## Try it against the simulator
 
@@ -268,6 +268,8 @@ rdt/
   target.py                                         Target API and target file
   workspace.py, scaling.py, tomlw.py                workspace files, display formats and scaling, write safety
   cli.py                                            command line
+  gui/         app.py, device.py, variables.py, panels.py   the GUI (PySide6): main window, device worker thread,
+                                                    watch tree and symbol browser, memory view, console, buttons, dialogs
 ```
 
 ## Tests
@@ -275,6 +277,8 @@ rdt/
 `python -m pytest` runs the host tests against the simulator over TCP, UDP (with dropped datagrams) and a serial pseudo-terminal on Linux. They cover every reply format, user-defined commands, split reads and writes, write confirmation, a silent MCU, a cut link and reconnect, and a second SCPI client sharing the device and its error queue.
 
 The symbol tests use a corpus in [`tests/elf`](../tests/elf): one C program with structs, unions, anonymous members, bit fields, enums, 2-D arrays, pointer chains, function pointers and clashing file-statics, built by clang for little-endian Cortex-M4 (DWARF 4), by clang for big-endian ARM (DWARF 5), and by GCC for x86-64 (64-bit pointers). A second "rebuilt" image tests reloading. `build.sh` rebuilds them; the ELFs are committed.
+
+`tests/test_gui.py` drives the GUI against the simulator with pytest-qt, offscreen (`QT_QPA_PLATFORM=offscreen`; on Linux it needs `libegl1`, `libxkbcommon0` and `libfontconfig1`).
 
 ### On Windows over a COM port
 
