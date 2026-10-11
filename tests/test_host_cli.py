@@ -100,6 +100,17 @@ def test_watch(sim):
     assert lines[1].split()[1] == "305419896"
 
 
+def test_watch_logs_csv(sim, tmp_path):
+    log = tmp_path / "w.csv"
+    code, out = rdt(sim, "watch", "main:motor", "@main:0x20000010:u32", "-i", "20", "-n", "3", "--csv", str(log))
+    assert code == 0 and out.splitlines()[-1] == f"# 3 rows logged to {log}"
+    rows = log.read_text(encoding="utf-8-sig").splitlines()
+    assert rows[0] == ("time,seconds,main:motor.speed,main:motor.target,main:motor.current_ma,main:motor.enabled,"
+                       "main:motor.mode,@main:0x20000010:u32,event")
+    assert rows[1].split(",")[1:] == ["0.000", "1.5", "3000", "-120", "1", "1", "305419896", ""]
+    assert len(rows) == 4
+
+
 def test_console(sim, monkeypatch):
     monkeypatch.setattr("sys.stdin", io.StringIO("*IDN?\nNOPE?\n.err\n.read @main:0x20000000:f32\n.quit\n"))
     code, out = rdt(sim, "console")

@@ -94,7 +94,7 @@ A bit field is written by reading the word that holds it, changing the field and
 | `poke MCU ADDR HEX` | Write raw bytes, lowest address first, and confirm them |
 | `send COMMAND` | Send one SCPI command. A query (header ending in `?`) waits for its reply; `--reply` and `--no-reply` override that |
 | `errors` | Read the SCPI error queue until it is empty |
-| `watch [EXPR...] [-i MS] [-n N]` | Poll values and print one line per sample. A struct or array becomes one column per field and cell. With no names, the workspace's watch list, each item at its own interval |
+| `watch [EXPR...] [-i MS] [-n N] [--csv FILE]` | Poll values and print one line per sample. A struct or array becomes one column per field and cell. With no names, the workspace's watch list, each item at its own interval. `--csv` also logs every value read to a CSV file (see [CSV log](#csv-log)) |
 | `console` | Interactive SCPI console. `.read EXPR` reads, `.write EXPR VALUE` writes, `.err` reads the error queue, `.quit` leaves |
 | `press BUTTON [VALUE]` | Send a workspace button's command |
 | `init FILE` | Save the current target (file and command-line options) as a new workspace. Needs no device |
@@ -105,6 +105,8 @@ A bit field is written by reading the word that holds it, changing the field and
 `-v` logs link events and `-vv` logs every command and reply, which is the first thing to turn on when trying a new firmware. The exit code is 0 on success and 1 if anything failed.
 
 `watch` and `console` keep running when the link drops, show `link-down`, and reconnect on their own. The other commands are one-shot and fail at once.
+
+`watch` reads everything that is due in one poll, through the poll scheduler: items close to each other on the same MCU (at most 32 bytes apart) are merged into one read of up to `max_response` bytes, so they come from the same moment and cost one command. Items in a listed range (a peripheral) are always read on their own, at their exact size. If a merged read fails, its items are read again one by one, so one bad item fails alone. When the link is slower than the interval, `watch` falls behind rather than queueing reads.
 
 `watch` also notices when an MCU's ELF is rebuilt. It loads the new ELF and finds each watched item again by name, and prints a `#` line for each item that moved, changed type or no longer exists (its column then shows `gone`). An ELF the linker is still writing is left until it has been still for half a second, and one that can't be read keeps the old symbols.
 
@@ -195,6 +197,23 @@ Every key in a `[[watch]]` but `expr` is optional.
 - **Write safety.** A `read_only` item refuses writes, `min` and `max` are checked in shown units, and `confirm` asks before writing. Without a terminal to ask, or `-y`, the write is refused. A read-only or confirm-first struct or array covers its fields and cells too.
 - **Polling.** `poll_ms` is the global interval, and each item can have its own interval or be `manual`. In `watch`, `-i` replaces the global interval, and a manual item is read once at the start.
 
+### CSV log
+
+`watch --csv FILE` (and **Log CSV** in the GUI) writes one row per poll:
+
+```
+time,seconds,main:motor.speed [rpm],main:motor.mode,main:tick_count,event
+2026-10-11T14:03:22.120+03:00,0.000,1500.5,1,6911,
+2026-10-11T14:03:22.220+03:00,0.100,1502.25,,,
+2026-10-11T14:03:23.950+03:00,1.830,,,,link down
+```
+
+- `time` is the PC's clock in ISO 8601 with its UTC offset, and `seconds` counts from the first row.
+- One column per value, struct fields and array cells included, with the unit in the header. Values are the shown ones: scaled, a bool as 0 or 1, an enum as its number. A `char` array is written as its string. Numbers are always decimal, whatever the item's display format.
+- A cell is empty when that value was not read in that poll: it has a slower interval, it is manual, or the read failed.
+- The `event` column marks `link down`, `link up` and `ELF rebuilt for MCU`.
+- The file is UTF-8 with a byte order mark, so Excel shows units such as `°C` correctly.
+
 ## SCPI profile
 
 The profile is the same `[scpi]` table the simulator reads ([`default_profile.toml`](../sim/examples/default_profile.toml)); see [SCPI profile](DESIGN.md#scpi-profile) in the design. The host also reads these keys, which the simulator ignores:
@@ -237,6 +256,8 @@ with Target.from_file("examples/sim_target.toml") as t:
     print(t.command("*IDN?"))                             # any SCPI command
 ```
 
+`rdt.scheduler.read_many(t, exprs)` reads many items in as few reads as possible and returns one `Sample` (bytes, PC time, or the error) per item. `rdt.stats.StatsBook` keeps min, max, mean and count per value, and `rdt.csvlog.CsvLog` writes the CSV log.
+
 `read_value` returns a number or bool for a scalar, an `EnumValue` (an `int` with a `.name`) for an enum, `bytes` for a `char` array, a dict for a struct and a list for an array. `read_rows` gives the display rows `rdt read` prints, which the GUI's variable view will use too. `refresh_elfs()` reloads rebuilt ELFs and `remap(loc)` finds a watched item again by name.
 
 A workspace adds its watch list, scaling and write safety on top:
@@ -248,6 +269,8 @@ ws = Workspace.load("examples/sim_bench.rdtw")
 with Target(ws.config) as t:
     for w in ws.watches:
         loc, shown = ws.read(t, w)                         # scaled, in the item's format
+    for r in ws.read_many(t, ws.watches):                  # one poll: nearby items share a read
+        print(r.time, r.watch.expr, r.error or [s.text for s in r.shown])
     ws.write(t, "main:motor.target", "2500", confirm=lambda q: input(q) == "y")
     ws.save()
 ```
@@ -266,10 +289,13 @@ rdt/
   symbols/     elf.py, types.py, expr.py, values.py DWARF symbol table, type model, expressions, typed values
   codec.py                                          raw scalar types
   target.py                                         Target API and target file
+  scheduler.py                                      poll scheduler: block merging, one poll for many items
+  stats.py, csvlog.py                               min/max/mean per value, the CSV log
   workspace.py, scaling.py, tomlw.py                workspace files, display formats and scaling, write safety
   cli.py                                            command line
-  gui/         app.py, device.py, variables.py, panels.py   the GUI (PySide6): main window, device worker thread,
-                                                    watch tree and symbol browser, memory view, console, buttons, dialogs
+  gui/         app.py, device.py, variables.py, panels.py, chart.py   the GUI (PySide6): main window, device worker thread,
+                                                    watch tree and symbol browser, memory view, console, buttons, dialogs,
+                                                    live chart (pyqtgraph)
 ```
 
 ## Tests

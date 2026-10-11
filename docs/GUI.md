@@ -16,6 +16,7 @@ rdt-gui examples/sim_bench.rdtw          # or: python -m rdt.gui examples/sim_be
 - **Profile**: opens the SCPI profile editor (below). The button shows the profile's name and, when it comes from a file of its own, the file.
 - **Connect / Disconnect** (F5). The state next to it is green while the link is up, red while it is down and RDT is reconnecting, and grey when not connected. The console, memory view and buttons are disabled unless the link is up, and the connection fields can only be changed while disconnected.
 - **Poll**: the global polling interval. `Off` (0) stops polling; items set to their own interval still poll.
+- **Log CSV** (Ctrl+L): log every watched value to a CSV file. See [CSV log](#csv-log).
 
 **Target > MCUs and ELF files** sets each MCU's id, name, ELF file and timeout. MCU 0 is the main MCU and is required.
 
@@ -30,7 +31,11 @@ The watch tree in the centre shows each watched item with its value, type, addre
 - Right-click a field or cell and choose **Watch this on its own** to give it its own row, with its own format and polling.
 - Grey values are read-only (in the workspace, or not a single value). A red value is an error; hover over it for the reason. When the link goes down or an MCU stops answering, the item shows `link down` or `MCU silent` in grey and its last values stay.
 
-Polling: each item is read at the global interval, at its own interval, or only by hand. An item that can't keep up falls behind rather than queueing reads; the **Rate** column shows what it actually gets. **Watch > Read all now** (F6) reads everything once, and every item is read once on connect.
+Polling: each item is read at the global interval, at its own interval, or only by hand. Everything that is due is read in one poll, and items close to each other on the same MCU share one read (see [CLI.md](CLI.md#commands)), so they come from the same moment. While a poll is still running no new one starts: an item that can't keep up falls behind rather than queueing reads, and the **Rate** column shows what it actually gets. **Watch > Read all now** (F6) reads everything once, and every item is read once on connect.
+
+### Statistics
+
+**View > Statistics columns** (Ctrl+T) shows **Min**, **Max**, **Mean** and **Samples** for every numeric value in the tree, fields and cells included, in shown units. They count every value read since connecting or the last reset. **Watch > Reset statistics** starts them all again; right-click an item and choose **Reset statistics** for that item alone. Changing an item's scaling resets its statistics.
 
 ### Writing
 
@@ -45,6 +50,39 @@ Right-click a top-level item for **Format** (dec, hex, bin, char) and **Settings
 ### ELF rebuilds
 
 RDT checks the ELF files every second while connected. When one is rebuilt, its MCU's watched items are found again by name: an item that moved or changed type is shown in orange with a note in its tooltip and the status bar, and an item that no longer exists shows `gone` in grey. The variables list reloads too.
+
+## Live chart
+
+![The live chart with two signals on two axes and the cursors on](images/gui-chart.png)
+
+The **Chart** panel plots watched values over time. Right-click a number, bool or enum in the watch tree (a variable, a field or a cell) and choose **Add to chart**, or select several and press Ctrl+G. Values from any MCUs can share the chart; the time is the PC's clock when each reply arrived.
+
+- **Following.** The chart shows the newest data over the **Window** (1 s to 10 min). Each signal keeps the last 10 minutes.
+- **Pause** (or Space) freezes the view while data keeps coming in. Dragging or zooming with the mouse pauses too. **Run** goes back to following.
+- **Zoom and pan.** The mouse wheel zooms, dragging pans, and right-dragging zooms each axis on its own. The wheel over a Y axis zooms only that axis. **Fit Y** scales every Y axis to the data in view again.
+- **Y axes.** There are up to four: axis 1 on the left, the others on the right. Signals with the same unit share an axis by default, and each axis is labelled with its units. Right-click a signal in the list to move it to another axis, change its colour or remove it; untick it to hide it.
+- **Cursors** shows two vertical cursors. Drag them; the list shows each signal's value at C1 and C2 and the difference, and the bar above shows both times, the time between them and its frequency.
+- **Gaps.** When the link goes down or a value can't be read, its line breaks rather than joining across the gap.
+- **Clear** drops the recorded data and keeps the signals.
+
+A charted field of a struct or array is read even while its row is collapsed. The chart's window and signals, with their axes and colours, are saved in the workspace's `[chart]` table:
+
+```toml
+[chart]
+window_s = 10
+
+[[chart.series]]
+expr  = "main:motor.speed"
+axis  = 1
+color = "#1f77b4"
+unit  = "rpm"
+```
+
+## CSV log
+
+**Log CSV** in the toolbar, or **Watch > Log to CSV...** (Ctrl+L), asks for a file (by default `rdt-<date>-<time>.csv` next to the workspace) and writes one row per poll until you press it again. The columns are every value the watch tree shows at that moment, struct fields and array cells included; while logging, collapsed structs and arrays are read too. Items added later are not logged until the log is started again. Starting the log reads everything once, so the first full row has every column. The status bar shows the file and the number of rows.
+
+The format is the same as `rdt watch --csv`; see [CSV log](CLI.md#csv-log). A lost link and its return are marked in the `event` column, and so is an ELF rebuild.
 
 ## Memory view
 

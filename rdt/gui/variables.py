@@ -15,11 +15,14 @@ from PySide6.QtWidgets import (
 
 from ..errors import ConfigError, LinkDown, McuSilent, RdtError
 from ..scaling import FORMATS, Display
+from ..stats import StatsBook, numeric
 from ..symbols import Location, load_symbols
-from ..workspace import Shown, Watch, Workspace
+from ..workspace import Reading, Shown, Watch, Workspace
 from .device import describe_error
 
-COL_NAME, COL_VALUE, COL_TYPE, COL_ADDR, COL_RATE = range(5)
+COL_NAME, COL_VALUE, COL_TYPE, COL_ADDR, COL_RATE, COL_MIN, COL_MAX, COL_MEAN, COL_COUNT = range(9)
+STATS_COLUMNS = (COL_MIN, COL_MAX, COL_MEAN, COL_COUNT)
+POLL_KEY = "poll"
 GREY = QBrush(QColor("#888888"))
 WARN = QBrush(QColor("#c87800"))
 ERROR = QBrush(QColor("#c03030"))
@@ -50,13 +53,18 @@ class WatchTree(QTreeWidget):
     """Debugger-style watch tree. Top-level rows are the workspace's watch list; structs and arrays
     open to every field and cell. A collapsed struct or array is not read."""
 
-    changed = Signal()   # the watch list or an item's settings changed
+    changed = Signal()            # the watch list or an item's settings changed
+    sampled = Signal(object)      # list[Reading]: everything one poll read, for the chart and the log
+    chart_requested = Signal(str, str)   # path, unit: the user asked to chart this value
 
     def __init__(self, main):
         super().__init__()
         self.main = main
-        self.setColumnCount(5)
-        self.setHeaderLabels(["Name", "Value", "Type", "Address", "Rate"])
+        self.setColumnCount(9)
+        self.setHeaderLabels(["Name", "Value", "Type", "Address", "Rate", "Min", "Max", "Mean", "Samples"])
+        for c in STATS_COLUMNS:
+            self.setColumnHidden(c, True)
+            self.setColumnWidth(c, 80)
         self.header().setSectionResizeMode(COL_NAME, QHeaderView.Interactive)
         self.setColumnWidth(COL_NAME, 220)
         self.setColumnWidth(COL_VALUE, 180)
@@ -71,6 +79,7 @@ class WatchTree(QTreeWidget):
         self.itemChanged.connect(self._item_changed)
         self.itemExpanded.connect(self._expanded)
         self.states: dict[str, _ItemState] = {}
+        self.stats = StatsBook()
         self._editing: tuple[str, str] | None = None   # (expr of the item, path) being edited
 
     @property
@@ -88,7 +97,7 @@ class WatchTree(QTreeWidget):
         self.blockSignals(False)
 
     def _add_row(self, w: Watch) -> _ItemState:
-        item = QTreeWidgetItem([w.expr, "", "", "", ""])
+        item = QTreeWidgetItem([w.expr] + [""] * 8)
         item.setData(COL_NAME, PATH_ROLE, w.expr)
         self.addTopLevelItem(item)
         st = _ItemState(w, item, nodes={w.expr: item})
@@ -111,6 +120,7 @@ class WatchTree(QTreeWidget):
         if st is None:
             return
         self.ws.remove(expr)
+        self.stats.reset(expr)
         self.takeTopLevelItem(self.indexOfTopLevelItem(st.item))
         self.changed.emit()
 
@@ -119,6 +129,8 @@ class WatchTree(QTreeWidget):
         self.ws.watches[i] = new
         st = self.states[old.expr]
         st.watch, st.force = new, True
+        if new.display != old.display:
+            self.reset_stats(new.expr)   # the old numbers were in other units
         self._decorate(st)
         self.changed.emit()
 
@@ -140,38 +152,58 @@ class WatchTree(QTreeWidget):
     # --- polling -----------------------------------------------------------------------------
 
     def tick(self, now: float | None = None) -> None:
-        """Read every item that is due. Called by the main window's poll timer."""
-        if self.main.device.target is None:
+        """Read every item that is due, all in one poll. Called by the main window's poll timer.
+        While a poll is still running nothing new starts, so a slow link falls behind instead of
+        queueing reads."""
+        device = self.main.device
+        if device.target is None or device.busy(POLL_KEY):
             return
         now = time.monotonic() if now is None else now
-        for expr, st in list(self.states.items()):
+        due = []
+        for expr, st in self.states.items():
             if st.gone:
                 continue
             interval = st.watch.interval_ms(self.ws.poll_ms)
             if not st.force and (interval is None or now < st.due):
                 continue
-            if st.aggregate and not st.item.isExpanded() and not st.force:
+            if st.aggregate and not st.item.isExpanded() and not st.force and not self.main.reads_closed(expr):
                 continue   # a collapsed struct or array is not read
-            self._read(st, now, interval)
+            due.append(st)
+        if not due:
+            return
+        ws = self.ws
+        watches = [st.watch for st in due]
+        cells = {st.watch.expr: st.max_cells for st in due}
+        job = device.submit(lambda t: ws.read_many(t, watches, cells, headers=True), self._polled,
+                            self._poll_failed, key=POLL_KEY)
+        if job is not None:
+            for st in due:
+                st.force = False
+                # keep the item's cadence; one that fell behind starts again from now
+                step = (st.watch.interval_ms(ws.poll_ms) or 0) / 1000.0
+                st.due = st.due + step if now - st.due < step else now + step
 
     def read_now(self, expr: str) -> None:
         st = self.states.get(expr)
         if st is not None:
             st.force = True
-            self._read(st, time.monotonic(), st.watch.interval_ms(self.ws.poll_ms))
+            self.tick()
 
-    def _read(self, st: _ItemState, now: float, interval: int | None) -> None:
-        w, ws, cells = st.watch, self.ws, st.max_cells
-        job = self.main.device.submit(lambda t: ws.read(t, w, cells, headers=True),
-                                      lambda r, st=st: self._done(st, r),
-                                      lambda e, st=st: self._failed(st, e), key=f"watch:{w.expr}")
-        if job is not None:
-            st.force = False
-            st.due = now + (interval or 0) / 1000.0
+    def _polled(self, readings: list[Reading]) -> None:
+        for r in readings:
+            st = self.states.get(r.watch.expr)
+            if st is None:
+                continue   # removed while it was being read
+            if r.error is not None:
+                self._failed(st, r.error)
+            else:
+                self._done(st, (r.loc, r.shown))
+        self.sampled.emit(readings)
+
+    def _poll_failed(self, e: Exception) -> None:
+        self.main.status(f"poll: {describe_error(e)}", error=True)
 
     def _done(self, st: _ItemState, result) -> None:
-        if self.states.get(st.watch.expr) is not st:
-            return   # removed while it was being read
         loc, rows = result
         st.loc = loc
         now = time.monotonic()
@@ -196,7 +228,7 @@ class WatchTree(QTreeWidget):
                 parent = stack[r.depth - 1]
                 item = st.nodes.get(r.path)
                 if item is None or item.parent() is not parent:
-                    item = QTreeWidgetItem([self._label(r.path, st.watch.expr), "", "", "", ""])
+                    item = QTreeWidgetItem([self._label(r.path, st.watch.expr)] + [""] * 8)
                     item.setData(COL_NAME, PATH_ROLE, r.path)
                     parent.addChild(item)
                     st.nodes[r.path] = item
@@ -211,6 +243,7 @@ class WatchTree(QTreeWidget):
                 item.setText(COL_VALUE, text if not item.isExpanded() or not n else "")
             else:
                 item.setText(COL_VALUE, r.text)
+                self._show_stats(item, self.stats.add(r.path, r.value))
             item.setText(COL_TYPE, r.type_name)
             item.setText(COL_ADDR, f"0x{r.addr:08X}" if r.raw is not None or r.text is None else "")
             brush = GREY if (self._read_only(r.path) or not r.scalar) and r.text is not None else QBrush()
@@ -222,6 +255,49 @@ class WatchTree(QTreeWidget):
                 node.parent().removeChild(node)
         rate = f"{1 / st.period:.1f}/s" if st.period and st.watch.interval_ms(self.ws.poll_ms) else ""
         st.item.setText(COL_RATE, rate)
+
+    @staticmethod
+    def _show_stats(item: QTreeWidgetItem, st) -> None:
+        if st is None:
+            for c in STATS_COLUMNS:
+                item.setText(c, "")
+            return
+        for c, v in ((COL_MIN, st.min), (COL_MAX, st.max), (COL_MEAN, st.mean)):
+            item.setText(c, f"{v:.6g}")
+        item.setText(COL_COUNT, str(st.n))
+
+    def reset_stats(self, expr: str | None = None) -> None:
+        """Start the statistics again, for one watched item or for all."""
+        self.stats.reset(expr)
+        for e, st in self.states.items():
+            if expr is None or e == expr:
+                for node in st.nodes.values():
+                    self._show_stats(node, None)
+
+    def show_stats(self, on: bool) -> None:
+        for c in STATS_COLUMNS:
+            self.setColumnHidden(c, not on)
+
+    def chartable(self, path: str) -> tuple[_ItemState, Shown] | None:
+        """The item and value behind a path, if it can be charted: a number, a bool or an enum."""
+        for st in self.states.values():
+            row = st.shown.get(path)
+            if row is not None and row.text is not None and numeric(row.value) is not None:
+                return st, row
+        return None
+
+    def chart(self, path: str) -> None:
+        found = self.chartable(path)
+        if found is None:
+            self.main.status(f"{path} is not a number, so it can't be charted")
+            return
+        st, _ = found
+        self.chart_requested.emit(path, st.watch.display.unit if path == st.watch.expr else "")
+        if st.aggregate:
+            st.force = True   # read it even while collapsed
+
+    def selected_paths(self) -> list[str]:
+        return [p for i in self.selectedItems() if (p := i.data(COL_NAME, PATH_ROLE))]
 
     @staticmethod
     def _label(path: str, top: str) -> str:
@@ -373,6 +449,11 @@ class WatchTree(QTreeWidget):
         row = st.shown.get(path)
         if not top and path:
             menu.addAction("Watch this on its own", lambda: self.add_watch(path))
+        if path and self.chartable(path):
+            if self.main.chart.has(path):
+                menu.addAction("Remove from chart", lambda: self.main.chart.remove(path))
+            else:
+                menu.addAction("Add to chart", lambda: self.chart(path))
         if row is not None and row.scalar and not self._read_only(path):
             menu.addAction("Write...", lambda: self._double_clicked(item, COL_VALUE))
         if row is not None and row.type_name.endswith("*") and row.raw:
@@ -387,6 +468,7 @@ class WatchTree(QTreeWidget):
                 a.triggered.connect(lambda _=False, f=f: self.set_format(st.watch.expr, f))
                 fmt.addAction(a)
             menu.addAction("Settings...", lambda: self.edit_settings(st.watch.expr))
+            menu.addAction("Reset statistics", lambda: self.reset_stats(st.watch.expr))
             menu.addAction("Remove from watch list", lambda: self.remove_watch(st.watch.expr))
         menu.exec(self.viewport().mapToGlobal(pos))
 
