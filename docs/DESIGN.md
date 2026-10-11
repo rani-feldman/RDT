@@ -232,6 +232,16 @@ param   = "rpm"                  # label for the {param} prompt
 | Variable view | Debugger-style watch tree from the ELF | M3 |
 | Live chart | Oscilloscope of watched values: pause, zoom, cursors | M4 |
 
+### How the GUI works
+
+- **Start:** `rdt-gui [workspace.rdtw]` or `python -m rdt.gui`. The GUI works on one workspace, and every edit saves back to it. Opening a plain `.toml` target file starts an unsaved workspace, and Save asks for a `.rdtw` path.
+- **Threading:** all device I/O runs on one worker thread, in the order it was asked for. Keyed jobs (each watch item, the memory view, the ELF check) are dropped while the previous job with the same key is still pending, so a slow poll falls behind instead of queueing. A 50 ms tick looks for due items, and each row shows its achieved rate.
+- **Watch tree:** structs and arrays get header rows with depth, type and address. Every item is read once on connect; manual items are read only by hand or with F6.
+- **Writes:** edited in place, checked by the workspace's write safety, confirmed in a dialog when the item asks for it, and verified by read-back.
+- **ELF check:** every 1 s while connected, with re-mapping by name. Items that moved or changed type turn orange with a note; items that no longer exist turn grey and show "gone".
+- **Profile editor:** edits every SCPI field with a live preview of the commands and a test read using the edited profile before applying. Applying stores the profile inside the workspace and reconnects. MCUs and their ELFs have their own dialog.
+- **Link state:** the console, memory view and buttons are disabled unless the link is up, and the connection fields can be edited only while disconnected.
+
 ### Variable view
 
 - The user browses or searches the ELF's globals and adds them to the watch tree.
