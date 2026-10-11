@@ -2,7 +2,7 @@
 
 RDT (Remote Debugger Tool) reads and writes a running device's firmware variables and raw memory over the link the product already has, a COM port or LAN, so a live system can be inspected and tuned without a JTAG/SWD probe.
 
-The full, living design document is [RDT Design Document](https://claude.ai/code/artifact/01fb6748-f6db-46d8-a10b-bd96ece091f2). This file summarizes the decisions as of 2026-10-05.
+The full, living design document is [RDT Design Document](https://claude.ai/code/artifact/01fb6748-f6db-46d8-a10b-bd96ece091f2). This file summarizes the decisions as of 2026-10-11.
 
 ## Scope
 
@@ -28,6 +28,7 @@ The full, living design document is [RDT Design Document](https://claude.ai/code
 | Memory ranges | RDT refuses any address outside the ELF's RAM and flash sections and the extra ranges listed in the SCPI profile. |
 | Peripheral reads | Never merged into blocks. Each item in a peripheral range is read on its own at its exact size. |
 | Link loss | RDT reconnects on its own. Values grey out and writes are refused while the link is down. |
+| Multiple MCUs | One ELF per MCU. The main MCU is MCU 0 and forwards requests to the others. See [Multiple MCUs](#multiple-mcus). |
 | Shared SCPI port | Other tools may use the port over LAN at the same time. RDT tolerates unexpected replies and busy firmware. |
 
 ## Architecture
@@ -65,6 +66,7 @@ The firmware only ever sees an address and a byte count. Everything that knows a
 - `pyelftools` walks `.debug_info`. Every global and file-static variable is recorded with its address, size and type.
 - The type model covers base types, pointers, arrays, structs and unions with member offsets, enums with their names, bit fields, and typedefs.
 - Supported expressions: `name`, `a.b.c`, `arr[3]`, `arr[2][5]`, `*ptr`, `ptr->m`, `file.c:name`, and the raw form `@0x20000418:u32`.
+- An MCU prefix picks the MCU: `mcu1:motor.speed`, `@mcu2:0x20000418:u32`. Without a prefix, the expression means MCU 0.
 - Parsed results are cached on disk, keyed by the ELF's hash.
 
 ## SCPI profile
@@ -74,8 +76,8 @@ The SCPI profile is saved per firmware product and edited in the GUI. Example:
 ```toml
 [scpi]
 name         = "Motor controller v3"
-read         = "MEM:RD? {addr},{len}"
-write        = "MEM:WR {addr},{value},{size}"   # one value per command
+read         = "MEM:RD? {mcu},{addr},{len}"
+write        = "MEM:WR {mcu},{addr},{value},{size}"   # one value per command
 value_format = "0x{value:X}"   # raw integer in hex; floats sent as their bit pattern
 max_write    = 4               # largest value size the write accepts, in bytes
 size_query   = "MEM:MAX?"      # optional; sets max_response on connect
@@ -115,13 +117,29 @@ Other tools may talk to the firmware's SCPI port over LAN while RDT is connected
 ### Recommended firmware commands (to be added later)
 
 ```
-MEMory:READ?  <addr>,<len>          -> hex bytes, lowest address first, e.g. 0000A041
-MEMory:WRITE  <addr>,<value>,<size> ; one value of 1, 2 or 4 bytes
+MEMory:READ?  <mcu>,<addr>,<len>          -> hex bytes, lowest address first, e.g. 0000A041
+MEMory:WRITE  <mcu>,<addr>,<value>,<size> ; one value of 1, 2 or 4 bytes
 MEMory:MAX?                         -> largest <len> the read accepts (optional)
 SYSTem:ERRor?                       -> 0,"No error" or a code and text
 ```
 
-A read larger than the firmware's buffer should return an error, never a truncated reply.
+A read larger than the firmware's buffer should return an error, never a truncated reply. A secondary MCU that doesn't answer should return a defined error, for example `-240,"MCU not responding"`.
+
+## Multiple MCUs
+
+The device has several MCUs, each with its own ELF. The main MCU owns the USB/LAN link and forwards requests to the others over an internal channel.
+
+| Topic | Decision |
+| --- | --- |
+| MCU IDs | The main MCU is MCU 0; the others are 1, 2, 3. Each has a display name and its own ELF in the workspace. |
+| SCPI commands | The MCU is an extra parameter: `read mcu,startAddress,size` and `write mcu,address,value,size`. Templates use `{mcu}`. |
+| Internal channel | MCUs 1 and up use fixed 64-byte command and response frames. The main MCU's firmware splits a large read into 64-byte pieces, so `max_response` stays one profile setting. |
+| Timeouts | One profile timeout, which each MCU can override, because split reads take longer. |
+| Silent MCU | The main MCU returns a defined SCPI error. RDT greys out only that MCU's values, keeps polling the others, and retries it in the background. |
+| Watch list and chart | One mixed watch tree with an MCU column and filter. The chart and the CSV log can combine values from any MCUs; timestamps come from the PC. |
+
+- Symbols, memory ranges, the ELF watcher and the build check all work per MCU.
+- On MCUs 1 and up, a struct or array larger than 64 bytes is read in pieces, so its fields may not come from the same moment. The variable view marks such items.
 
 ## GUI
 
@@ -199,7 +217,7 @@ tests/
 | | Milestone | Contents |
 | --- | --- | --- |
 | M0 | Spec and skeleton | This design, repo layout, CI |
-| M1 | Simulated device | SCPI over TCP, UDP and a virtual COM port; memory loaded from the ELF |
+| M1 | Simulated device | SCPI over TCP, UDP and a virtual COM port; several MCUs, each with memory loaded from its ELF; 64-byte split and silent-MCU error |
 | M2 | Host core and first GUI | Transports, session, SCPI profiles, reconnect; connection bar, profile editor, console, command buttons, memory view; CLI; a test with a second SCPI client |
 | M3 | Symbols | ELF/DWARF, types, expressions, codec, variable view, formats and scaling, write safety, workspace, ELF rebuild detection |
 | M4 | Watch | Polling scheduler, live chart, statistics, CSV logging |
