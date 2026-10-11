@@ -1,0 +1,28 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "rdt"
+version = "0.1.0"
+description = "Remote Debugger Tool: read and write firmware variables and memory over a COM port or LAN"
+requires-python = ">=3.11"
+dependencies = [
+    "pyelftools>=0.30",
+    "pyserial>=3.5",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8"]
+
+[project.scripts]
+rdt-sim = "sim.__main__:main"
+
+[tool.setuptools.packages.find]
+include = ["sim*"]
+
+[tool.setuptools.package-data]
+sim = ["examples/*.toml", "examples/firmware/*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
