@@ -27,3 +27,9 @@ def ram_mcu(mcu_id=0, start=0x20000000, size=256, **kw):
     mem = Memory()
     mem.add(Region("RAM", start, bytearray(size), True))
     return Mcu(mcu_id, f"mcu{mcu_id}", mem, **kw)
+
+
+@pytest.fixture(autouse=True)
+def _symbol_cache(tmp_path_factory, monkeypatch):
+    """Keep the DWARF cache out of the user's cache folder; shared by the whole test run."""
+    monkeypatch.setenv("RDT_CACHE_DIR", str(tmp_path_factory.getbasetemp() / "symbol-cache"))

@@ -4,26 +4,35 @@ A target is a device reached over one link, with one or more MCUs. Each MCU has 
 and usually its own ELF. Every access names its MCU, always: there is no default MCU.
 
     with Target.from_file("bench.toml") as t:
+        t.read_value("main:motor.speed")
+        t.write_value("motorctl:pwm_duty", 750)
         t.read_value("@main:0x20000010:u32")
-        t.write_value("@motorctl:0x20000084:u32", 750)
 
-The target checks every access against the MCU's memory map before anything is sent, then
-hands it to the session, which deals with timeouts, retries and confirming writes.
+Names are resolved through the MCU's ELF (see ``rdt.symbols``). The target checks every access
+against the MCU's memory map before anything is sent, then hands it to the session, which deals
+with timeouts, retries and confirming writes.
 """
 
 from __future__ import annotations
 
+import logging
+import os
 import re
+import time
 import tomllib
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from . import codec
-from .errors import AccessRefused, ConfigError, DeviceError
+from .errors import AccessRefused, ConfigError, DeviceError, RdtError, SymbolError
 from .memmap import ElfInfo, MemoryMap, load_elf_sections
-from .profile import Profile, Range, parse_int
+from .profile import Profile, Range
 from .session import LinkState, Session
+from .symbols import Location, Resolver, Row, SymbolTable, describe_address, load_symbols, parse
+from .symbols import values
+from .symbols.types import is_scalar
 from .transport import KINDS, Transport, make_transport
+
+log = logging.getLogger(__name__)
 
 
 @dataclass
@@ -99,59 +108,80 @@ class TargetConfig:
 
 
 class Mcu:
-    """One MCU of the target: its id, name, byte order and memory map."""
+    """One MCU of the target: its id, name, byte order, memory map and symbols."""
 
     def __init__(self, cfg: McuConfig, profile: Profile):
         self.id = cfg.id
         self.name = cfg.name
+        self.timeout_ms = cfg.timeout_ms
+        self._cfg = cfg
+        self._profile = profile
+        self._failed_stamp: tuple[int, int] | None = None
+        self._load()
+
+    def _load(self) -> None:
+        cfg = self._cfg
         self.elf: ElfInfo | None = load_elf_sections(cfg.elf) if cfg.elf else None
-        self.byte_order = cfg.byte_order or (self.elf.byte_order if self.elf else profile.byte_order)
+        self.byte_order = cfg.byte_order or (self.elf.byte_order if self.elf else self._profile.byte_order)
         if self.byte_order not in ("little", "big"):
             raise ConfigError(f"MCU {self.name}: byte_order must be little or big")
-        self.timeout_ms = cfg.timeout_ms
-        shared = [r for r in profile.ranges if r.mcu in (None, "", cfg.name, cfg.id)]
+        shared = [r for r in self._profile.ranges if r.mcu in (None, "", cfg.name, cfg.id)]
         self.memory = MemoryMap(self.elf.sections if self.elf else [], shared + cfg.ranges)
+        self._symbols: SymbolTable | None = None
+        self._stamp = _stamp(cfg.elf) if cfg.elf else None
+
+    @property
+    def symbols(self) -> SymbolTable | None:
+        """The ELF's variables and types, read on first use (and cached on disk). None without an ELF."""
+        if self.elf is None:
+            return None
+        if self._symbols is None:
+            self._symbols = load_symbols(self.elf.path)
+        return self._symbols
+
+    def resolver(self, reader=None) -> Resolver:
+        return Resolver(self.name, lambda: self.symbols, self.byte_order, reader)
+
+    def elf_changed(self) -> bool:
+        """True when the ELF on disk is not the one loaded, and has been still for a moment."""
+        if self._cfg.elf is None:
+            return False
+        now = _stamp(self._cfg.elf)
+        if now is None or now in (self._stamp, self._failed_stamp):
+            return False
+        return time.time() - now[0] / 1e9 > ELF_SETTLE_S   # the linker may still be writing it
+
+    def reload(self) -> bool:
+        """Load the ELF again. On failure (a half-written file) keep the old one and return False."""
+        old = (self.elf, self.byte_order, self.memory, self._symbols, self._stamp)
+        try:
+            self._load()
+            if self.elf is not None:
+                self._symbols = load_symbols(self.elf.path)
+        except ConfigError as e:
+            log.warning("MCU %s: cannot reload %s yet: %s", self.name, self._cfg.elf, e)
+            self.elf, self.byte_order, self.memory, self._symbols, self._stamp = old
+            self._failed_stamp = _stamp(self._cfg.elf)   # tried again when the file changes again
+            return False
+        log.info("MCU %s: reloaded %s", self.name, self._cfg.elf)
+        return True
 
     def __repr__(self) -> str:
         return f"Mcu({self.id}, {self.name!r})"
 
 
-_NAME = re.compile(r"^[A-Za-z_][\w.-]*$")
+ELF_SETTLE_S = 0.5
 
 
-@dataclass(frozen=True)
-class RawRef:
-    """A raw address on one MCU, as in ``@main:0x20000418:u32``."""
-
-    mcu: str
-    addr: int
-    type: str
-
-    @property
-    def size(self) -> int:
-        return codec.size_of(self.type)
-
-    def __str__(self) -> str:
-        return f"@{self.mcu}:0x{self.addr:08X}:{self.type}"
-
-
-def parse_ref(text: str) -> RawRef:
-    """Parse ``@mcu:address:type``. Symbol names such as ``main:motor.speed`` come with M3."""
-    t = text.strip()
-    if not t.startswith("@"):
-        raise ConfigError(f"{text!r}: expected @mcu:address:type, such as @main:0x20000010:u32 "
-                          f"(variable names come with ELF symbol support)")
-    parts = t[1:].split(":")
-    if len(parts) != 3 or not parts[0]:
-        raise ConfigError(f"{text!r}: expected @mcu:address:type, such as @main:0x20000010:u32")
-    mcu, addr, type_name = parts
+def _stamp(path: Path) -> tuple[int, int] | None:
     try:
-        address = parse_int(addr)
-    except ValueError:
-        raise ConfigError(f"{text!r}: {addr!r} is not an address") from None
-    if type_name not in codec.TYPES:
-        raise ConfigError(f"{text!r}: unknown type {type_name!r}; use one of {', '.join(codec.TYPES)}")
-    return RawRef(mcu, address, type_name)
+        st = os.stat(path)
+    except OSError:
+        return None
+    return st.st_mtime_ns, st.st_size
+
+
+_NAME = re.compile(r"^[A-Za-z_][\w.-]*$")
 
 
 class Target:
@@ -240,17 +270,107 @@ class Target:
         except AccessRefused as e:
             raise AccessRefused(f"MCU {m.name}: {e}") from None
 
-    def read_value(self, ref: str | RawRef) -> int | float:
-        r = parse_ref(ref) if isinstance(ref, str) else ref
-        m = self.mcu(r.mcu)
-        return codec.decode(self.read(m, r.addr, r.size), r.type, m.byte_order)
+    # --- values by name --------------------------------------------------------------------
 
-    def write_value(self, ref: str | RawRef, value: int | float | str) -> None:
-        r = parse_ref(ref) if isinstance(ref, str) else ref
-        m = self.mcu(r.mcu)
-        if isinstance(value, str):
-            value = codec.parse_value(value, r.type)
-        self.write(m, r.addr, codec.encode(value, r.type, m.byte_order))
+    def resolve(self, expr: str | Location) -> Location:
+        """Where an expression's value is: ``main:motor.speed``, ``@main:0x20000010:u32``.
+
+        A location that went through a pointer is resolved again, since the pointer may have moved.
+        """
+        if isinstance(expr, Location):
+            if not expr.dynamic:
+                return expr
+            expr = expr.path
+        e = parse(expr)
+        m = self.mcu(e.mcu)
+        return m.resolver(lambda addr, size: self.read(m, addr, size)).resolve(e)
+
+    def describe(self, expr: str) -> Location:
+        """Resolve without the device: following a pointer is refused."""
+        e = parse(expr)
+        return self.mcu(e.mcu).resolver().resolve(e)
+
+    def read_location(self, loc: Location) -> bytes:
+        return self.read(loc.mcu, loc.addr, loc.size)
+
+    def read_value(self, expr: str | Location):
+        """Read a value: a number or bool for a scalar, an ``EnumValue`` for an enum, a dict for a
+        struct and a list for an array. A struct or array is read in one block."""
+        loc = self.resolve(expr)
+        data = self.read_location(loc)
+        order = self.mcu(loc.mcu).byte_order
+        if loc.bit_size is not None:
+            return values.decode_scalar(loc.type, data, order, loc.bit_size, loc.bit_shift)
+        return values.decode(loc.type, data, order)
+
+    def rows(self, loc: Location, data: bytes, max_cells: int = 100) -> list[Row]:
+        """One row per field and cell of a value already read, for display."""
+        m = self.mcu(loc.mcu)
+        return values.rows(loc.type, data, m.byte_order, loc.path, loc.addr, max_cells,
+                           lambda a, typ: self.symbolize(m, a, typ), loc.bit_size, loc.bit_shift)
+
+    def read_rows(self, expr: str | Location, max_cells: int = 100) -> tuple[Location, list[Row]]:
+        loc = self.resolve(expr)
+        return loc, self.rows(loc, self.read_location(loc), max_cells)
+
+    def symbolize(self, mcu: str | Mcu, addr: int, target=None) -> str | None:
+        """``&name.field`` for an address inside a variable of the MCU's ELF."""
+        m = self.mcu(mcu)
+        if m.elf is None:
+            return None
+        try:
+            return describe_address(m.symbols, addr, target)
+        except (ConfigError, SymbolError):
+            return None
+
+    def parse_value(self, loc: Location, text: str):
+        if not is_scalar(loc.type):
+            raise SymbolError(f"{loc.path} is a {loc.type.name}; write one field or cell at a time")
+        try:
+            return values.parse_scalar(loc.type, text, loc.bit_size)
+        except ValueError as e:
+            raise ConfigError(f"{loc.path}: {e}") from None
+
+    def write_value(self, expr: str | Location, value) -> Location:
+        """Write one scalar (a number, bool, enum name or bit field) and confirm it by read-back.
+
+        A bit field is written by reading the bytes that hold it, changing the field and writing
+        them back, so a change the firmware makes to a neighbouring field in between is lost.
+        """
+        loc = self.resolve(expr)
+        if not is_scalar(loc.type):
+            raise SymbolError(f"{loc.path} is a {loc.type.name}; write one field or cell at a time")
+        if not isinstance(value, str):
+            value = repr(value) if isinstance(value, float) else str(int(value))
+        value = self.parse_value(loc, value)
+        m = self.mcu(loc.mcu)
+        old = self.read_location(loc) if loc.bit_size is not None else None
+        data = values.encode_scalar(loc.type, value, m.byte_order, loc.size, loc.bit_size, loc.bit_shift, old)
+        self.write(m, loc.addr, data)
+        return loc
+
+    def remap(self, loc: Location) -> tuple[Location | None, str | None]:
+        """Resolve a watched item again by name after its MCU's ELF was reloaded.
+
+        Returns the new location (None if the name is gone) and a note when something changed:
+        it moved, its type changed, or it no longer exists. A raw address keeps its address.
+        """
+        try:
+            new = self.describe(loc.path) if not loc.dynamic else loc
+        except SymbolError as e:
+            return None, f"{loc.path} is gone after the ELF was rebuilt ({e})"
+        except RdtError as e:
+            return None, f"{loc.path} can't be resolved after the ELF was rebuilt ({e})"
+        notes = []
+        if (new.addr, new.bit_shift) != (loc.addr, loc.bit_shift) and not loc.dynamic:
+            notes.append(f"moved from 0x{loc.addr:08X} to 0x{new.addr:08X}")
+        if (new.type_name, new.size) != (loc.type_name, loc.size):
+            notes.append(f"is now {new.type_name} ({new.size} bytes), was {loc.type_name} ({loc.size} bytes)")
+        return new, (f"{loc.path} " + " and ".join(notes) if notes else None)
+
+    def refresh_elfs(self) -> list[str]:
+        """Reload every MCU's ELF that was rebuilt; returns the names of the MCUs reloaded."""
+        return [m.name for m in self.mcus.values() if m.elf_changed() and m.reload()]
 
     # --- console -----------------------------------------------------------------------------
 

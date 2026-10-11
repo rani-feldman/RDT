@@ -1,11 +1,13 @@
 """Command line: rdt [connection options] COMMAND ...
 
     rdt -t bench.toml info
-    rdt -t bench.toml read @main:0x20000010:u32 @motorctl:0x20000088:f32
-    rdt -t bench.toml write @main:0x20000004:f32 2500
-    rdt -t bench.toml dump main 0x20000000 64
+    rdt -t bench.toml symbols main motor*
+    rdt -t bench.toml ptype main:motor
+    rdt -t bench.toml read main:motor motorctl:temperature @main:0x20000010:u32
+    rdt -t bench.toml write main:motor.target 2500
+    rdt -t bench.toml dump main:rx_buffer
     rdt -t bench.toml send "*IDN?"
-    rdt -t bench.toml watch @main:0x20000000:f32 -i 100
+    rdt -t bench.toml watch main:motor.speed -i 100
     rdt -t bench.toml console
 
 Without a target file, give the link and the MCUs on the command line:
@@ -23,9 +25,11 @@ from datetime import datetime
 from pathlib import Path
 
 from . import __version__, codec
-from .errors import CommandTimeout, ConfigError, LinkDown, RdtError
+from .errors import CommandTimeout, ConfigError, LinkDown, RdtError, SymbolError
 from .profile import Profile, parse_int
-from .target import ConnectionConfig, McuConfig, Target, TargetConfig, parse_ref
+from .symbols import Location, values
+from .symbols.types import ArrayType, EnumType, StructType, Type, is_char_array
+from .target import ConnectionConfig, McuConfig, Target, TargetConfig
 
 
 def _int(text: str) -> int:
@@ -48,8 +52,9 @@ def build_parser() -> argparse.ArgumentParser:
     ap = argparse.ArgumentParser(
         prog="rdt",
         description="Remote Debugger Tool: read and write firmware memory over a COM port or LAN.",
-        epilog="Addresses are written @mcu:address:type, such as @main:0x20000010:u32. "
-               f"Types: {', '.join(codec.TYPES)}.",
+        epilog="Values are named with their MCU first: main:motor.speed, main:gains[2], main:head->next, "
+               "main:motor.c:state (a file-static), or a raw address @main:0x20000010:u32. "
+               f"Raw types: {', '.join(codec.TYPES)}, or any type from the ELF.",
     )
     ap.add_argument("--version", action="version", version=f"rdt {__version__}")
     g = ap.add_argument_group("target")
@@ -70,18 +75,24 @@ def build_parser() -> argparse.ArgumentParser:
 
     sub.add_parser("info", help="identify the device and list its MCUs and memory")
 
-    p = sub.add_parser("read", help="read values at raw addresses")
-    p.add_argument("refs", nargs="+", metavar="@MCU:ADDR:TYPE")
-
-    p = sub.add_parser("write", help="write a value and confirm it by reading it back")
-    p.add_argument("ref", metavar="@MCU:ADDR:TYPE")
-    p.add_argument("value", help="42, -7, 0x1F, 1.5 ... (a hex integer for a float is its bit pattern)")
-
-    p = sub.add_parser("dump", help="hex and ASCII dump of a memory range")
+    p = sub.add_parser("symbols", help="list or search an MCU's variables (no device needed)")
     p.add_argument("mcu_name", metavar="mcu")
-    p.add_argument("addr", type=_int)
-    p.add_argument("length", type=_int)
+    p.add_argument("pattern", nargs="?", default="*", help="glob such as motor* (default: all)")
 
+    p = sub.add_parser("ptype", help="show where a variable is and its type's layout (no device needed)")
+    p.add_argument("expr", metavar="EXPR", help="a variable such as main:motor, or a type such as main:motor_t")
+
+    p = sub.add_parser("read", help="read values; structs and arrays open to every field and cell")
+    p.add_argument("exprs", nargs="+", metavar="EXPR")
+    p.add_argument("--max-cells", type=int, default=100, metavar="N", help="cells shown per array (default 100)")
+
+    p = sub.add_parser("write", help="write one value and confirm it by reading it back")
+    p.add_argument("expr", metavar="EXPR")
+    p.add_argument("value", help="42, -7, 0x1F, 1.5, true, an enum name ... (a hex integer for a float is its "
+                                 "bit pattern)")
+
+    p = sub.add_parser("dump", help="hex and ASCII dump of a variable or a memory range")
+    p.add_argument("what", nargs="+", metavar="EXPR [LEN] | MCU ADDR LEN")
     p = sub.add_parser("poke", help="write raw bytes, lowest address first, and confirm them")
     p.add_argument("mcu_name", metavar="mcu")
     p.add_argument("addr", type=_int)
@@ -97,7 +108,7 @@ def build_parser() -> argparse.ArgumentParser:
     sub.add_parser("errors", help="read the SCPI error queue until it is empty")
 
     p = sub.add_parser("watch", help="poll values and print one line per sample (Ctrl+C stops)")
-    p.add_argument("refs", nargs="+", metavar="@MCU:ADDR:TYPE")
+    p.add_argument("exprs", nargs="+", metavar="EXPR")
     p.add_argument("-i", "--interval", type=float, default=500, metavar="MS", help="poll interval (default 500)")
     p.add_argument("-n", "--count", type=int, default=0, help="stop after this many samples (default: run until Ctrl+C)")
 
@@ -145,29 +156,42 @@ def cmd_info(t: Target, args, out) -> int:
     return 0
 
 
+def print_rows(t: Target, loc: Location, data: bytes, out, max_cells: int = 100) -> None:
+    rows = t.rows(loc, data, max_cells)
+    if len(rows) == 1 and rows[0].text is not None:
+        print(f"{loc.path} = {rows[0].text}", file=out)
+        return
+    print(f"{loc.path}  {loc.type_name}, {loc.size} bytes at 0x{loc.addr:08X}", file=out)
+    leaves = [r for r in rows if r.text is not None]
+    width = max(len(r.path) for r in leaves) if leaves else 0
+    vwidth = min(24, max((len(r.text) for r in leaves), default=0))
+    for r in leaves:
+        if r.value is None:
+            print(f"{r.path:<{width}}   {r.text}", file=out)
+        else:
+            print(f"{r.path:<{width}} = {r.text:<{vwidth}}  {r.type_name}", file=out)
+
+
 def cmd_read(t: Target, args, out) -> int:
-    refs = [parse_ref(r) for r in args.refs]
     failed = 0
-    for r in refs:
+    for text in args.exprs:
         try:
-            v = t.read_value(r)
+            loc = t.resolve(text)
+            data = t.read_location(loc)
         except RdtError as e:
-            print(f"{r} : {e}", file=out)
+            print(f"{text} : {e}", file=out)
             failed += 1
         else:
-            print(f"{r} = {codec.format_value(v, r.type)}", file=out)
+            print_rows(t, loc, data, out, args.max_cells)
     return 1 if failed else 0
 
 
 def cmd_write(t: Target, args, out) -> int:
-    r = parse_ref(args.ref)
-    try:
-        value = codec.parse_value(args.value, r.type)
-        codec.encode(value, r.type, "little")
-    except ValueError as e:
-        raise ConfigError(str(e)) from None
-    t.write_value(r, value)
-    print(f"{r} = {codec.format_value(value, r.type)} (confirmed by read-back)", file=out)
+    loc = t.resolve(args.expr)
+    value = t.parse_value(loc, args.value)
+    t.write_value(loc, value)
+    row = t.rows(loc, t.read_location(loc))[0]
+    print(f"{loc.path} = {row.text} (confirmed by read-back)", file=out)
     return 0
 
 
@@ -182,10 +206,91 @@ def hexdump(addr: int, data: bytes, width: int = 16) -> list[str]:
 
 
 def cmd_dump(t: Target, args, out) -> int:
-    data = t.read(args.mcu_name, args.addr, args.length)
-    for line in hexdump(args.addr, data):
+    what = args.what
+    if ":" in what[0]:
+        if len(what) > 2:
+            raise ConfigError("dump takes EXPR [LEN], or MCU ADDR LEN")
+        loc = t.resolve(what[0])
+        mcu, addr = loc.mcu, loc.addr
+        length = _int(what[1]) if len(what) == 2 else loc.size
+    else:
+        if len(what) != 3:
+            raise ConfigError("dump takes MCU ADDR LEN, or a name such as main:rx_buffer")
+        try:
+            mcu, addr, length = what[0], parse_int(what[1]), parse_int(what[2])
+        except ValueError as e:
+            raise ConfigError(str(e)) from None
+    data = t.read(mcu, addr, length)
+    for line in hexdump(addr, data):
         print(line, file=out)
     return 0
+
+
+def cmd_symbols(t: Target, args, out) -> int:
+    m = t.mcu(args.mcu_name)
+    if m.symbols is None:
+        raise ConfigError(f"MCU {m.name} has no ELF")
+    found = m.symbols.search(args.pattern)
+    width = max((len(v.type.name) for v in found), default=0)
+    for v in found:
+        print(f"0x{v.address:08X}  {v.size:6d}  {v.type.name:<{width}}  {v.qualified_name}", file=out)
+    if not found:
+        print(f"no variables match {args.pattern!r}", file=out)
+        return 1
+    return 0
+
+
+def cmd_ptype(t: Target, args, out) -> int:
+    try:
+        loc = t.describe(args.expr)
+    except SymbolError as e:
+        # Not a variable: maybe a type, such as main:motor_t.
+        mcu, _, name = args.expr.partition(":")
+        typ = t.mcu(mcu).symbols.find_type(name) if ":" in args.expr and t.mcu(mcu).symbols else None
+        if typ is None:
+            raise e from None
+        print(f"{typ.name}  {_kind(typ)}, {typ.size} bytes", file=out)
+        _layout(typ, 0, 1, out)
+        return 0
+    var = None
+    sym = t.mcu(loc.mcu).symbols
+    if sym is not None and sym.at(loc.addr) is not None:
+        var = sym.at(loc.addr)
+    where = f" in {var.file_name}" if var and var.address == loc.addr and not loc.dynamic else ""
+    bits = f", bits {loc.bit_shift}..{loc.bit_shift + loc.bit_size - 1} of {loc.storage} bytes" if loc.bit_size else ""
+    print(f"{loc.path}  {loc.type_name}  {_kind(loc.type)}, {loc.type.size} bytes at 0x{loc.addr:08X}{bits}{where}",
+          file=out)
+    _layout(loc.type, 0, 1, out)
+    return 0
+
+
+def _kind(t: Type) -> str:
+    s = t.strip()
+    return s.name if s is not t else type(s).__name__.removesuffix("Type").lower()
+
+
+def _layout(t: Type, base: int, depth: int, out) -> None:
+    s = t.strip()
+    pad = "  " * depth
+    if isinstance(s, EnumType):
+        print(f"{pad}{{{', '.join(f'{n} = {v}' for v, n in s.values.items())}}}", file=out)
+    elif isinstance(s, ArrayType) and not is_char_array(s) and isinstance(s.element.strip(), (StructType, ArrayType)):
+        print(f"{pad}each cell, {s.element.size} bytes:", file=out)
+        _layout(s.element, 0, depth + 1, out)
+    elif isinstance(s, StructType):
+        members = s.named_members()
+        width = max((len(m.name) for _, m in members), default=0)
+        for off, m in members:
+            o = base + off
+            if m.is_bitfield:
+                print(f"{pad}+0x{o:02X}  {m.name:<{width}}  {m.type.name} : {m.bit_size}  "
+                      f"(bits {m.bit_shift}..{m.bit_shift + m.bit_size - 1} of {m.storage} bytes)", file=out)
+                continue
+            print(f"{pad}+0x{o:02X}  {m.name:<{width}}  {m.type.name}", file=out)
+            inner = m.type.strip()
+            if isinstance(inner, (StructType, EnumType)) or (isinstance(inner, ArrayType) and not is_char_array(inner)
+                                                             and isinstance(inner.element.strip(), StructType)):
+                _layout(m.type, 0, depth + 1, out)
 
 
 def cmd_poke(t: Target, args, out) -> int:
@@ -229,26 +334,51 @@ def cmd_errors(t: Target, args, out) -> int:
     return 0
 
 
+def _watch_cells(t: Target, loc: Location) -> dict[str, str]:
+    """The leaf values of one watched item, by path. A struct or array is read in one block."""
+    loc = t.resolve(loc)
+    return {r.path: r.text if isinstance(r.value, bytes) else
+            values.format_scalar(r.type, r.value, r.bit_size, hex_too=False)
+            for r in t.rows(loc, t.read_location(loc), max_cells=1 << 30) if r.value is not None}
+
+
 def cmd_watch(t: Target, args, out) -> int:
-    refs = [parse_ref(r) for r in args.refs]
-    for r in refs:
-        t.mcu(r.mcu)
-    print("time          " + "  ".join(str(r) for r in refs), file=out)
+    locs: list[Location | None] = [t.resolve(e) for e in args.exprs]
+    columns: list[tuple[int, str]] = []
+    for i, loc in enumerate(locs):
+        leaves = list(_watch_cells(t, loc))
+        if not leaves:
+            raise ConfigError(f"{loc.path} has nothing to show")
+        columns += [(i, p) for p in leaves]
+    print("time          " + "  ".join(p for _, p in columns), file=out)
     period = max(args.interval, 1) / 1000.0
     n = 0
     next_at = time.monotonic()
+    next_elf_check = next_at + 1.0
     try:
         while not args.count or n < args.count:
+            if time.monotonic() >= next_elf_check:
+                next_elf_check = time.monotonic() + 1.0
+                for name in t.refresh_elfs():
+                    for i, loc in enumerate(locs):
+                        if loc is not None and loc.mcu == name:
+                            locs[i], note = t.remap(loc)
+                            if note:
+                                print(f"# {note}", file=out, flush=True)
             stamp = datetime.now().strftime("%H:%M:%S.%f")[:-3]
-            cells = []
-            for r in refs:
+            got: list[dict[str, str] | str] = []
+            for loc in locs:
+                if loc is None:
+                    got.append("gone")
+                    continue
                 try:
-                    cells.append(codec.format_value(t.read_value(r), r.type, hex_too=False))
+                    got.append(_watch_cells(t, loc))
                 except LinkDown:
-                    cells.append("link-down")
+                    got.append("link-down")
                 except RdtError as e:
-                    cells.append(type(e).__name__)
-            print(f"{stamp}  " + "  ".join(f"{c:>{len(str(r))}}" for c, r in zip(cells, refs)), file=out, flush=True)
+                    got.append(type(e).__name__)
+            cells = [g if isinstance(g, str) else g.get(p, "gone") for g, p in ((got[i], p) for i, p in columns)]
+            print(f"{stamp}  " + "  ".join(f"{c:>{len(p)}}" for c, (_, p) in zip(cells, columns)), file=out, flush=True)
             n += 1
             next_at += period
             delay = next_at - time.monotonic()
@@ -262,8 +392,11 @@ def cmd_watch(t: Target, args, out) -> int:
 
 
 CONSOLE_HELP = """Type any SCPI command; queries (header ending in '?') wait for a reply.
-  .err    read the error queue        .read @mcu:addr:type   read a value
-  .help   this text                   .quit                  leave (or Ctrl+D)"""
+  .read EXPR...         read values, such as .read main:motor @main:0x20000010:u32
+  .write EXPR VALUE     write a value and confirm it
+  .err                  read the error queue
+  .help                 this text
+  .quit                 leave (or Ctrl+D)"""
 
 
 def cmd_console(t: Target, args, out) -> int:
@@ -291,9 +424,15 @@ def cmd_console(t: Target, args, out) -> int:
                 err = t.error_query()
                 print(err if err else '0,"No error"', file=out)
             elif line.startswith(".read "):
-                for ref in line.split()[1:]:
-                    r = parse_ref(ref)
-                    print(f"{r} = {codec.format_value(t.read_value(r), r.type)}", file=out)
+                for text in line.split()[1:]:
+                    loc = t.resolve(text)
+                    print_rows(t, loc, t.read_location(loc), out)
+            elif line.startswith(".write "):
+                parts = line.split(None, 2)
+                if len(parts) != 3:
+                    raise ConfigError(".write takes EXPR VALUE")
+                args.expr, args.value = parts[1], parts[2]
+                cmd_write(t, args, out)
             else:
                 _send(t, line, None, out)
         except RdtError as e:
@@ -302,9 +441,12 @@ def cmd_console(t: Target, args, out) -> int:
 
 
 COMMANDS = {
-    "info": cmd_info, "read": cmd_read, "write": cmd_write, "dump": cmd_dump, "poke": cmd_poke,
+    "info": cmd_info, "symbols": cmd_symbols, "ptype": cmd_ptype, "read": cmd_read, "write": cmd_write, "dump": cmd_dump, "poke": cmd_poke,
     "send": cmd_send, "errors": cmd_errors, "watch": cmd_watch, "console": cmd_console,
 }
+
+
+OFFLINE = ("symbols", "ptype")   # read only the ELF, never the device
 
 
 def main(argv: list[str] | None = None, out=None) -> int:
@@ -316,6 +458,8 @@ def main(argv: list[str] | None = None, out=None) -> int:
         cfg = load_config(args)
         # One-shot commands fail at once on a broken link; watch and console keep reconnecting.
         target = Target(cfg, auto_reconnect=args.cmd in ("watch", "console"))
+        if args.cmd in OFFLINE:
+            return COMMANDS[args.cmd](target, args, out)
         target.connect()
         try:
             return COMMANDS[args.cmd](target, args, out)
