@@ -85,7 +85,7 @@ addr_format  = "0x{addr:08X}"
 data_format  = "hex"           # reply format of the read: hex | bytes_csv | decimal | ieee_block
 byte_order   = "little"
 max_response = 1024            # bytes of data the firmware can put in one reply
-error_query  = "SYST:ERR?"
+error_query  = "SYST:ERR?"     # sent once after a timeout, to learn the cause
 terminator   = "\n"
 timeout_ms   = 500
 
@@ -101,8 +101,10 @@ size  = 0x400
 - **Writes:** the value is sent as the raw integer in hex, so a float like 1.5 becomes `0x3FC00000` and the firmware never parses floats.
   - Struct and array edits become one write per field or cell. These are not atomic, and the GUI says so.
   - Values wider than `max_write` are split into pieces.
+  - A write sends no reply whether it succeeds or fails, so RDT reads the value back after every write to confirm it.
+- **Errors:** a failed command sends no reply at all; its error goes only to the error queue. RDT sees a timeout, sends the error query once, and shows the cause if it finds one.
 - **Replies:** a reply format that the fixed options cannot describe can be matched with a regular expression instead.
-- **UDP:** a timed-out read is re-sent. A timed-out write is never blindly repeated; RDT first confirms it, by reading the value back or by running the error query.
+- **UDP:** a timed-out read is re-sent. A timed-out write is never blindly repeated; RDT first confirms it by reading the value back.
 - **Link loss:** values grey out, writes are refused, and RDT retries in the background with a growing delay. Once the link is back, it re-reads every watched value, marks the gap in the chart and the CSV log, and resumes polling.
 
 ### Sharing the link with other tools
@@ -111,8 +113,8 @@ Other tools may talk to the firmware's SCPI port over LAN while RDT is connected
 
 - Each tool uses its own TCP connection, and the firmware must send each reply on the connection that asked. Over UDP it replies to the sender's address and port.
 - Every read reply must match the requested size. A reply that doesn't fit is discarded, the input is flushed, and the read is sent again.
-- A busy or error reply is retried with a growing delay instead of failing at once.
-- The SCPI error queue is shared by all clients, so a timed-out write is confirmed by reading the value back, not by the error query.
+- A command that times out is retried with a growing delay instead of failing at once.
+- The SCPI error queue is shared by all clients, so another tool can read RDT's error first, or RDT can read another tool's. RDT never depends on it: writes are confirmed by reading the value back, and an error found after a timeout is only a hint.
 
 ### Recommended firmware commands (to be added later)
 
@@ -123,7 +125,7 @@ MEMory:MAX?                         -> largest <len> the read accepts (optional)
 SYSTem:ERRor?                       -> 0,"No error" or a code and text
 ```
 
-A read larger than the firmware's buffer should return an error, never a truncated reply. A secondary MCU that doesn't answer should return a defined error, for example `-240,"MCU not responding"`.
+A failed command sends no reply and puts its error in the queue. A read larger than the firmware's buffer should fail that way, never with a truncated reply. A secondary MCU that doesn't answer should do the same with a defined error, for example `-240,"MCU not responding"`.
 
 ## Multiple MCUs
 
@@ -135,7 +137,7 @@ The device has several MCUs, each with its own ELF. The main MCU owns the USB/LA
 | SCPI commands | The MCU is an extra parameter: `read mcu,startAddress,size` and `write mcu,address,value,size`. Templates use `{mcu}`. |
 | Internal channel | MCUs 1 and up use fixed 64-byte command and response frames. The main MCU's firmware splits a large read into 64-byte pieces, so `max_response` stays one profile setting. |
 | Timeouts | One profile timeout, which each MCU can override, because split reads take longer. |
-| Silent MCU | The main MCU returns a defined SCPI error. RDT greys out only that MCU's values, keeps polling the others, and retries it in the background. |
+| Silent MCU | The main MCU sends no reply and puts a defined error in the queue. RDT greys out only that MCU's values, keeps polling the others, and retries it in the background. Because another LAN client may read that error first, RDT also greys out an MCU after three timeouts in a row while MCU 0 still answers. |
 | Watch list and chart | One mixed watch tree with an MCU column and filter. The chart and the CSV log can combine values from any MCUs; timestamps come from the PC. |
 
 - Symbols, memory ranges, the ELF watcher and the build check all work per MCU.
@@ -217,7 +219,7 @@ tests/
 | | Milestone | Contents |
 | --- | --- | --- |
 | M0 | Spec and skeleton | This design, repo layout, CI |
-| M1 | Simulated device | SCPI over TCP, UDP and a virtual COM port; several MCUs, each with memory loaded from its ELF; 64-byte split and silent-MCU error |
+| M1 | Simulated device | SCPI over TCP, UDP and a virtual COM port; several MCUs, each with memory loaded from its ELF; 64-byte split; failed commands send no reply |
 | M2 | Host core and first GUI | Transports, session, SCPI profiles, reconnect; connection bar, profile editor, console, command buttons, memory view; CLI; a test with a second SCPI client |
 | M3 | Symbols | ELF/DWARF, types, expressions, codec, variable view, formats and scaling, write safety, workspace, ELF rebuild detection |
 | M4 | Watch | Polling scheduler, live chart, statistics, CSV logging |
