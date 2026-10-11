@@ -8,7 +8,7 @@ version = "0.1.0"
 description = "Remote Debugger Tool: read and write firmware variables and memory over a COM port or LAN"
 requires-python = ">=3.11"
 dependencies = [
-    "pyelftools>=0.30",
+    "pyelftools>=0.31",
     "pyserial>=3.5",
 ]
 

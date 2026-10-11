@@ -22,38 +22,86 @@ In another:
 
 ```
 rdt -t examples/sim_target.toml info
-rdt -t examples/sim_target.toml read @main:0x20000010:u32 @motorctl:0x20000088:f32
-rdt -t examples/sim_target.toml write @main:0x20000004:f32 2500
-rdt -t examples/sim_target.toml dump main 0x20000000 64
-rdt -t examples/sim_target.toml watch @main:0x20000000:f32 -i 100
+rdt -t examples/sim_target.toml symbols main
+rdt -t examples/sim_target.toml read main:motor motorctl:temperature
+rdt -t examples/sim_target.toml write main:motor.mode MODE_FAULT
+rdt -t examples/sim_target.toml dump main:firmware_name
+rdt -t examples/sim_target.toml watch main:motor.speed motorctl:pwm_duty -i 100
 rdt -t examples/sim_target.toml console
 ```
 
-## Addresses
+## Names and addresses
 
-Every address names its MCU, always: `@main:0x20000010:u32` reads 4 bytes at `0x20000010` on the MCU named `main` and shows them as an unsigned 32-bit integer. Types are `u8 i8 u16 i16 u32 i32 u64 i64 f32 f64`. The byte order comes from the MCU's ELF.
+Every expression starts with its MCU's name, always: `main:motor.speed` is the variable `motor.speed` in the ELF of the MCU named `main`. There is no default MCU.
 
-Variable names such as `main:motor.speed` come with ELF symbol support in M3.
+| Expression | Meaning |
+| --- | --- |
+| `main:tick_count` | A global variable |
+| `main:motor.speed` | A struct or union member, to any depth |
+| `main:gains[2]`, `main:matrix[1][2]` | An array cell |
+| `main:*head`, `main:head->next->value`, `main:(*head).value`, `main:head[2]` | Following a pointer |
+| `main:motor.c:state` | A file-static variable, named with its source file. Needed only when two files have a variable of that name |
+| `@main:0x20000010:u32` | A raw address as one of the types `u8 i8 u16 i16 u32 i32 u64 i64 f32 f64` |
+| `@main:0x48000000:GPIO_TypeDef.ODR` | A raw address as any type in the ELF (a typedef, or a struct, union or enum tag), then members and cells as above |
 
-Values for `write` can be `42`, `-7`, `0x1F`, `0b101`, `1.5` or `2.5e3`. A hex integer written to a float is taken as its bit pattern, so `write @main:0x20000004:f32 0x3FC00000` writes 1.5.
+The names, addresses and types come from the ELF's DWARF debug info, so the firmware must be built with `-g`. RDT knows every global and file-static variable with a fixed address. Locals and function-static variables are not included, and neither are variables the compiler kept only as a constant. The byte order and pointer size come from the ELF.
+
+Following a pointer reads it from the device. An expression that goes through a pointer is resolved again before every read, so `watch main:head->value` follows `head` as the firmware moves it.
+
+Reading DWARF takes a while for a large firmware, so the result is cached, keyed by the ELF's hash: in `%LOCALAPPDATA%\rdt\cache` on Windows, `~/.cache/rdt` elsewhere, or `RDT_CACHE_DIR`. A rebuilt ELF gets a new entry; old entries can be deleted at any time.
+
+### How values are shown
+
+`read` shows a scalar on one line. A struct or array opens to every field and cell, nested to any depth, one line each with its full expression, so any line can be copied into `write`:
+
+```
+$ rdt -t examples/sim_target.toml read main:motor
+main:motor  motor_t, 16 bytes at 0x20000000
+main:motor.speed      = 1.5            float
+main:motor.target     = 3000           float
+main:motor.current_ma = -120 (0xFF88)  int16_t
+main:motor.enabled    = 1 (0x01)       uint8_t
+main:motor.mode       = MODE_RUN (1)   mode_t
+```
+
+- Integers in decimal and hex; floats; `true` and `false` for `bool`.
+- Enums as `NAME (n)`.
+- Bit fields as their own value, taken out of the word that holds them.
+- `char` arrays as a string, such as `"rdt-main"`; `uint8_t` arrays stay numbers. A `char` also shows its character.
+- Pointers as an address and what it points to, such as `0x20000048 (&nodes[1])` or `0x00000000 (NULL)`.
+- An array shows its first 100 cells; `--max-cells N` changes that, and a cell further on can be read by its index.
+
+A struct or array is read in one block, so all its fields come from the same moment, except on MCUs 1 and up, where a block larger than 64 bytes is read in pieces.
+
+### Writing values
+
+`write` takes one scalar: a number, a bool, an enum, a pointer or a bit field. A struct or array is written one field or cell at a time.
+
+Values can be `42`, `-7`, `0x1F`, `0b101`, `1.5`, `2.5e3`, `true`/`false` for a bool, an enumerator's name such as `MODE_FAULT` (or its number), and `'A'` for a `char`. A hex integer written to a float is taken as its bit pattern, so `write @main:0x20000004:f32 0x3FC00000` writes 1.5. Values that don't fit the type, or the bit field's width, are refused before anything is sent.
+
+A bit field is written by reading the word that holds it, changing the field and writing the word back, then reading it again to confirm. If the firmware changes a neighbouring field in that moment, its change is lost.
 
 ## Commands
 
 | Command | What it does |
 | --- | --- |
 | `info` | Device identity, max response size, and each MCU's memory map |
-| `read REF...` | Read one or more values |
-| `write REF VALUE` | Write a value, then read it back to confirm it |
-| `dump MCU ADDR LEN` | Hex and ASCII dump |
+| `symbols MCU [PATTERN]` | List an MCU's variables with address, size and type. `PATTERN` is a glob such as `motor*`, or any part of the name. Needs no device |
+| `ptype EXPR` | Where a variable is, and its type's layout: member offsets, bit positions, enum values. Also takes a type, such as `main:motor_t`. Needs no device |
+| `read EXPR... [--max-cells N]` | Read values; structs and arrays open to every field and cell |
+| `write EXPR VALUE` | Write one value, then read it back to confirm it |
+| `dump EXPR [LEN]` or `dump MCU ADDR LEN` | Hex and ASCII dump of a variable or of a memory range |
 | `poke MCU ADDR HEX` | Write raw bytes, lowest address first, and confirm them |
 | `send COMMAND` | Send one SCPI command. A query (header ending in `?`) waits for its reply; `--reply` and `--no-reply` override that |
 | `errors` | Read the SCPI error queue until it is empty |
-| `watch REF... [-i MS] [-n N]` | Poll values and print one line per sample |
-| `console` | Interactive SCPI console. `.err` reads the error queue, `.read REF` reads a value, `.quit` leaves |
+| `watch EXPR... [-i MS] [-n N]` | Poll values and print one line per sample. A struct or array becomes one column per field and cell |
+| `console` | Interactive SCPI console. `.read EXPR` reads, `.write EXPR VALUE` writes, `.err` reads the error queue, `.quit` leaves |
 
 `-v` logs link events and `-vv` logs every command and reply, which is the first thing to turn on when trying a new firmware. The exit code is 0 on success and 1 if anything failed.
 
 `watch` and `console` keep running when the link drops, show `link-down`, and reconnect on their own. The other commands are one-shot and fail at once.
+
+`watch` also notices when an MCU's ELF is rebuilt. It loads the new ELF and finds each watched item again by name, and prints a `#` line for each item that moved, changed type or no longer exists (its column then shows `gone`). An ELF the linker is still writing is left until it has been still for half a second, and one that can't be read keeps the old symbols.
 
 ## Target file
 
@@ -90,10 +138,10 @@ timeout_ms = 1000                 # overrides the profile's timeout for this MCU
 The command line can override or replace it: `--tcp HOST:PORT`, `--udp HOST:PORT`, `--serial PORT --baud N`, `--profile FILE`, `--timeout MS`, and `--mcu NAME=ID[:ELF]` (repeat for each MCU; replaces the file's MCUs). Without a target file, `--mcu` is required:
 
 ```
-rdt --serial COM5 --profile fw_profile.toml --mcu main=0:build/main.elf read @main:0x20000010:u32
+rdt --serial COM5 --profile fw_profile.toml --mcu main=0:build/main.elf read main:motor
 ```
 
-The target file is the start of the `.rdtw` workspace that M3 adds.
+The target file is the start of the `.rdtw` workspace that comes later in M3.
 
 ## SCPI profile
 
@@ -128,13 +176,18 @@ The CLI is a thin layer over `rdt.Target`, which the GUI will use too:
 from rdt import Target
 
 with Target.from_file("examples/sim_target.toml") as t:
-    speed = t.read_value("@main:0x20000000:f32")
-    t.write_value("@motorctl:0x20000084:u32", 750)        # confirmed by read-back
+    motor = t.read_value("main:motor")                    # {'speed': 1.5, ..., 'mode': MODE_RUN (1)}
+    t.write_value("main:motor.mode", "MODE_FAULT")        # confirmed by read-back
+    t.write_value("motorctl:pwm_duty", 750)
+    speed = t.read_value("@main:0x20000000:f32")          # a raw address
+    loc = t.resolve("main:head->value")                   # address, type; resolve again each read if loc.dynamic
     block = t.read("motorctl", 0x20000000, 140)           # bytes
     print(t.command("*IDN?"))                             # any SCPI command
 ```
 
-Errors are all `rdt.RdtError`: `AccessRefused`, `CommandTimeout` (with `.hint`), `WriteNotConfirmed`, `McuSilent`, `LinkDown`, `ConfigError` and a few more in [`rdt/errors.py`](../rdt/errors.py).
+`read_value` returns a number or bool for a scalar, an `EnumValue` (an `int` with a `.name`) for an enum, `bytes` for a `char` array, a dict for a struct and a list for an array. `read_rows` gives the display rows `rdt read` prints, which the GUI's variable view will use too. `refresh_elfs()` reloads rebuilt ELFs and `remap(loc)` finds a watched item again by name.
+
+Errors are all `rdt.RdtError`: `AccessRefused`, `SymbolError` (a name, member or index that doesn't resolve), `CommandTimeout` (with `.hint`), `WriteNotConfirmed`, `McuSilent`, `LinkDown`, `ConfigError` and a few more in [`rdt/errors.py`](../rdt/errors.py).
 
 ## Code layout
 
@@ -145,7 +198,8 @@ rdt/
   profile.py                                        SCPI profile: templates, reply formats
   session.py                                        timeouts, retries, write confirm, silent MCUs, reconnect
   memmap.py                                         ELF sections and listed ranges; access checks
-  codec.py                                          scalar types
+  symbols/     elf.py, types.py, expr.py, values.py DWARF symbol table, type model, expressions, typed values
+  codec.py                                          raw scalar types
   target.py                                         Target API and target file
   cli.py                                            command line
 ```
@@ -153,6 +207,8 @@ rdt/
 ## Tests
 
 `python -m pytest` runs the host tests against the simulator over TCP, UDP (with dropped datagrams) and a serial pseudo-terminal on Linux. They cover every reply format, user-defined commands, split reads and writes, write confirmation, a silent MCU, a cut link and reconnect, and a second SCPI client sharing the device and its error queue.
+
+The symbol tests use a corpus in [`tests/elf`](../tests/elf): one C program with structs, unions, anonymous members, bit fields, enums, 2-D arrays, pointer chains, function pointers and clashing file-statics, built by clang for little-endian Cortex-M4 (DWARF 4), by clang for big-endian ARM (DWARF 5), and by GCC for x86-64 (64-bit pointers). A second "rebuilt" image tests reloading. `build.sh` rebuilds them; the ELFs are committed.
 
 ### On Windows over a COM port
 
