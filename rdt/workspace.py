@@ -1,9 +1,12 @@
 """Workspace (``.rdtw``): everything about one bench in one TOML file.
 
 A workspace is a target file (connection, SCPI profile, MCUs) plus what the user set up on top
-of it: the watch list with each item's display format, scaling, polling and write safety, the
-command buttons, and the chart layout. A plain target file loads as a workspace with an empty
-watch list, and a workspace works anywhere a target file does.
+of it: the watch tabs, each a named watch list, with each item's display format, scaling,
+polling and write safety, and the chart layout. A plain target file loads as a workspace with no
+tabs, and a workspace works anywhere a target file does.
+
+An expression may be in several tabs. It is still one item: its settings are the same in every
+tab, and it is read once per poll.
 
     ws = Workspace.load("bench.rdtw")
     with Target(ws.config) as t:
@@ -110,38 +113,18 @@ def _opt_float(v) -> float | None:
 
 
 @dataclass
-class Button:
-    """A user-defined button that sends one SCPI command. ``{param}`` in the command is filled
-    with a value asked for when it is pressed; ``param`` is the label for that value."""
+class Tab:
+    """One watch tab: a name and its own list of watched items."""
 
     name: str
-    command: str
-    param: str = ""
+    watches: list[Watch] = field(default_factory=list)
 
-    @property
-    def needs_param(self) -> bool:
-        return "{param}" in self.command
+    def watch(self, expr: str) -> Watch | None:
+        key = canonical(expr)
+        return next((w for w in self.watches if w.expr == key), None)
 
-    def fill(self, value: str | None) -> str:
-        if self.needs_param:
-            if value is None or value == "":
-                raise ConfigError(f"button {self.name!r} needs a value" + (f" ({self.param})" if self.param else ""))
-            return self.command.replace("{param}", value)
-        if value:
-            raise ConfigError(f"button {self.name!r} takes no value")
-        return self.command
 
-    def to_dict(self) -> dict:
-        d = {"name": self.name, "command": self.command}
-        if self.param:
-            d["param"] = self.param
-        return d
-
-    @classmethod
-    def from_dict(cls, t: dict) -> Button:
-        if not t.get("name") or not t.get("command"):
-            raise ConfigError(f"every [[button]] needs a name and a command: {t!r}")
-        return cls(str(t["name"]), str(t["command"]), str(t.get("param", "")))
+DEFAULT_TAB = "Watch"
 
 
 @dataclass
@@ -172,11 +155,11 @@ class Reading:
 @dataclass
 class Workspace:
     config: TargetConfig = field(default_factory=TargetConfig)
-    watches: list[Watch] = field(default_factory=list)
-    buttons: list[Button] = field(default_factory=list)
+    tabs: list[Tab] = field(default_factory=list)
     poll_ms: int = DEFAULT_POLL_MS   # the global polling interval; 0 is off
     chart: dict = field(default_factory=dict)   # owned by the GUI's chart; kept as written
     path: Path | None = None
+    warnings: list[str] = field(default_factory=list)   # about the file as it was loaded
 
     # --- files -------------------------------------------------------------------------------
 
@@ -201,17 +184,15 @@ class Workspace:
             poll = 0
         if not isinstance(poll, int) or poll < 0:
             raise ConfigError("poll_ms must be a time in ms, or 0 (or \"off\") for no polling")
-        watches = [Watch.from_dict(t) for t in raw.get("watch", [])]
-        seen = set()
-        for w in watches:
-            if w.expr in seen:
-                raise ConfigError(f"{w.expr} is in the watch list twice")
-            seen.add(w.expr)
-        buttons = [Button.from_dict(t) for t in raw.get("button", [])]
+        tabs = _tabs_from(raw)
         chart = raw.get("chart", {})
         if not isinstance(chart, dict):
             raise ConfigError("[chart] must be a table")
-        return cls(TargetConfig.from_dict(raw, base), watches, buttons, poll, chart)
+        ws = cls(TargetConfig.from_dict(raw, base), tabs, poll, chart)
+        if raw.get("button"):
+            ws.warnings.append("command buttons are no longer supported: the [[button]] tables are ignored "
+                               "and are left out when the workspace is saved")
+        return ws
 
     def to_dict(self, base: Path) -> dict:
         cfg = self.config
@@ -245,10 +226,16 @@ class Workspace:
             mcus.append(md)
         if mcus:
             d["mcu"] = mcus
-        if self.watches:
-            d["watch"] = [w.to_dict() for w in self.watches]
-        if self.buttons:
-            d["button"] = [b.to_dict() for b in self.buttons]
+        tabs, written = [], set()
+        for tab in self.tabs:
+            td: dict = {"name": tab.name}
+            if tab.watches:
+                # an item in several tabs keeps its settings at its first place only
+                td["watch"] = [w.to_dict() if w.expr not in written else {"expr": w.expr} for w in tab.watches]
+                written.update(w.expr for w in tab.watches)
+            tabs.append(td)
+        if tabs:
+            d["tab"] = tabs
         if self.chart:
             d["chart"] = self.chart
         return d
@@ -267,12 +254,71 @@ class Workspace:
         self.path = path
         return path
 
+    # --- tabs ---------------------------------------------------------------------------------
+
+    def tab(self, name: str) -> Tab:
+        """The tab with this name (any case)."""
+        for t in self.tabs:
+            if t.name.lower() == name.strip().lower():
+                return t
+        names = ", ".join(t.name for t in self.tabs) or "none"
+        raise ConfigError(f"no tab {name!r}; the workspace has {names}")
+
+    def has_tab(self, name: str) -> bool:
+        return any(t.name.lower() == name.strip().lower() for t in self.tabs)
+
+    def add_tab(self, name: str, index: int | None = None) -> Tab:
+        name = _tab_name(name)
+        if self.has_tab(name):
+            raise ConfigError(f"there is already a tab {name!r}")
+        tab = Tab(name)
+        self.tabs.insert(len(self.tabs) if index is None else index, tab)
+        return tab
+
+    def remove_tab(self, name: str) -> Tab:
+        tab = self.tab(name)
+        self.tabs.remove(tab)
+        return tab
+
+    def rename_tab(self, old: str, new: str) -> Tab:
+        tab = self.tab(old)
+        new = _tab_name(new)
+        if new.lower() != tab.name.lower() and self.has_tab(new):
+            raise ConfigError(f"there is already a tab {new!r}")
+        tab.name = new
+        return tab
+
+    def ensure_tab(self) -> Tab:
+        """The first tab, made (as "Watch") when the workspace has none."""
+        if not self.tabs:
+            self.tabs.append(Tab(DEFAULT_TAB))
+        return self.tabs[0]
+
+    def tabs_with(self, expr: str) -> list[Tab]:
+        key = canonical(expr)
+        return [t for t in self.tabs if t.watch(key)]
+
     # --- the watch list ----------------------------------------------------------------------
 
+    @property
+    def watches(self) -> list[Watch]:
+        """Every watched item once, in tab order."""
+        out, seen = [], set()
+        for t in self.tabs:
+            for w in t.watches:
+                if w.expr not in seen:
+                    seen.add(w.expr)
+                    out.append(w)
+        return out
+
     def watch(self, expr: str) -> Watch | None:
-        """The watch list's item for exactly this expression."""
+        """The watched item for exactly this expression, from whichever tab has it."""
         key = canonical(expr)
-        return next((w for w in self.watches if w.expr == key), None)
+        for t in self.tabs:
+            w = t.watch(key)
+            if w is not None:
+                return w
+        return None
 
     def guard_for(self, expr: str) -> tuple[Watch | None, Watch | None]:
         """The item for this expression, and the watched struct or array it is inside, if any.
@@ -286,25 +332,41 @@ class Workspace:
                     parent = w
         return exact, parent
 
-    def add(self, w: Watch) -> Watch:
-        if self.watch(w.expr):
-            raise ConfigError(f"{w.expr} is already in the watch list")
-        self.watches.append(w)
+    def add(self, w: Watch, tab: str | None = None) -> Watch:
+        """Add an item to a tab (the first one by default). An item already in another tab is
+        shared: the tab gets that item, with its settings."""
+        t = self.tab(tab) if tab is not None else self.ensure_tab()
+        if t.watch(w.expr):
+            raise ConfigError(f"{w.expr} is already in tab {t.name!r}")
+        w = self.watch(w.expr) or w
+        t.watches.append(w)
         return w
 
-    def remove(self, expr: str) -> Watch:
-        w = self.watch(expr)
-        if w is None:
-            raise ConfigError(f"{canonical(expr)} is not in the watch list")
-        self.watches.remove(w)
-        return w
+    def remove(self, expr: str, tab: str | None = None) -> Watch:
+        """Remove an item from one tab, or from every tab when none is named."""
+        key = canonical(expr)
+        tabs = [self.tab(tab)] if tab is not None else self.tabs
+        found = None
+        for t in tabs:
+            w = t.watch(key)
+            if w is not None:
+                t.watches.remove(w)
+                found = w
+        if found is None:
+            where = f"tab {tabs[0].name!r}" if tab is not None else "the watch list"
+            raise ConfigError(f"{key} is not in {where}")
+        return found
 
-    def button(self, name: str) -> Button:
-        for b in self.buttons:
-            if b.name.lower() == name.lower():
-                return b
-        names = ", ".join(b.name for b in self.buttons) or "none"
-        raise ConfigError(f"no button {name!r}; the workspace has {names}")
+    def replace(self, new: Watch) -> None:
+        """Give an item new settings, in every tab that has it."""
+        found = False
+        for t in self.tabs:
+            for i, w in enumerate(t.watches):
+                if w.expr == new.expr:
+                    t.watches[i] = new
+                    found = True
+        if not found:
+            raise ConfigError(f"{new.expr} is not in the watch list")
 
     # --- values ------------------------------------------------------------------------------
 
@@ -407,6 +469,61 @@ class Workspace:
             raw = t.parse_value(loc, str(raw))   # checks that the raw value fits the type
         t.write_value(loc, raw)
         return loc, raw
+
+
+def _tab_name(name: str) -> str:
+    name = str(name).strip()
+    if not name:
+        raise ConfigError("a tab needs a name")
+    return name
+
+
+def _tabs_from(raw: dict) -> list[Tab]:
+    """The tabs of a workspace file. A file from before tabs has one plain [[watch]] list; it
+    becomes the tab "Watch"."""
+    tabs: list[Tab] = []
+    shared: dict[str, Watch] = {}
+    names = set()
+
+    def take(tab: Tab, items) -> None:
+        for t in items:
+            w = Watch.from_dict(t)
+            if tab.watch(w.expr):
+                raise ConfigError(f"{w.expr} is in tab {tab.name!r} twice")
+            first = shared.get(w.expr)
+            if first is None:
+                shared[w.expr] = w
+            elif set(t) != {"expr"} and w != first:
+                raise ConfigError(f"{w.expr} has different settings in two tabs; an item has one set of "
+                                  f"settings, so give them only at its first place")
+            else:
+                w = first
+            tab.watches.append(w)
+
+    plain = raw.get("watch", [])
+    if plain:
+        tab = Tab(DEFAULT_TAB)
+        take(tab, plain)
+        tabs.append(tab)
+        names.add(tab.name.lower())
+    for t in raw.get("tab", []):
+        if not isinstance(t, dict):
+            raise ConfigError("every [[tab]] must be a table with a name")
+        unknown = set(t) - {"name", "watch"}
+        if unknown:
+            raise ConfigError(f"[[tab]] {t.get('name', '')!r}: unknown keys {', '.join(sorted(unknown))}")
+        name = _tab_name(t.get("name", ""))
+        if name.lower() in names:
+            if plain and name.lower() == DEFAULT_TAB.lower():
+                tab = tabs[0]   # the old plain list and a [[tab]] "Watch" are the same tab
+                take(tab, t.get("watch", []))
+                continue
+            raise ConfigError(f"there are two tabs named {name!r}")
+        names.add(name.lower())
+        tab = Tab(name)
+        take(tab, t.get("watch", []))
+        tabs.append(tab)
+    return tabs
 
 
 def _num(v: float) -> float | int:

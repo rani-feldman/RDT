@@ -1,4 +1,4 @@
-"""RDT main window: connection bar, variable view, memory view, SCPI console and command buttons,
+"""RDT main window: connection bar, watch tabs, variable browser, chart, memory view and SCPI console,
 all working on one workspace (``.rdtw``).
 
     rdt-gui [bench.rdtw]
@@ -28,11 +28,11 @@ from ..target import ConnectionConfig, McuConfig, TargetConfig
 from ..workspace import Workspace
 from .chart import ChartPanel
 from .device import Device, describe_error
-from .panels import ButtonPanel, Console, McuDialog, MemoryView, ProfileDialog
-from .variables import SymbolBrowser, WatchTree
+from .panels import Console, McuDialog, MemoryView, ProfileDialog
+from .variables import SymbolBrowser, WatchTabs, WatchTree
 
 FILTER = "RDT workspace (*.rdtw);;Target file (*.toml);;All files (*)"
-TICK_MS = 50            # how often the watch tree looks for items that are due
+TICK_MS = 50            # how often the watch tabs look for items that are due
 ELF_CHECK_MS = 1000     # how often to look for rebuilt ELF files
 BAUDS = ("9600", "19200", "38400", "57600", "115200", "230400", "460800", "921600")
 
@@ -167,26 +167,23 @@ class MainWindow(QMainWindow):
         self.chart = ChartPanel(self)
         self.chart.changed.connect(self._chart_changed)
         self.chart.series_changed.connect(self._chart_series_changed)
-        self.watch_tree = WatchTree(self)
-        self.watch_tree.changed.connect(self.set_dirty)
-        self.watch_tree.sampled.connect(self.chart.feed)
-        self.watch_tree.sampled.connect(self._log_readings)
-        self.watch_tree.chart_requested.connect(self.add_to_chart)
-        self.setCentralWidget(self.watch_tree)
+        self.watch_tabs = WatchTabs(self)
+        self.watch_tabs.changed.connect(self.set_dirty)
+        self.watch_tabs.sampled.connect(self.chart.feed)
+        self.watch_tabs.sampled.connect(self._log_readings)
+        self.watch_tabs.chart_requested.connect(self.add_to_chart)
+        self.setCentralWidget(self.watch_tabs)
         self.symbols = SymbolBrowser(self)
-        self.symbols.add_requested.connect(self.watch_tree.add_watch)
+        self.symbols.add_requested.connect(lambda expr: self.watch_tabs.add_watch(expr))
         self.console = Console(self)
         self.memory = MemoryView(self)
-        self.buttons = ButtonPanel(self)
-        self.buttons.changed.connect(self.set_dirty)
         self.bar = ConnectionBar(self)
         self.addToolBar(self.bar)
         self.docks = {}
         for title, widget, area in (("Variables", self.symbols, Qt.LeftDockWidgetArea),
                                     ("Chart", self.chart, Qt.BottomDockWidgetArea),
                                     ("Console", self.console, Qt.BottomDockWidgetArea),
-                                    ("Memory", self.memory, Qt.BottomDockWidgetArea),
-                                    ("Buttons", self.buttons, Qt.RightDockWidgetArea)):
+                                    ("Memory", self.memory, Qt.BottomDockWidgetArea)):
             dock = QDockWidget(title, self)
             dock.setObjectName(title.lower())
             dock.setWidget(widget)
@@ -196,7 +193,7 @@ class MainWindow(QMainWindow):
         self.tabifyDockWidget(self.docks["Console"], self.docks["Memory"])
         self.docks["Chart"].raise_()
         self.resizeDocks([self.docks["Chart"]], [300], Qt.Vertical)
-        self.resizeDocks([self.docks["Variables"], self.docks["Buttons"]], [250, 150], Qt.Horizontal)
+        self.resizeDocks([self.docks["Variables"]], [250], Qt.Horizontal)
         self._menus()
         self.message = QLabel()
         self.statusBar().addWidget(self.message, 1)
@@ -204,7 +201,7 @@ class MainWindow(QMainWindow):
         self.statusBar().addPermanentWidget(self.log_label)
 
         self.poll_timer = QTimer(self)
-        self.poll_timer.timeout.connect(self.watch_tree.tick)
+        self.poll_timer.timeout.connect(self.watch_tabs.tick)
         self.poll_timer.start(TICK_MS)
         self.state_timer = QTimer(self)
         self.state_timer.timeout.connect(self._show_state)
@@ -244,28 +241,39 @@ class MainWindow(QMainWindow):
         action(m, "Re&move selected", lambda: [self.watch_tree.remove_watch(e) for e in self.watch_tree.selected_exprs()],
                QKeySequence.Delete)
         m.addSeparator()
+        action(m, "&New tab...", lambda: self.watch_tabs.new_tab(), "Ctrl+Shift+T")
+        action(m, "Re&name tab...", lambda: self.watch_tabs.rename_tab())
+        action(m, "Remove &tab", lambda: self.watch_tabs.close_tab())
+        action(m, "Next tab", lambda: self.watch_tabs.setCurrentIndex(
+            (self.watch_tabs.currentIndex() + 1) % self.watch_tabs.count()), "Ctrl+PgDown")
+        action(m, "Previous tab", lambda: self.watch_tabs.setCurrentIndex(
+            (self.watch_tabs.currentIndex() - 1) % self.watch_tabs.count()), "Ctrl+PgUp")
+        m.addSeparator()
         action(m, "Add selected to &chart", self.chart_selected, "Ctrl+G")
-        action(m, "Reset &statistics", lambda: self.watch_tree.reset_stats())
+        action(m, "Reset &statistics", lambda: self.watch_tabs.reset_stats())
         self.log_action = action(m, "&Log to CSV...", self.toggle_log, "Ctrl+L")
         self.log_action.setCheckable(True)
         m = self.menuBar().addMenu("&View")
         for dock in self.docks.values():
             m.addAction(dock.toggleViewAction())
         m.addSeparator()
-        stats = action(m, "&Statistics columns", self.watch_tree.show_stats, "Ctrl+T")
+        stats = action(m, "&Statistics columns", self.watch_tabs.show_stats, "Ctrl+T")
         stats.setCheckable(True)
 
     # --- workspace ---------------------------------------------------------------------------
 
     def show_workspace(self) -> None:
         self.bar.show_config(self.ws)
-        self.watch_tree.rebuild()
-        self.watch_tree.reset_stats()
+        self.watch_tabs.rebuild()
         self.chart.load(self.ws.chart)
         self.symbols.set_workspace(self.ws)
         self.memory.set_workspace(self.ws)
-        self.buttons.rebuild()
         self.set_dirty(False)
+
+    @property
+    def watch_tree(self) -> WatchTree:
+        """The watch tree of the tab in front."""
+        return self.watch_tabs.current()
 
     def set_dirty(self, dirty: bool = True) -> None:
         self.dirty = dirty
@@ -314,7 +322,8 @@ class MainWindow(QMainWindow):
             self.device.close()
         self.ws = ws
         self.show_workspace()
-        self.status(f"Opened {ws.path}" if ws.path else "New workspace")
+        msg = f"Opened {ws.path}" if ws.path else "New workspace"
+        self.status("; ".join([msg] + ws.warnings))
 
     def save(self) -> bool:
         if self.ws.path is None:
@@ -363,8 +372,7 @@ class MainWindow(QMainWindow):
         if ms != self.ws.poll_ms:
             self.ws.poll_ms = ms
             self.set_dirty()
-            for st in self.watch_tree.states.values():
-                self.watch_tree._decorate(st)
+            self.watch_tabs.decorate()
             if self.memory.auto.isChecked():
                 self.memory._auto(True)
 
@@ -420,7 +428,7 @@ class MainWindow(QMainWindow):
         self.bar.state.setStyleSheet(f"color: {color}")
         self.bar.connect_button.setText(button)
         up = state == LinkState.UP
-        for w in (self.memory, self.console, self.buttons):
+        for w in (self.memory, self.console):
             w.setEnabled(up)
         for w in (self.bar.transport, self.bar.host, self.bar.port, self.bar.com, self.bar.baud):
             w.setEnabled(self.device.target is None and not self._connecting)
@@ -434,7 +442,7 @@ class MainWindow(QMainWindow):
                 self.log.event(time.time(), f"ELF rebuilt for {', '.join(mcus)}")
             if mcus:
                 self.status(f"ELF rebuilt for {', '.join(mcus)}; watch items found again by name")
-                self.watch_tree.remap(mcus)
+                self.watch_tabs.remap(mcus)
                 self.symbols.reload()
 
         self.device.submit(lambda t: t.refresh_elfs(), reloaded, lambda e: self.status(describe_error(e), True),
@@ -508,9 +516,9 @@ class MainWindow(QMainWindow):
         self.set_dirty()
 
     def _chart_series_changed(self) -> None:
-        for expr in self.watch_tree.states:
+        for expr in self.watch_tabs.exprs():
             if self.chart.wants(expr):
-                self.watch_tree.states[expr].force = True
+                self.watch_tabs.force(expr)
 
     # --- CSV log -----------------------------------------------------------------------------
 
@@ -534,7 +542,8 @@ class MainWindow(QMainWindow):
                 self._show_log()
                 return False
         columns, units = [], {}
-        for expr, st in self.watch_tree.states.items():
+        for _, st in self.watch_tabs.states():
+            expr = st.watch.expr
             leaves = [p for p, r in st.shown.items() if r.text is not None and r.raw is not None] or [expr]
             columns += [p for p in leaves if p not in columns]
             if st.watch.display.unit:
@@ -546,8 +555,7 @@ class MainWindow(QMainWindow):
             self._show_log()
             return False
         self._log_link_up = True
-        for st in self.watch_tree.states.values():
-            st.force = True   # a first row with everything
+        self.watch_tabs.force()   # a first row with everything
         self.status(f"Logging {len(columns)} values to {path}")
         self._show_log()
         return True
@@ -590,8 +598,7 @@ class MainWindow(QMainWindow):
         self.log_label.setText(f"CSV: {self.log.path.name}, {self.log.rows} rows" if on else "")
 
     def read_all(self) -> None:
-        for expr in list(self.watch_tree.states):
-            self.watch_tree.read_now(expr)
+        self.watch_tabs.read_all()
 
 
 def main(argv: list[str] | None = None) -> int:
