@@ -88,6 +88,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     p = sub.add_parser("read", help="read values; structs and arrays open to every field and cell")
     p.add_argument("exprs", nargs="*", metavar="EXPR", help="default: the workspace's watch list")
+    p.add_argument("--tab", metavar="NAME", help="only the items in this watch tab")
     p.add_argument("--max-cells", type=int, default=100, metavar="N", help="cells shown per array (default 100)")
 
     p = sub.add_parser("write", help="write one value and confirm it by reading it back")
@@ -114,6 +115,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     p = sub.add_parser("watch", help="poll values and print one line per sample (Ctrl+C stops)")
     p.add_argument("exprs", nargs="*", metavar="EXPR", help="default: the workspace's watch list")
+    p.add_argument("--tab", metavar="NAME", help="only the items in this watch tab")
     p.add_argument("-i", "--interval", type=float, metavar="MS",
                    help="poll interval (default: the workspace's poll_ms, else 500)")
     p.add_argument("-n", "--count", type=int, default=0, help="stop after this many samples (default: run until Ctrl+C)")
@@ -121,18 +123,15 @@ def build_parser() -> argparse.ArgumentParser:
 
     sub.add_parser("console", help="interactive SCPI console")
 
-    p = sub.add_parser("press", help="send a workspace button's SCPI command")
-    p.add_argument("button")
-    p.add_argument("param", nargs="?", help="the value for a button whose command has {param}")
-
     p = sub.add_parser("init", help="save the target as a new workspace file (no device needed)")
     p.add_argument("file", type=Path)
     p.add_argument("--force", action="store_true", help="overwrite the file if it exists")
 
-    sub.add_parser("list", help="show the workspace's watch list and buttons (no device needed)")
+    sub.add_parser("list", help="show the workspace's watch tabs and their items (no device needed)")
 
     p = sub.add_parser("add", help="add an item to the workspace's watch list, or change one (no device needed)")
     p.add_argument("expr", metavar="EXPR")
+    p.add_argument("--tab", metavar="NAME", help="the watch tab to add it to, made if it is new (default: the first)")
     p.add_argument("--format", choices=FORMATS, help="integers as dec, hex, bin or char")
     p.add_argument("--q", metavar="QFMT", help="fixed point, such as Q15, Q31 or Q3.12")
     p.add_argument("--scale", type=float, metavar="K", help="shown = raw * K + OFFSET")
@@ -146,6 +145,15 @@ def build_parser() -> argparse.ArgumentParser:
 
     p = sub.add_parser("remove", help="remove an item from the workspace's watch list (no device needed)")
     p.add_argument("expr", metavar="EXPR")
+    p.add_argument("--tab", metavar="NAME", help="remove it from this watch tab only (default: from every tab)")
+
+    p = sub.add_parser("tab", help="add, rename or remove a watch tab (no device needed)")
+    tab = p.add_subparsers(dest="tab_cmd", metavar="ACTION", required=True)
+    tab.add_parser("add", help="add an empty tab").add_argument("name")
+    q = tab.add_parser("rename", help="rename a tab")
+    q.add_argument("name")
+    q.add_argument("new_name")
+    tab.add_parser("remove", help="remove a tab and its items").add_argument("name")
     return ap
 
 
@@ -223,7 +231,14 @@ def print_shown(loc: Location, shown: list[Shown], out) -> None:
 
 def _exprs(args) -> list[str]:
     if args.exprs:
+        if args.tab:
+            raise ConfigError("name what to read, or give --tab, not both")
         return args.exprs
+    if args.tab:
+        tab = args.ws.tab(args.tab)
+        if not tab.watches:
+            raise ConfigError(f"tab {tab.name!r} has no items")
+        return [w.expr for w in tab.watches]
     if not args.ws.watches:
         raise ConfigError("name what to read, or give a workspace (-w) with a watch list")
     return [w.expr for w in args.ws.watches]
@@ -501,11 +516,6 @@ def cmd_watch(t: Target, args, out) -> int:
     return 0
 
 
-def cmd_press(t: Target, args, out) -> int:
-    b = args.ws.button(args.button)
-    return _send(t, b.fill(args.param), None, out)
-
-
 def _need_file(ws: Workspace) -> Workspace:
     if ws.path is None:
         raise ConfigError("give the workspace file with -w FILE (rdt init FILE makes one)")
@@ -523,13 +533,14 @@ def cmd_init(t: Target, args, out) -> int:
 def cmd_list(t: Target, args, out) -> int:
     ws = _need_file(args.ws)
     poll = f"every {ws.poll_ms} ms" if ws.poll_ms else "off"
-    print(f"{ws.path}: {len(ws.watches)} watched items, polling {poll}", file=out)
+    tabs = f"{len(ws.tabs)} tab{'' if len(ws.tabs) == 1 else 's'}"
+    print(f"{ws.path}: {len(ws.watches)} watched items in {tabs}, polling {poll}", file=out)
     width = max((len(w.expr) for w in ws.watches), default=0)
-    for w in ws.watches:
-        notes = [f"{k}={v}" for k, v in w.to_dict().items() if k != "expr"]
-        print(f"  {w.expr:<{width}}  {' '.join(notes)}".rstrip(), file=out)
-    for b in ws.buttons:
-        print(f"  button {b.name!r}: {b.command}" + (f"  ({{param}}: {b.param})" if b.param else ""), file=out)
+    for tab in ws.tabs:
+        print(f"tab {tab.name!r}: {len(tab.watches)} items", file=out)
+        for w in tab.watches:
+            notes = [f"{k}={v}" for k, v in w.to_dict().items() if k != "expr"]
+            print(f"  {w.expr:<{width}}  {' '.join(notes)}".rstrip(), file=out)
     return 0
 
 
@@ -551,19 +562,47 @@ def cmd_add(t: Target, args, out) -> int:
         d["poll"] = args.poll if args.poll in ("global", "manual") else _int(args.poll)
     w = Watch.from_dict(d)
     if old:
-        ws.watches[ws.watches.index(old)] = w
-    else:
-        ws.add(w)
+        ws.replace(w)
+    if args.tab is not None and not ws.has_tab(args.tab):
+        ws.add_tab(args.tab)
+    if args.tab is not None:
+        tab = ws.tab(args.tab)
+    else:   # without --tab, an item already watched is changed where it is
+        tab = ws.tabs_with(w.expr)[0] if old else ws.ensure_tab()
+    added = tab.watch(w.expr) is None
+    if added:
+        ws.add(w, tab.name)
     ws.save()
-    print(f"{'changed' if old else 'added'} {w.expr} in {ws.path}", file=out)
+    what = "added" if added else "changed"
+    if added and old:
+        what = "added (with its settings from another tab)" if d == old.to_dict() else "changed and added"
+    print(f"{what} {w.expr} in tab {tab.name!r} of {ws.path}", file=out)
     return 0
 
 
 def cmd_remove(t: Target, args, out) -> int:
     ws = _need_file(args.ws)
-    w = ws.remove(args.expr)
+    w = ws.remove(args.expr, args.tab)
     ws.save()
-    print(f"removed {w.expr} from {ws.path}", file=out)
+    where = f"tab {ws.tab(args.tab).name!r} of " if args.tab else ""
+    print(f"removed {w.expr} from {where}{ws.path}", file=out)
+    return 0
+
+
+def cmd_tab(t: Target, args, out) -> int:
+    ws = _need_file(args.ws)
+    if args.tab_cmd == "add":
+        tab = ws.add_tab(args.name)
+        msg = f"added tab {tab.name!r}"
+    elif args.tab_cmd == "rename":
+        old = ws.tab(args.name).name
+        tab = ws.rename_tab(args.name, args.new_name)
+        msg = f"renamed tab {old!r} to {tab.name!r}"
+    else:
+        tab = ws.remove_tab(args.name)
+        msg = f"removed tab {tab.name!r} and its {len(tab.watches)} items"
+    ws.save()
+    print(f"{msg} in {ws.path}", file=out)
     return 0
 
 
@@ -617,13 +656,13 @@ def cmd_console(t: Target, args, out) -> int:
 
 
 COMMANDS = {
-    "press": cmd_press, "init": cmd_init, "list": cmd_list, "add": cmd_add, "remove": cmd_remove,
+    "init": cmd_init, "list": cmd_list, "add": cmd_add, "remove": cmd_remove, "tab": cmd_tab,
     "info": cmd_info, "symbols": cmd_symbols, "ptype": cmd_ptype, "read": cmd_read, "write": cmd_write, "dump": cmd_dump, "poke": cmd_poke,
     "send": cmd_send, "errors": cmd_errors, "watch": cmd_watch, "console": cmd_console,
 }
 
 
-OFFLINE = ("symbols", "ptype", "init", "list", "add", "remove")   # never open the link
+OFFLINE = ("symbols", "ptype", "init", "list", "add", "remove", "tab")   # never open the link
 
 
 def main(argv: list[str] | None = None, out=None) -> int:
@@ -633,6 +672,8 @@ def main(argv: list[str] | None = None, out=None) -> int:
     logging.basicConfig(level=level, format="%(asctime)s %(name)s %(message)s", stream=sys.stderr)
     try:
         args.ws = load_workspace(args)
+        for warning in args.ws.warnings:
+            print(f"rdt: {warning}", file=sys.stderr)
         cfg = args.ws.config
         # One-shot commands fail at once on a broken link; watch and console keep reconnecting.
         target = Target(cfg, auto_reconnect=args.cmd in ("watch", "console"))

@@ -11,7 +11,7 @@ from rdt.errors import CommandTimeout, SymbolError
 from rdt.scheduler import plan, read_many
 from rdt.stats import StatsBook
 from rdt.symbols import EnumValue
-from rdt.workspace import Watch, Workspace
+from rdt.workspace import Tab, Watch, Workspace
 from sim import Simulator, TransportConfig, load_config
 
 from host_helpers import make_target
@@ -112,8 +112,8 @@ def test_a_failing_merged_block_is_read_item_by_item(target, monkeypatch):
 
 
 def test_workspace_read_many_scales_like_read(target):
-    ws = Workspace(target.config, [Watch.from_dict({"expr": "main:motor.current_ma", "scale": 0.001, "unit": "A"}),
-                                   Watch("main:motor")])
+    ws = Workspace(target.config, [Tab("Watch", [
+        Watch.from_dict({"expr": "main:motor.current_ma", "scale": 0.001, "unit": "A"}), Watch("main:motor")])])
     one = [ws.read(target, w, headers=True)[1] for w in ws.watches]
     many = ws.read_many(target, ws.watches, headers=True)
     assert [r.shown for r in many] == one
