@@ -852,7 +852,7 @@ class MemoryView(QWidget):
 
 # --- SCPI profile editor ---------------------------------------------------------------------
 
-_OPTIONAL = {"size_query", "reply_regex", "error_query", "probe"}
+_OPTIONAL = {"reply_regex", "error_query", "probe"}
 
 
 def _escape(s: str) -> str:

@@ -67,7 +67,7 @@ def test_far_apart_items_and_other_mcus_are_read_separately(target):
 
 
 def test_blocks_stay_within_max_response(sim):
-    with make_target("tcp", sim.tcp_address, Profile(timeout_ms=300, max_response=8, size_query=None)) as t:
+    with make_target("tcp", sim.tcp_address, Profile(timeout_ms=300, max_response=8)) as t:
         assert blocks(t, ["main:motor.speed", "main:motor.target", "main:motor.current_ma"]) == \
             [("main", 0x20000000, 8, [0, 1]), ("main", 0x20000008, 2, [2])]
         # one item larger than max_response is still one block; the session splits the read

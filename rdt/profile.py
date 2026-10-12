@@ -1,7 +1,7 @@
 """SCPI profile: the user-defined command templates and reply format.
 
 Nothing about the firmware's commands is hard-coded. The profile says how to spell a read, a
-write, the error query and the size query, and how the read reply is encoded. The simulator
+write and the error query, and how the read reply is encoded. The simulator
 reads the same ``[scpi]`` table, so one file describes both sides.
 """
 
@@ -16,6 +16,9 @@ from pathlib import Path
 from .errors import BadReply, ConfigError, DeviceError
 
 DATA_FORMATS = ("hex", "bytes_csv", "decimal", "ieee_block")
+# Keys older profiles may still have, ignored on load. There is no size query: the largest
+# read reply is the profile's max_response, set by the user (rani, 2026-10-12).
+RETIRED_KEYS = {"size_query"}
 TEMPLATE_FIELDS = {"read": {"mcu", "addr", "len"}, "write": {"mcu", "addr", "value", "size"}}
 
 
@@ -97,11 +100,10 @@ class Profile:
     value_format: str = "0x{value:X}"      # raw integer; floats are sent as their bit pattern
     addr_format: str = "0x{addr:08X}"
     max_write: int = 4                     # largest value one write accepts, in bytes
-    size_query: str | None = "MEMory:MAX?"  # optional; its reply replaces max_response on connect
     data_format: str = "hex"               # read reply: hex | bytes_csv | decimal | ieee_block
     reply_regex: str | None = None         # optional; group "data" (or group 1) holds the data
     byte_order: str = "little"             # used for an MCU without an ELF
-    max_response: int = 1024               # bytes of data one read reply can carry
+    max_response: int = 1024               # bytes of data one read reply can carry; set here only
     error_query: str | None = "SYSTem:ERRor?"
     probe: str | None = "*IDN?"            # sent on connect and reconnect to check the device answers
     terminator: str = "\n"
@@ -155,6 +157,7 @@ class Profile:
     @classmethod
     def from_dict(cls, table: dict, ranges: list[dict] | None = None) -> Profile:
         known = {f.name for f in fields(cls)} - {"ranges"}
+        table = {k: v for k, v in table.items() if k not in RETIRED_KEYS}
         unknown = set(table) - known
         if unknown:
             raise ConfigError(f"unknown [scpi] keys: {', '.join(sorted(unknown))}")

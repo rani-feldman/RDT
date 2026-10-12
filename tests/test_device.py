@@ -11,9 +11,9 @@ def q(device, line):
     return None if reply is None else reply.decode("latin-1")
 
 
-def test_identity_and_max(device):
+def test_identity(device):
     assert q(device, "*IDN?").startswith("RDT,Simulator")
-    assert q(device, "MEM:MAX?") == "1024"
+    assert q(device, "MEM:MAX?") is None                  # no size query: max_response is set in the profile
     assert q(device, "SIM:MCU:LIST?") == '0,"main",1,"motorctl"'
 
 
@@ -119,7 +119,7 @@ def test_data_formats(two_mcus, fmt, expected):
 def test_user_defined_templates():
     """The commands rani's firmware will have: plain read/write with bare hex values."""
     profile = Profile(read="read {mcu},{addr},{len}", write="write {mcu},{addr},{value},{size}",
-                      addr_format="{addr:X}", value_format="{value:X}", size_query=None)
+                      addr_format="{addr:X}", value_format="{value:X}")
     d = Device([ram_mcu(0), ram_mcu(2)], profile)
     assert d.handle("write 2,20000010,DEADBEEF,4") is None
     assert d.handle("read 2,20000010,4") == b"EFBEADDE"

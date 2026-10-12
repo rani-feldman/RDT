@@ -26,7 +26,7 @@ from typing import Callable
 from .errors import (
     BadReply, CommandRejected, CommandTimeout, DeviceError, LinkDown, LinkError, McuSilent, WriteNotConfirmed,
 )
-from .profile import Profile, parse_int
+from .profile import Profile
 from .protocol import ScpiProtocol
 from .transport import Transport
 
@@ -126,16 +126,6 @@ class Session:
                     raise LinkError(f"{self.transport.description}: no reply to {p.probe}")
                 self.idn = reply
             self.max_response = p.max_response
-            if p.size_query:
-                reply = self._query_with_retries(p.size_query)
-                try:
-                    n = parse_int(reply) if reply is not None else 0
-                except ValueError:
-                    n = 0
-                if n > 0:
-                    self.max_response = n
-                else:
-                    log.info("no usable reply to %s; max_response stays %d", p.size_query, p.max_response)
         except LinkError:
             self.transport.close()
             raise
