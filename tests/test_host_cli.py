@@ -41,7 +41,7 @@ def test_info(sim):
     assert code == 0
     assert "RDT,Simulator" in out
     assert "MCU 1 motorctl (motorctl.elf, little endian)" in out
-    assert "0x48000000      1024  rw  range    GPIOA" in out
+    assert "0x48000000      1024  rw  peripheral  GPIOA" in out
 
 
 @pytest.mark.parametrize("transport", ["tcp", "udp"])

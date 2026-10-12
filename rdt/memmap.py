@@ -2,9 +2,9 @@
 
 RDT refuses any access outside the ELF's allocated sections (RAM and flash) and the extra
 ranges listed in the profile or the target file. Sections without the write flag, such as
-``.text`` and ``.rodata``, are read-only. A read may span adjacent ELF sections, but an access
-that touches a listed range must stay inside that one range: those are typically peripherals,
-which are never merged with anything else.
+``.text`` and ``.rodata``, are read-only, also where a listed memory range covers them.
+A read may span adjacent ELF sections and memory ranges. A peripheral range is accessed on its
+own: an access that touches one must stay inside it, and it is never merged with anything else.
 """
 
 from __future__ import annotations
@@ -22,7 +22,12 @@ class Area:
     start: int
     size: int
     writable: bool
-    peripheral: bool  # a listed range rather than an ELF section
+    peripheral: bool     # a listed peripheral range: never merged, accessed on its own
+    memory: bool = False  # a listed memory range (RAM or flash), which may overlap ELF sections
+
+    @property
+    def kind(self) -> str:
+        return "peripheral" if self.peripheral else "memory" if self.memory else "section"
 
     @property
     def end(self) -> int:
@@ -62,11 +67,13 @@ def load_elf_sections(path: str | Path) -> ElfInfo:
 class MemoryMap:
     def __init__(self, sections: list[Area] | None = None, ranges: list[Range] | None = None):
         areas = list(sections or [])
-        areas += [Area(r.name, r.start, r.size, r.writable, True) for r in ranges or []]
-        areas.sort(key=lambda a: a.start)
-        for a, b in zip(areas, areas[1:]):
-            if b.start < a.end and (a.peripheral or b.peripheral):
-                raise ConfigError(f"range {b.name} overlaps {a.name}")
+        areas += [Area(r.name, r.start, r.size, r.writable, r.kind == "peripheral", r.kind == "memory")
+                  for r in ranges or []]
+        areas.sort(key=lambda a: (a.start, -a.size))
+        for p in (a for a in areas if a.peripheral):
+            for a in areas:
+                if a is not p and a.start < p.end and p.start < a.end:
+                    raise ConfigError(f"peripheral range {p.name} overlaps {a.name}")
         self.areas = areas
 
     def check(self, addr: int, size: int, write: bool = False) -> list[Area]:
@@ -91,11 +98,12 @@ class MemoryMap:
         if pos < end:
             raise AccessRefused(f"{what} is outside the MCU's known memory (0x{pos:08X} is not in the ELF "
                                 f"or a listed range)")
+        touched = [a for a in self.areas if a.start < end and addr < a.end]   # overlapping ones too
         if any(a.peripheral for a in covered) and len(covered) > 1:
             raise AccessRefused(f"{what} crosses the edge of range {next(a.name for a in covered if a.peripheral)}; "
                                 f"listed ranges are accessed on their own")
         if write:
-            for a in covered:
+            for a in touched:   # a read-only section stays read-only inside a writable memory range
                 if not a.writable:
                     raise AccessRefused(f"{what} is in read-only {a.name}")
         return covered
