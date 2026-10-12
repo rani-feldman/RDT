@@ -77,3 +77,70 @@ def test_codec_checks_range_and_parses_user_values():
     assert codec.parse_value("2.5e3", "f32") == 2500.0
     assert codec.parse_value("0x3FC00000", "f32") == 1.5   # bit pattern
     assert codec.encode(1.5, "f32", "little") == bytes.fromhex("0000C03F")
+
+
+# --- memory ranges: RAM and flash banks listed by the user, over the ELF's sections ---------------
+
+def h7_regions():
+    """The read regions of an STM32H7 firmware, as start and inclusive end."""
+    return [Range.from_dict({"name": n, "start": s, "end": e, "kind": "memory", **extra}) for n, s, e, extra in (
+        ("ITCM", 0x00000000, 0x0000FFFF, {}),
+        ("Flash", 0x08000000, 0x081FFFFF, {"writable": False}),
+        ("DTCM", 0x20000000, 0x2001FFFF, {}),
+        ("AXI SRAM", 0x24000000, 0x2407FFFF, {}),
+    )]
+
+
+@pytest.fixture
+def banks():
+    elf = load_elf_sections(FIRMWARE / "main.elf")   # .data and .bss sit at the start of DTCM
+    return MemoryMap(elf.sections, h7_regions() + [Range("GPIOA", 0x48000000, 0x400)])
+
+
+def test_memory_range_from_end_and_kind():
+    r = h7_regions()[2]
+    assert (r.start, r.size, r.kind) == (0x20000000, 0x20000, "memory")
+    with pytest.raises(Exception, match="either size or end"):
+        Range.from_dict({"name": "x", "start": 0, "size": 4, "end": 3})
+    with pytest.raises(Exception, match="kind must be"):
+        Range.from_dict({"name": "x", "start": 0, "size": 4, "kind": "ram"})
+
+
+def test_memory_ranges_may_overlap_sections_and_extend_them(banks):
+    banks.check(0x20000000, 0x20000)                 # all of DTCM, .data and .bss included
+    banks.check(0x200000EA, 4)                       # past the end of .bss, still in DTCM
+    banks.check(0x2001FFFC, 4, write=True)
+
+
+@pytest.mark.parametrize("addr,size", [
+    (0x2001FFFE, 4),                                 # starts in DTCM, runs off its end
+    (0x0000FFF0, 0x20),                              # off the end of ITCM
+    (0x20020000, 1),                                 # the gap after DTCM
+])
+def test_reads_past_a_memory_range_are_refused(banks, addr, size):
+    with pytest.raises(AccessRefused, match="outside the MCU's known memory"):
+        banks.check(addr, size)
+
+
+def test_read_only_stays_read_only_inside_memory_ranges(banks):
+    banks.check(0x08100000, 4)                       # flash with no section: readable
+    with pytest.raises(AccessRefused, match="read-only Flash"):
+        banks.check(0x08100000, 4, write=True)
+    rw = MemoryMap(load_elf_sections(FIRMWARE / "main.elf").sections,
+                   [Range("Flash", 0x08000000, 0x200000, kind="memory")])
+    with pytest.raises(AccessRefused, match="read-only .text"):
+        rw.check(0x08000000, 4, write=True)          # a writable range doesn't unlock .text
+
+
+def test_a_peripheral_range_may_not_overlap_anything():
+    sections = load_elf_sections(FIRMWARE / "main.elf").sections
+    with pytest.raises(Exception, match="peripheral range DTCM overlaps"):
+        MemoryMap(sections, [Range("DTCM", 0x20000000, 0x20000)])
+    with pytest.raises(Exception, match="overlaps"):
+        MemoryMap([], [Range("A", 0x1000, 16, kind="memory"), Range("P", 0x1008, 4)])
+
+
+def test_scheduler_merges_inside_memory_ranges(banks):
+    from rdt.scheduler import _readable
+    assert _readable(banks, 0x20000000, 0x100)       # across .bss's end into the rest of DTCM
+    assert not _readable(banks, 0x48000000, 8)       # a peripheral: never merged

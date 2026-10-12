@@ -453,3 +453,15 @@ def test_cli_read_only(sim, tmp_path, capsys):
     assert code == 0 and "confirmed by read-back" in text
     assert main(["-w", str(path), *off, "read-only", "off"], out=out) == 0
     assert rdt(sim, path, "poke", "main", "0x20000010", "00")[0] == 0
+
+
+def test_memory_range_kind_is_saved(tmp_path):
+    from rdt.profile import Range
+    from rdt.target import McuConfig, TargetConfig
+    ws = Workspace(TargetConfig(mcus=[McuConfig(0, "main", ranges=[
+        Range("DTCM", 0x20000000, 0x20000, kind="memory"), Range("GPIOA", 0x48000000, 0x400)])]))
+    ws.save(tmp_path / "b.rdtw")
+    text = (tmp_path / "b.rdtw").read_text()
+    assert text.count("kind") == 1 and '"memory"' in text   # peripheral is the default
+    back = Workspace.load(tmp_path / "b.rdtw").config.mcus[0].ranges
+    assert [(r.name, r.kind, r.size) for r in back] == [("DTCM", "memory", 0x20000), ("GPIOA", "peripheral", 0x400)]
