@@ -35,7 +35,7 @@ def test_write_then_read_back(device):
 
 
 def test_write_takes_the_raw_value_in_bare_hex(device):
-    q(device, "MEM:WRITE 1,20000084,FFFF,2")
+    q(device, "MEM:WRITE 1,20000084,FFFF,4")
     assert q(device, "MEM:READ? 1,20000084,4") == "FFFF0000"
 
 
@@ -53,6 +53,8 @@ def test_prefixed_or_signed_numbers_are_refused(device, line):
     ("MEM:READ? 0,30000000,4", -222),        # unmapped
     ("MEM:READ? 0,20000000,1025", -223),     # over max_response
     ("MEM:READ? 0,20000000,0", -224),
+    ("MEM:READ? 0,20000002,4", -224),        # address not 4-byte aligned
+    ("MEM:READ? 0,20000000,2", -224),        # length not a multiple of 4
     ("MEM:READ? 9,20000000,4", -224),        # unknown MCU
     ("MEM:READ? 0,banana,4", -104),
     ("MEM:READ? 0,20000000", -102),
@@ -65,8 +67,10 @@ def test_failed_query_sends_no_reply_and_queues_the_error(device, line, code):
 
 
 @pytest.mark.parametrize("line,code", [
-    ("MEM:WRITE 0,08000050,1,1", -222),     # flash is read-only
-    ("MEM:WRITE 0,20000000,100,1", -222),  # does not fit
+    ("MEM:WRITE 0,08000050,1,4", -222),     # flash is read-only
+    ("MEM:WRITE 0,20000000,100000000,4", -222),  # does not fit
+    ("MEM:WRITE 0,20000002,1,4", -224),      # address not 4-byte aligned
+    ("MEM:WRITE 0,20000000,1,2", -224),      # size not a multiple of 4
     ("MEM:WRITE 0,20000000,1,8", -224),      # wider than max_write
     ("MEM:WRITE 0,20000000,1,3", -224),
 ])
@@ -132,5 +136,5 @@ def test_user_defined_templates():
 
 def test_big_endian_mcu():
     d = Device([ram_mcu(0, byte_order="big")])
-    d.handle("MEM:WRITE 0,20000000,1234,2")
-    assert d.handle("MEM:READ? 0,20000000,2") == b"1234"
+    d.handle("MEM:WRITE 0,20000000,1234,4")
+    assert d.handle("MEM:READ? 0,20000000,4") == b"00001234"

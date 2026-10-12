@@ -20,7 +20,7 @@ from PySide6.QtWidgets import (
 from ..console import (CommandHistory, SessionLog, completions, hex_to_text, history_path, merge_commands, read_commands,
                        text_to_hex, write_commands)
 from ..errors import CommandTimeout, ConfigError, LinkDown, RdtError, WriteRefused
-from ..profile import Profile, parse_int
+from ..profile import Profile, align_span, parse_int
 from ..target import McuConfig, Target
 from ..workspace import Workspace
 from .device import describe_error
@@ -881,6 +881,8 @@ class ProfileDialog(QDialog):
             "write": "Placeholders: {mcu} {addr} {value} {size}. {addr} and {value} are sent as bare hex",
             "reply_regex": "Optional; the group named data (or group 1) holds the hex data",
             "terminator": "Escapes allowed: \\n, \\r\\n",
+            "align": "Every read and write covers whole aligned words of this many bytes; "
+                     "a smaller value is read as its word and written by read-modify-write",
         }
         for f in fields(Profile):
             if f.name == "ranges":
@@ -891,7 +893,7 @@ class ProfileDialog(QDialog):
                 w.addItems(("little", "big"))
                 w.setCurrentText(value)
                 w.currentTextChanged.connect(self._preview)
-            elif f.name == "max_write":
+            elif f.name in ("max_write", "align"):
                 w = QComboBox()
                 w.addItems(["1", "2", "4", "8"])
                 w.setCurrentText(str(value))
@@ -945,7 +947,7 @@ class ProfileDialog(QDialog):
             text = w.currentText() if isinstance(w, QComboBox) else w.text()
             if name == "terminator":
                 values[name] = _unescape(text)
-            elif name in ("max_write", "max_response", "retries"):
+            elif name in ("max_write", "align", "max_response", "retries"):
                 values[name] = int(text)
             elif name == "timeout_ms":
                 values[name] = float(text)
@@ -968,7 +970,7 @@ class ProfileDialog(QDialog):
         self.ok.setEnabled(True)
         self.test_button.setEnabled(self.device.target is not None)
         self.preview.setText(f"Read 16 bytes:  {p.format_read(0, 0x20000000, 16)}\n"
-                             f"Write 2 bytes:  {p.format_write(0, 0x20000000, 0x1234, 2)}")
+                             f"Write {p.align} bytes:  {p.format_write(0, 0x20000000, 0x1234, p.align)}")
 
     def test(self) -> None:
         try:
@@ -977,7 +979,9 @@ class ProfileDialog(QDialog):
         except (ConfigError, ValueError) as e:
             self.test_result.setText(str(e))
             return
-        cmd = p.format_read(mcu, addr, length)
+        start, end = align_span(addr, length, p.align)   # the firmware takes only whole aligned words
+        cmd = p.format_read(mcu, start, end - start)
+        length = end - start
 
         def job(t: Target):
             reply = t.command(cmd, expect_reply=True, timeout_ms=p.timeout_ms)

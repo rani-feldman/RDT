@@ -3,6 +3,7 @@
 The simulator reads the same ``[scpi]`` table the host uses, so whatever templates the user
 defines are exactly the commands the simulated device answers. As in the firmware, addresses
 and values are bare hex with no prefix (``20000000``), and read replies are bare hex bytes.
+Every read and write must be whole aligned words (``align``, 4 bytes by default).
 """
 
 from __future__ import annotations
@@ -21,6 +22,7 @@ class Profile:
     read: str = "MEMory:READ? {mcu},{addr},{len}"
     write: str = "MEMory:WRITE {mcu},{addr},{value},{size}"
     max_write: int = 4
+    align: int = 4          # addr, len and size must be multiples of this (rani, 2026-10-12)
     max_response: int = 1024
     error_query: str = "SYSTem:ERRor?"
     terminator: str = "\n"
@@ -28,6 +30,8 @@ class Profile:
     def __post_init__(self) -> None:
         if self.max_response < 1:
             raise ValueError("max_response must be at least 1")
+        if self.align not in (1, 2, 4, 8):
+            raise ValueError("align must be 1, 2, 4 or 8")
         if not self.terminator:
             raise ValueError("terminator must not be empty")
 

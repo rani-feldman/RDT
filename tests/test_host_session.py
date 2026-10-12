@@ -139,8 +139,62 @@ def test_addresses_values_and_replies_are_bare_hex(two_mcus):
             assert t.read("main", 0x20000024, 6) == data
             assert t.read_value("@main:0x20000000:f32") == 1.5
         assert "MEMory:WRITE 0,20000024,230D0A,4" in sent      # bytes 0A 0D 23 00, little endian
-        assert "MEMory:READ? 0,20000024,6" in sent
+        assert "MEMory:READ? 0,20000024,8" in sent             # 6 bytes are read as two whole words
         assert not any("0x" in c for c in sent)
+
+
+def _record(t):
+    sent = []
+    send = t.session.protocol.send
+    t.session.protocol.send = lambda command: (sent.append(command), send(command))[1]
+    return sent
+
+
+def test_small_reads_ask_for_whole_aligned_words(two_mcus):
+    dev = Device(two_mcus)
+    with Simulator(dev, TransportConfig(tcp="127.0.0.1:0", udp=None)) as s:
+        t = make_target("tcp", s.tcp_address)
+        sent = _record(t)
+        with t:
+            assert t.read_value("@main:0x20000008:i16") == -120          # 2 bytes in the word at 20000008
+            assert t.read("main", 0x20000001, 2) == bytes.fromhex("00C0")
+            assert t.read("main", 0x20000002, 4) == t.read("main", 0x20000000, 8)[2:6]   # straddles two words
+        assert sent[1:] == ["MEMory:READ? 0,20000008,4", "MEMory:READ? 0,20000000,4",
+                            "MEMory:READ? 0,20000000,8", "MEMory:READ? 0,20000000,8"]
+
+
+def test_small_write_is_a_read_modify_write(two_mcus):
+    dev = Device(two_mcus)
+    with Simulator(dev, TransportConfig(tcp="127.0.0.1:0", udp=None)) as s:
+        t = make_target("tcp", s.tcp_address)
+        sent = _record(t)
+        with t:
+            before = t.read("main", 0x20000008, 4)
+            sent.clear()
+            t.write_value("@main:0x2000000A:u16", 0xBEEF)
+            assert t.read("main", 0x20000008, 4) == before[:2] + bytes.fromhex("EFBE")   # neighbour kept
+        assert sent[:3] == ["MEMory:READ? 0,20000008,4",                                  # read the word
+                            f"MEMory:WRITE 0,20000008,BEEF{before[1]:02X}{before[0]:02X},4",  # write it whole
+                            "MEMory:READ? 0,20000008,4"]                                  # and confirm
+
+
+def test_read_modify_write_confirms_only_the_value(two_mcus):
+    """A neighbour the firmware changes between the write and the read-back is not a failure."""
+    dev = Device(two_mcus)
+    handle = dev.handle
+    seen = []
+
+    def firmware_changes_neighbour(line, client=""):
+        if line.startswith("MEMory:READ?") and any(c.startswith("MEMory:WRITE") for c in seen):
+            dev.mcus[0].write(0x20000008, b"\x55\x55")              # after the write, before the read-back
+        seen.append(line)
+        return handle(line, client)
+
+    dev.handle = firmware_changes_neighbour
+    with Simulator(dev, TransportConfig(tcp="127.0.0.1:0", udp=None)) as s:
+        with make_target("tcp", s.tcp_address) as t:
+            t.write_value("@main:0x2000000A:u16", 0x1234)
+            assert t.read("main", 0x20000008, 4) == bytes.fromhex("55553412")
 
 
 def test_user_defined_commands(two_mcus):
@@ -153,9 +207,9 @@ def test_user_defined_commands(two_mcus):
 
 
 def test_write_wider_than_max_write_is_split(two_mcus):
-    dev = Device(two_mcus, SimProfile(max_write=2))
+    dev = Device(two_mcus, SimProfile(max_write=2, align=2))
     with Simulator(dev, TransportConfig(tcp="127.0.0.1:0", udp=None)) as s:
-        with make_target("tcp", s.tcp_address, Profile(max_write=2, timeout_ms=300)) as t:
+        with make_target("tcp", s.tcp_address, Profile(max_write=2, align=2, timeout_ms=300)) as t:
             t.write_value("@main:0x20000004:f32", -1.25)
             assert t.read_value("@main:0x20000004:f32") == -1.25
             t.write_value("@main:0x20000028:u64", 0x0123456789ABCDEF)
