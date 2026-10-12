@@ -77,7 +77,7 @@ def test_error_replies():
 
 def test_host_and_simulator_read_the_profile_the_same_way():
     host, sim = Profile.load(DEFAULT_PROFILE), SimProfile.load(DEFAULT_PROFILE)
-    for key in ("read", "write", "value_format", "addr_format", "max_write", "size_query", "data_format",
+    for key in ("read", "write", "value_format", "addr_format", "max_write", "data_format",
                 "max_response", "error_query", "terminator"):
         assert getattr(host, key) == getattr(sim, key), key
     assert host.timeout_ms == 500
@@ -90,3 +90,8 @@ def test_profile_ranges(tmp_path):
     p = Profile.load(f)
     assert [(r.name, r.start, r.size, r.writable, r.mcu) for r in p.ranges] == [
         ("GPIOA", 0x48000000, 0x400, True, None), ("ADC", 0x50000000, 16, False, "motorctl")]
+
+
+def test_an_old_size_query_key_is_ignored():
+    p = Profile.from_dict({"size_query": "MEMory:MAX?", "max_response": 256})
+    assert p.max_response == 256 and not hasattr(p, "size_query")

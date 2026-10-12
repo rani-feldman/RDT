@@ -24,7 +24,6 @@ class Profile:
     value_format: str = "0x{value:X}"
     addr_format: str = "0x{addr:08X}"
     max_write: int = 4
-    size_query: str | None = "MEMory:MAX?"
     data_format: str = "hex"
     max_response: int = 1024
     error_query: str = "SYSTem:ERRor?"
