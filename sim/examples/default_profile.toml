@@ -1,15 +1,14 @@
 # SCPI profile: the same [scpi] table the RDT host uses. The simulator answers exactly these
 # templates, so editing them here is how to try another command set before the firmware has it.
+# {addr} and {value} are always bare hex with no prefix (20000000, 3FC00000), and a read reply
+# is the bytes in bare hex, lowest address first (0000C03F).
 [scpi]
 name         = "RDT simulator"
 read         = "MEMory:READ? {mcu},{addr},{len}"
 write        = "MEMory:WRITE {mcu},{addr},{value},{size}"
-value_format = "0x{value:X}"
-addr_format  = "0x{addr:08X}"
 max_write    = 4
-data_format  = "hex"           # hex | bytes_csv | decimal | ieee_block
 byte_order   = "little"
-max_response = 1024
+max_response = 1024            # largest read reply, in bytes; RDT never asks the device for it
 error_query  = "SYSTem:ERRor?"
 terminator   = "\n"
 timeout_ms   = 500

@@ -1,8 +1,9 @@
 """SCPI profile: the user-defined command templates and reply format.
 
 Nothing about the firmware's commands is hard-coded. The profile says how to spell a read, a
-write and the error query, and how the read reply is encoded. The simulator
-reads the same ``[scpi]`` table, so one file describes both sides.
+write and the error query. Addresses and values in commands, and the data in read replies, are
+always bare hex with no prefix: address 0x11AABBCCDD is sent as ``11AABBCCDD`` (rani,
+2026-10-12). The simulator reads the same ``[scpi]`` table, so one file describes both sides.
 """
 
 from __future__ import annotations
@@ -15,10 +16,11 @@ from pathlib import Path
 
 from .errors import BadReply, ConfigError, DeviceError
 
-DATA_FORMATS = ("hex", "bytes_csv", "decimal", "ieee_block")
-# Keys older profiles may still have, ignored on load. There is no size query: the largest
-# read reply is the profile's max_response, set by the user (rani, 2026-10-12).
-RETIRED_KEYS = {"size_query"}
+# Keys older profiles may still have, ignored on load (rani, 2026-10-12): there is no size query,
+# since the largest read reply is the profile's max_response; and addresses, values and reply data
+# are always bare hex, so their format keys are gone.
+RETIRED_KEYS = {"size_query", "addr_format", "value_format", "data_format"}
+_HEX_SPEC = re.compile(r"^0?\d*X$")
 TEMPLATE_FIELDS = {"read": {"mcu", "addr", "len"}, "write": {"mcu", "addr", "value", "size"}}
 
 
@@ -70,9 +72,9 @@ class Range:
         return r
 
 
-def fill_template(template: str, addr_format: str, value_format: str, **values) -> str:
-    """Fill a command template. ``{addr}`` and ``{value}`` use the profile's formats unless the
-    template gives its own spec, as in ``{addr:08X}``."""
+def fill_template(template: str, **values) -> str:
+    """Fill a command template. ``{addr}`` and ``{value}`` are written as bare upper-case hex with
+    no prefix; a template may pad them, as in ``{addr:08X}``, but not change the base."""
     out = []
     for literal, name, spec, _ in string.Formatter().parse(template):
         out.append(literal)
@@ -81,12 +83,13 @@ def fill_template(template: str, addr_format: str, value_format: str, **values) 
         if name not in values:
             raise ConfigError(f"unknown placeholder {{{name}}} in {template!r}")
         value = values[name]
-        if spec:
+        if name in ("addr", "value"):
+            if spec and not _HEX_SPEC.match(spec):
+                raise ConfigError(f"{{{name}:{spec}}} in {template!r}: addresses and values are always "
+                                  f"bare hex; only a width such as {{{name}:08X}} is allowed")
+            out.append(format(value, spec or "X"))
+        elif spec:
             out.append(format(value, spec))
-        elif name == "addr":
-            out.append(addr_format.format(addr=value))
-        elif name == "value":
-            out.append(value_format.format(value=value))
         else:
             out.append(str(value))
     return "".join(out)
@@ -97,11 +100,8 @@ class Profile:
     name: str = "Default"
     read: str = "MEMory:READ? {mcu},{addr},{len}"
     write: str = "MEMory:WRITE {mcu},{addr},{value},{size}"
-    value_format: str = "0x{value:X}"      # raw integer; floats are sent as their bit pattern
-    addr_format: str = "0x{addr:08X}"
     max_write: int = 4                     # largest value one write accepts, in bytes
-    data_format: str = "hex"               # read reply: hex | bytes_csv | decimal | ieee_block
-    reply_regex: str | None = None         # optional; group "data" (or group 1) holds the data
+    reply_regex: str | None = None         # optional; group "data" (or group 1) holds the hex data
     byte_order: str = "little"             # used for an MCU without an ELF
     max_response: int = 1024               # bytes of data one read reply can carry; set here only
     error_query: str | None = "SYSTem:ERRor?"
@@ -112,8 +112,6 @@ class Profile:
     ranges: list[Range] = field(default_factory=list)
 
     def __post_init__(self) -> None:
-        if self.data_format not in DATA_FORMATS:
-            raise ConfigError(f"data_format must be one of {', '.join(DATA_FORMATS)}, not {self.data_format!r}")
         if self.byte_order not in ("little", "big"):
             raise ConfigError(f"byte_order must be little or big, not {self.byte_order!r}")
         if self.max_response < 1:
@@ -126,8 +124,6 @@ class Profile:
             raise ConfigError("timeout_ms must be positive")
         if self.retries < 0:
             raise ConfigError("retries must be 0 or more")
-        if self.reply_regex and self.data_format == "ieee_block":
-            raise ConfigError("reply_regex cannot be combined with data_format = ieee_block")
         self._regex = re.compile(self.reply_regex) if self.reply_regex else None
         for key, allowed in TEMPLATE_FIELDS.items():
             names = {n for _, n, _, _ in string.Formatter().parse(getattr(self, key)) if n is not None}
@@ -173,60 +169,38 @@ class Profile:
 
     def _fill(self, template: str, **kw) -> str:
         try:
-            return fill_template(template, self.addr_format, self.value_format, **kw)
+            return fill_template(template, **kw)
         except (ValueError, KeyError, IndexError) as e:
             raise ConfigError(f"cannot fill {template!r}: {e}") from None
 
     # --- replies -----------------------------------------------------------------------------
 
     def decode_data(self, reply: bytes, length: int) -> bytes:
-        """Decode a read reply (without its terminator) into exactly ``length`` bytes."""
-        if self.data_format == "ieee_block":
-            data = parse_ieee_block(reply)
-        else:
-            text = reply.decode("latin-1").strip()
-            if self._regex:
-                m = self._regex.search(text)
-                if not m:
-                    raise BadReply(f"reply {text[:60]!r} does not match reply_regex")
-                text = m.group("data") if "data" in self._regex.groupindex else m.group(1 if m.groups() else 0)
-            data = decode_text(text, self.data_format)
+        """Decode a read reply (without its terminator) into exactly ``length`` bytes.
+
+        The reply is the bytes in bare hex, lowest address first, such as ``0000C03F``.
+        """
+        text = reply.decode("latin-1").strip()
+        if self._regex:
+            m = self._regex.search(text)
+            if not m:
+                raise BadReply(f"reply {text[:60]!r} does not match reply_regex")
+            text = m.group("data") if "data" in self._regex.groupindex else m.group(1 if m.groups() else 0)
+        data = decode_hex(text)
         if len(data) != length:
             raise BadReply(f"expected {length} bytes, got {len(data)}")
         return data
 
 
-def decode_text(text: str, fmt: str) -> bytes:
-    text = text.strip()
-    try:
-        if fmt == "hex":
-            t = "".join(text.split())
-            if t[:2].lower() == "0x":
-                t = t[2:]
-            return bytes.fromhex(t)
-        parts = [p.strip() for p in text.split(",")] if text else []
-        if fmt == "bytes_csv":
-            values = [int(p[2:] if p[:2].lower() == "0x" else p, 16) for p in parts]
-        else:
-            values = [int(p, 10) for p in parts]
-        return bytes(values)
-    except ValueError:
-        raise BadReply(f"reply {text[:60]!r} is not valid {fmt} data") from None
+_HEX_DATA = re.compile(r"^[0-9A-Fa-f\s]*$")
 
 
-def parse_ieee_block(reply: bytes) -> bytes:
-    """``#<n><length digits><data>``, the IEEE 488.2 definite-length block."""
-    if len(reply) < 2 or reply[:1] != b"#" or not reply[1:2].isdigit() or reply[1:2] == b"0":
-        raise BadReply(f"reply {reply[:20]!r} is not an IEEE 488.2 block")
-    n = int(reply[1:2])
-    digits = reply[2:2 + n]
-    if len(digits) != n or not digits.isdigit():
-        raise BadReply("IEEE 488.2 block header is truncated")
-    length = int(digits)
-    data = reply[2 + n:2 + n + length]
-    if len(data) != length:
-        raise BadReply(f"IEEE 488.2 block is {len(data)} bytes, header says {length}")
-    return data
+def decode_hex(text: str) -> bytes:
+    """Bare hex bytes, such as ``0000C03F``. A prefix such as ``0x`` is not accepted."""
+    t = "".join(text.split())
+    if not _HEX_DATA.match(t) or len(t) % 2:
+        raise BadReply(f"reply {text[:60]!r} is not bare hex bytes")
+    return bytes.fromhex(t)
 
 
 _ERROR = re.compile(r'^\s*([+-]?\d+)\s*(?:,\s*"?(.*?)"?\s*)?$')

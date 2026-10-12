@@ -193,12 +193,12 @@ def test_console_history_and_completion(qtbot, win):
     connect(qtbot, win)
     con = win.console
     con.send_command("*IDN?")
-    con.send_command("MEMory:READ? 0,0x20000000,2")
+    con.send_command("MEMory:READ? 0,20000000,2")
     qtbot.waitUntil(lambda: len([e for e in con.entries if e[1] == "rx"]) == 2, timeout=3000)
-    assert CommandHistory().items == ["*IDN?", "MEMory:READ? 0,0x20000000,2"]     # saved for the next launch
+    assert CommandHistory().items == ["*IDN?", "MEMory:READ? 0,20000000,2"]     # saved for the next launch
     con.input.setText("draft")
     key(Qt.Key_Up)
-    assert con.input.text() == "MEMory:READ? 0,0x20000000,2"
+    assert con.input.text() == "MEMory:READ? 0,20000000,2"
     key(Qt.Key_Up)
     key(Qt.Key_Down)
     key(Qt.Key_Down)
@@ -206,19 +206,19 @@ def test_console_history_and_completion(qtbot, win):
 
     # Tab: suggestions come from the history and the imported commands only
     from rdt.console import SavedCommand
-    win.ws.commands = [SavedCommand("SYSTem:ERRor?"), SavedCommand("MEMory:READ? 0,0x20000000,4")]
+    win.ws.commands = [SavedCommand("SYSTem:ERRor?"), SavedCommand("MEMory:READ? 0,20000000,4")]
     con.input.setText("syst")
     key(Qt.Key_Tab)
     assert con.input.text() == "SYSTem:ERRor?"
     con.input.setText("mem")
     key(Qt.Key_Tab)                                   # several: their shared start, and a list
-    assert con.input.text() == "MEMory:READ? 0,0x20000000,"
-    assert con.completer.model().stringList() == ["MEMory:READ? 0,0x20000000,2", "MEMory:READ? 0,0x20000000,4"]
+    assert con.input.text() == "MEMory:READ? 0,20000000,"
+    assert con.completer.model().stringList() == ["MEMory:READ? 0,20000000,2", "MEMory:READ? 0,20000000,4"]
     assert con.completer.popup().isVisible()
     popup = con.completer.popup()                     # wide enough to read the commands
     assert popup.width() >= popup.sizeHintForColumn(0)
-    con.completer.activated.emit("MEMory:READ? 0,0x20000000,4")
-    assert con.input.text() == "MEMory:READ? 0,0x20000000,4" and not con.completer.popup().isVisible()
+    con.completer.activated.emit("MEMory:READ? 0,20000000,4")
+    assert con.input.text() == "MEMory:READ? 0,20000000,4" and not con.completer.popup().isVisible()
     con.input.setText("*rs")
     key(Qt.Key_Tab)                                   # *RST is neither in the history nor imported
     assert con.input.text() == "*rs" and not con.completer.popup().isVisible()
@@ -241,10 +241,10 @@ def test_console_history_and_completion(qtbot, win):
     assert con.output.ghost() == ""                    # nothing starts with *IDN?x
     con.input.setText("")
     QTest.keyClicks(con.output, "mem")
-    assert con.output.ghost() == "ory:READ? 0,0x20000000,2"
+    assert con.output.ghost() == "ory:READ? 0,20000000,2"
     key(Qt.Key_Tab)                                    # several: Tab lists them all, not just the grey one
-    assert con.input.text() == "MEMory:READ? 0,0x20000000," and con.completer.popup().isVisible()
-    assert con.completer.model().stringList() == ["MEMory:READ? 0,0x20000000,2", "MEMory:READ? 0,0x20000000,4"]
+    assert con.input.text() == "MEMory:READ? 0,20000000," and con.completer.popup().isVisible()
+    assert con.completer.model().stringList() == ["MEMory:READ? 0,20000000,2", "MEMory:READ? 0,20000000,4"]
     con.completer.popup().hide()
     con.input.setText("")
     assert con.output.ghost() == con.output.hint
@@ -256,13 +256,13 @@ def test_console_history_and_completion(qtbot, win):
     assert not dlg.isHidden() and not con.commands.isHidden()
     split = dlg.parentWidget()
     assert split is con.commands.parentWidget() and split.indexOf(dlg) == split.indexOf(con.commands) + 1
-    assert [dlg.list.item(i).text() for i in range(dlg.list.count())] == ["MEMory:READ? 0,0x20000000,2", "*IDN?"]
+    assert [dlg.list.item(i).text() for i in range(dlg.list.count())] == ["MEMory:READ? 0,20000000,2", "*IDN?"]
     dlg.list.setCurrentRow(1)
     dlg.send()
-    assert con.history.items == ["MEMory:READ? 0,0x20000000,2", "*IDN?"] and con.entries[-1][2] == "*IDN?"
+    assert con.history.items == ["MEMory:READ? 0,20000000,2", "*IDN?"] and con.entries[-1][2] == "*IDN?"
     dlg.list.setCurrentRow(0)
     dlg.delete()
-    assert CommandHistory().items == ["MEMory:READ? 0,0x20000000,2"]
+    assert CommandHistory().items == ["MEMory:READ? 0,20000000,2"]
     con.history_button.setChecked(False)
     assert dlg.isHidden() and not con.commands.isHidden()
 
@@ -479,7 +479,7 @@ def test_an_old_workspace_with_buttons_opens(qtbot, tmp_path):
 def test_profile_dialog_preview_and_apply(qtbot, win):
     dlg = ProfileDialog(win.ws.config.profile, win.device, win)
     qtbot.addWidget(dlg)
-    assert "MEMory:READ? 0,0x20000000,16" in dlg.preview.text()
+    assert "MEMory:READ? 0,20000000,16" in dlg.preview.text()
     dlg.edits["read"].setText("MEM:RD {addr}")
     assert "needs {addr} and {len}" in dlg.preview.text()
     assert not dlg.ok.isEnabled()

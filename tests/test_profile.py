@@ -1,17 +1,17 @@
 import pytest
 
-from sim.profile import CommandPattern, Profile, int_base_for, parse_int
+from sim.profile import CommandPattern, Profile, parse_hex, parse_int
 
 
 @pytest.mark.parametrize("line", [
-    "MEMory:READ? 0,0x20000000,4",
-    "MEM:READ? 0,0x20000000,4",
-    "memory:read? 0,0x20000000,4",
-    ":MEM:READ? 0 , 0x20000000 , 4",
+    "MEMory:READ? 0,20000000,4",
+    "MEM:READ? 0,20000000,4",
+    "memory:read? 0,20000000,4",
+    ":MEM:READ? 0 , 20000000 , 4",
 ])
 def test_long_and_short_forms_match(line):
     p = CommandPattern("MEMory:READ? {mcu},{addr},{len}")
-    assert p.match(line) == {"mcu": "0", "addr": "0x20000000", "len": "4"}
+    assert p.match(line) == {"mcu": "0", "addr": "20000000", "len": "4"}
 
 
 def test_partial_mnemonic_does_not_match():
@@ -45,15 +45,12 @@ def test_parse_int(text, base, value):
     assert parse_int(text, base) == value
 
 
-def test_value_base_follows_the_profile_format():
-    assert int_base_for("0x{value:X}", "value") == 0
-    assert int_base_for("{value:X}", "value") == 16
-    assert int_base_for("{value}", "value") == 0
-
-
-def test_profile_rejects_unknown_data_format():
-    with pytest.raises(ValueError):
-        Profile(data_format="base64")
+def test_addresses_and_values_are_bare_hex():
+    assert parse_hex("20000000") == 0x20000000
+    assert parse_hex("11aabbccdd") == 0x11AABBCCDD
+    for text in ("0x20000000", "#H10", "-1", "", "12G"):
+        with pytest.raises(ValueError):
+            parse_hex(text)
 
 
 def test_profile_ignores_host_only_keys():

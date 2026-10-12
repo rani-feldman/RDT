@@ -20,7 +20,7 @@ from PySide6.QtWidgets import (
 from ..console import (CommandHistory, SessionLog, completions, hex_to_text, history_path, merge_commands, read_commands,
                        text_to_hex, write_commands)
 from ..errors import CommandTimeout, ConfigError, LinkDown, RdtError, WriteRefused
-from ..profile import DATA_FORMATS, Profile, parse_int
+from ..profile import Profile, parse_int
 from ..target import McuConfig, Target
 from ..workspace import Workspace
 from .device import describe_error
@@ -877,20 +877,18 @@ class ProfileDialog(QDialog):
         form = QFormLayout()
         outer.addLayout(form)
         tips = {
-            "read": "Placeholders: {mcu} {addr} {len}",
-            "write": "Placeholders: {mcu} {addr} {value} {size}",
-            "value_format": "How {value} is written, such as 0x{value:X} or {value}",
-            "addr_format": "How {addr} is written, such as 0x{addr:08X}",
-            "reply_regex": "Optional; the group named data (or group 1) holds the data",
+            "read": "Placeholders: {mcu} {addr} {len}. {addr} is sent as bare hex, such as 20000000",
+            "write": "Placeholders: {mcu} {addr} {value} {size}. {addr} and {value} are sent as bare hex",
+            "reply_regex": "Optional; the group named data (or group 1) holds the hex data",
             "terminator": "Escapes allowed: \\n, \\r\\n",
         }
         for f in fields(Profile):
             if f.name == "ranges":
                 continue
             value = getattr(profile, f.name)
-            if f.name == "data_format" or f.name == "byte_order":
+            if f.name == "byte_order":
                 w = QComboBox()
-                w.addItems(DATA_FORMATS if f.name == "data_format" else ("little", "big"))
+                w.addItems(("little", "big"))
                 w.setCurrentText(value)
                 w.currentTextChanged.connect(self._preview)
             elif f.name == "max_write":
@@ -904,7 +902,7 @@ class ProfileDialog(QDialog):
                 w = QLineEdit(text)
                 if f.name in _OPTIONAL:
                     w.setPlaceholderText("none")
-                if f.name in ("read", "write", "value_format", "addr_format", "reply_regex"):
+                if f.name in ("read", "write", "reply_regex"):
                     w.setFont(mono())
                 w.textChanged.connect(self._preview)
             if f.name in tips:
