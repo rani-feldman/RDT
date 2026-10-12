@@ -158,9 +158,10 @@ class CommandsPanel(QWidget):
         self.tree.itemActivated.connect(self._activated)
         layout.addWidget(self.tree, 1)
         row = QHBoxLayout()
-        for text, tip, slot in (("Import...", "Add commands from a CSV or text file", self.import_file),
-                                ("Export...", "Write the list to a CSV file", self.export_file),
-                                ("Clear", "Empty the list", self.clear)):
+        # Lambdas, so the button's checked flag is not passed on as the file path.
+        for text, tip, slot in (("Import...", "Add commands from a CSV or text file", lambda: self.import_file()),
+                                ("Export...", "Write the list to a CSV file", lambda: self.export_file()),
+                                ("Clear", "Empty the list", lambda: self.clear())):
             b = QPushButton(text, toolTip=tip)
             b.clicked.connect(slot)
             row.addWidget(b)

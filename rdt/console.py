@@ -237,13 +237,19 @@ def read_commands(path: str | Path) -> list[SavedCommand]:
     """Read a command list: a CSV file (``.csv``) with the columns command, name, group and
     description (a header row names them in any order; without one they are taken in that
     order), or any other text file with one command per line. Blank lines and lines starting
-    with ``#`` are skipped. Raises ValueError for a CSV file with no command column."""
+    with ``#`` are skipped. Commas, semicolons or tabs separate the columns, and a file that is
+    not UTF-8 is read in the Windows code page. Raises ValueError for a CSV file with no command
+    column."""
     path = Path(path)
-    text = path.read_text(encoding="utf-8-sig")
+    data = path.read_bytes()
+    try:
+        text = data.decode("utf-8-sig")
+    except UnicodeDecodeError:   # saved by Excel as plain "CSV", in the Windows code page
+        text = data.decode("cp1252", errors="replace")
     if path.suffix.lower() != ".csv":
         return [SavedCommand(line.strip()) for line in text.splitlines()
                 if line.strip() and not line.lstrip().startswith("#")]
-    rows = [r for r in csv.reader(io.StringIO(text)) if any(c.strip() for c in r)]
+    rows = [r for r in csv.reader(io.StringIO(text), delimiter=_delimiter(text)) if any(c.strip() for c in r)]
     if not rows:
         return []
     header = [c.strip().lower() for c in rows[0]]
@@ -262,6 +268,15 @@ def read_commands(path: str | Path) -> list[SavedCommand]:
         if cell.get("command") and not cell["command"].startswith("#"):
             out.append(SavedCommand(**cell))
     return out
+
+
+def _delimiter(text: str) -> str:
+    """The CSV separator: a comma, or the semicolon or tab Excel uses in some regions, judged
+    by the first line that is not blank or a comment."""
+    first = next((line for line in text.splitlines() if line.strip() and not line.lstrip().startswith("#")), "")
+    counts = {d: first.count(d) for d in (",", ";", "\t")}
+    best = max(counts, key=counts.get)
+    return best if counts[best] else ","
 
 
 def write_commands(path: str | Path, commands: list[SavedCommand]) -> None:
