@@ -143,17 +143,17 @@ def profile_commands(profile: Profile | None) -> list[str]:
 
 
 def completions(text: str, history: list[str], profile: Profile | None = None,
-                extra: tuple[str, ...] | list[str] = (), limit: int = 20) -> list[str]:
+                extra: tuple[str, ...] | list[str] = (), limit: int = 20, common: bool = True) -> list[str]:
     """Suggestions for what is typed so far, without duplicates (case-insensitive).
 
     Commands that start with ``text`` come first, then those that only contain it. Within each
-    group, history comes first, newest first, then the profile's commands, ``extra``, and the
-    common IEEE 488.2 commands.
+    group, history comes first, newest first, then the profile's commands, ``extra``, and (unless
+    ``common`` is false) the common IEEE 488.2 commands.
     """
     needle = text.strip().casefold()
     pool: list[str] = []
     seen: set[str] = set()
-    for c in [*reversed(history), *profile_commands(profile), *extra, *COMMON_COMMANDS]:
+    for c in [*reversed(history), *profile_commands(profile), *extra, *(COMMON_COMMANDS if common else ())]:
         key = c.strip().casefold()
         if key and key not in seen:
             seen.add(key)

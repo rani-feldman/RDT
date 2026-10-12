@@ -33,7 +33,7 @@ FONT_MIN, FONT_MAX = 6, 32   # console font size, in points
 CONSOLE_KEYS = [
     ("Enter", "Send the command"),
     ("Up / Down", "Walk the command history"),
-    ("Ctrl+Space", "Complete the command"),
+    ("Tab / Ctrl+Space", "Complete the command from the history and the known commands"),
     ("Ctrl+F", "Find in the transcript"),
     ("Enter / Shift+Enter", "Next / previous match, in the find bar"),
     ("Esc", "Close the find bar"),
@@ -41,8 +41,25 @@ CONSOLE_KEYS = [
     ("Ctrl+= / Ctrl+- / Ctrl+wheel", "Larger / smaller console text"),
     ("Ctrl+0", "Default console text size"),
 ]
-# Console line colours; a reply keeps the theme's text colour so it reads on light and dark themes.
-LINE_COLORS = {"tx": "#2e9d4f", "rx": None, "error": "#d64545", "note": "#888888"}
+# The console is a dark terminal whatever the window's theme (CON-13).
+TERMINAL = {"background": "#0d1117", "text": "#c9d1d9", "stamp": "#6e7681", "prompt": "#3fb950",
+            "border": "#30363d", "placeholder": "#6e7681"}
+LINE_COLORS = {"tx": "#7ee787", "rx": "#c9d1d9", "error": "#ff7b72", "note": "#8b949e"}
+LINE_TAGS = {"tx": ("TX", "#3fb950"), "rx": ("RX", "#58a6ff"), "error": ("ERR", "#f85149"), "note": ("SYS", "#8b949e")}
+TAG_WIDTH = 4
+
+
+def _common_prefix(words: list[str]) -> str:
+    """The longest start all the words share, ignoring case; taken from the first word."""
+    first = words[0]
+    n = len(first)
+    for w in words[1:]:
+        n = min(n, len(w))
+        for i in range(n):
+            if w[i].casefold() != first[i].casefold():
+                n = i
+                break
+    return first[:n]
 
 
 def mono() -> QFont:
@@ -68,7 +85,8 @@ def run_command(t: Target, text: str) -> str | None:
 
 
 class _InputKeys(QObject):
-    """Keys of the console's input line: Up and Down walk the saved history, Ctrl+Space completes."""
+    """Keys of the console's input line: Up and Down walk the saved history, Tab (or Ctrl+Space)
+    completes."""
 
     def __init__(self, console: "Console"):
         super().__init__(console.input)
@@ -83,7 +101,8 @@ class _InputKeys(QObject):
             step = -1 if event.key() == Qt.Key_Up else 1
             con.input.setText(con.history.navigate(step, con.input.text()))
             return True
-        if event.key() == Qt.Key_Space and event.modifiers() & Qt.ControlModifier:
+        if (event.key() == Qt.Key_Tab and not event.modifiers() & ~Qt.KeypadModifier) or \
+                (event.key() == Qt.Key_Space and event.modifiers() & Qt.ControlModifier):
             con.complete()
             return True
         return False
@@ -257,39 +276,77 @@ class Console(QWidget):
         self.main = main
         layout = QVBoxLayout(self)
         layout.setContentsMargins(4, 4, 4, 4)
+        layout.setSpacing(2)
+        # per-user view settings (CON-11), next to the console history
+        self.settings = QSettings(str(history_path().parent / "console.ini"), QSettings.IniFormat)
+        self.commands = CommandsPanel(self)
+        self.commands.hide()
+        self.entries: deque[tuple[datetime, str, str]] = deque(maxlen=TRANSCRIPT_LINES)
+        self.history = CommandHistory()
+        self.session_log: SessionLog | None = None
+        layout.addLayout(self._tool_row())
+
+        # The terminal: transcript, then the prompt as its last line (CON-13).
+        self.terminal = QWidget(objectName="terminal")
+        self.terminal.setAttribute(Qt.WA_StyledBackground, True)
+        self.terminal.setStyleSheet(
+            f"#terminal {{ background: {TERMINAL['background']}; border: 1px solid {TERMINAL['border']}; }}"
+            f"#terminal QPlainTextEdit, #terminal QLineEdit {{ background: {TERMINAL['background']};"
+            f" color: {TERMINAL['text']}; border: none; selection-background-color: #264f78; }}"
+            f"#terminal QLabel {{ color: {TERMINAL['stamp']}; }}")
+        term = QVBoxLayout(self.terminal)
+        term.setContentsMargins(4, 2, 4, 2)
+        term.setSpacing(0)
         self.output = QPlainTextEdit(readOnly=True)
         self.output.setFont(mono())
         self.output.setMaximumBlockCount(TRANSCRIPT_LINES)
-        # per-user view settings (CON-11), next to the console history
-        self.settings = QSettings(str(history_path().parent / "console.ini"), QSettings.IniFormat)
         self.output.viewport().installEventFilter(self)
         self.output.setContextMenuPolicy(Qt.CustomContextMenu)
         self.output.customContextMenuRequested.connect(self._context_menu)
-        self.commands = CommandsPanel(self)
-        self.commands.hide()
-        split = QSplitter(Qt.Horizontal)
-        split.addWidget(self.output)
-        split.addWidget(self.commands)
-        split.setStretchFactor(0, 3)
-        split.setStretchFactor(1, 1)
-        layout.addWidget(split, 1)
-        self._find_bar(layout)
-        self.entries: deque[tuple[datetime, str, str]] = deque(maxlen=TRANSCRIPT_LINES)
-        row = QHBoxLayout()
+        term.addWidget(self.output, 1)
+        prompt = QHBoxLayout()
+        prompt.setSpacing(6)
+        self.prompt_label = QLabel()
+        self.prompt_label.setFont(mono())
+        self.prompt_arrow = QLabel(">")
+        self.prompt_arrow.setFont(mono())
         self.input = QLineEdit()
         self.input.setFont(mono())
-        self.input.setPlaceholderText("SCPI command, such as *IDN?  (Up and Down for history, Ctrl+Space to complete)")
+        palette = self.input.palette()
+        palette.setColor(palette.ColorRole.PlaceholderText, QColor(TERMINAL["placeholder"]))
+        self.input.setPalette(palette)
         self.input.returnPressed.connect(self._send_typed)
         self.input.textEdited.connect(self._typed)
-        self.history = CommandHistory()
         self.suggest_model = QStringListModel(self)
         self.completer = QCompleter(self.suggest_model, self)
         self.completer.setWidget(self.input)
         self.completer.setCompletionMode(QCompleter.UnfilteredPopupCompletion)
         self.completer.activated.connect(self._apply_completion)
         self.keys = _InputKeys(self)
-        self.send_button = send = QPushButton("Send")
-        send.clicked.connect(self._send_typed)
+        prompt.addWidget(self.prompt_label)
+        prompt.addWidget(self.prompt_arrow)
+        prompt.addWidget(self.input, 1)
+        term.addLayout(prompt)
+
+        split = QSplitter(Qt.Horizontal)
+        split.addWidget(self.terminal)
+        split.addWidget(self.commands)
+        split.setStretchFactor(0, 3)
+        split.setStretchFactor(1, 1)
+        layout.addWidget(split, 1)
+        self._find_bar(layout)
+        self.set_link_up(False)
+        for keys, slot in (("Ctrl+F", self.show_find), ("Ctrl+K", self.clear), ("Ctrl+=", lambda: self.zoom(1)),
+                           ("Ctrl++", lambda: self.zoom(1)), ("Ctrl+-", lambda: self.zoom(-1)),
+                           ("Ctrl+0", lambda: self.set_font_size(mono().pointSize()))):
+            QShortcut(QKeySequence(keys), self, slot, context=Qt.WidgetWithChildrenShortcut)
+        self.set_font_size(self.settings.value("font_size", mono().pointSize(), type=int))
+        self.set_wrap(self.wrap.isChecked())
+
+    def _tool_row(self) -> QHBoxLayout:
+        """The console's buttons, above the terminal. Sending needs none: press Enter."""
+        row = QHBoxLayout()
+        row.setContentsMargins(0, 0, 0, 0)
         self.commands_button = QPushButton("Commands")
         self.commands_button.setCheckable(True)
         self.commands_button.setToolTip("The workspace's list of known commands: import, pick, export")
@@ -299,13 +356,14 @@ class Console(QWidget):
         history.clicked.connect(lambda: HistoryDialog(self).exec())
         self.errors_button = errors = QPushButton("Error queue")
         errors.setToolTip("Read SYST:ERR? until the queue is empty")
-        errors.clicked.connect(self.drain_errors)
+        errors.clicked.connect(lambda: self.drain_errors())
         clear = QPushButton("Clear")
-        clear.clicked.connect(self.clear)
+        clear.setToolTip("Clear the transcript (Ctrl+K)")
+        clear.clicked.connect(lambda: self.clear())
         self.timestamps = QCheckBox("Timestamps")
         self.timestamps.setToolTip("Show the time of every line, to the millisecond")
         self.timestamps.setChecked(True)
-        self.timestamps.toggled.connect(self.rerender)
+        self.timestamps.toggled.connect(lambda _on: self.rerender())
         self.wrap = QCheckBox("Wrap")
         self.wrap.setToolTip("Wrap long lines; off, they scroll sideways")
         self.wrap.setChecked(self.settings.value("wrap", False, type=bool))
@@ -314,17 +372,12 @@ class Console(QWidget):
         self.log_button.setCheckable(True)
         self.log_button.setToolTip("Append every console line, with date and time, to a text file")
         self.log_button.clicked.connect(self._toggle_log)
-        self.session_log: SessionLog | None = None
-        row.addWidget(self.input, 1)
-        for b in (send, self.commands_button, history, errors, clear, self.timestamps, self.wrap, self.log_button):
-            row.addWidget(b)
-        layout.addLayout(row)
-        for keys, slot in (("Ctrl+F", self.show_find), ("Ctrl+K", self.clear), ("Ctrl+=", lambda: self.zoom(1)),
-                           ("Ctrl++", lambda: self.zoom(1)), ("Ctrl+-", lambda: self.zoom(-1)),
-                           ("Ctrl+0", lambda: self.set_font_size(mono().pointSize()))):
-            QShortcut(QKeySequence(keys), self, slot, context=Qt.WidgetWithChildrenShortcut)
-        self.set_font_size(self.settings.value("font_size", mono().pointSize(), type=int))
-        self.set_wrap(self.wrap.isChecked())
+        for w in (self.commands_button, history, errors, clear, self.log_button):
+            row.addWidget(w)
+        row.addStretch(1)
+        row.addWidget(self.timestamps)
+        row.addWidget(self.wrap)
+        return row
 
     # --- font size and wrap ------------------------------------------------------------------
 
@@ -343,7 +396,7 @@ class Console(QWidget):
 
     def set_font_size(self, size: int) -> None:
         size = max(FONT_MIN, min(FONT_MAX, size))
-        for w in (self.output, self.input):
+        for w in (self.output, self.input, self.prompt_label, self.prompt_arrow):
             f = w.font()
             f.setPointSize(size)
             w.setFont(f)
@@ -483,17 +536,29 @@ class Console(QWidget):
 
     def set_link_up(self, up: bool) -> None:
         """Sending needs the link; the transcript, search, log and the command list don't."""
-        for w in (self.input, self.send_button, self.errors_button):
+        self.link_up = up
+        for w in (self.input, self.errors_button):
             w.setEnabled(up)
+        self.input.setPlaceholderText("type a command \u2014 \u2191 recalls history, Tab completes" if up
+                                      else "not connected")
+        self._show_prompt()
+
+    def _show_prompt(self) -> None:
+        """The prompt names the link, such as COM3 or 192.168.1.20:5025: green while it is up."""
+        ws = getattr(self.main, "ws", None)
+        self.prompt_label.setText(ws.config.connection.address if ws else "")
+        color = TERMINAL["prompt"] if getattr(self, "link_up", False) else TERMINAL["stamp"]
+        self.prompt_label.setStyleSheet(f"color: {color};")
 
     def set_workspace(self, ws: Workspace) -> None:
         self.commands.refresh()
+        self._show_prompt()
 
     def suggestions(self) -> list[str]:
+        """Completions for the input line: the history, newest first, then the known commands."""
         ws = getattr(self.main, "ws", None)
-        profile = ws.config.profile if ws else None
         saved = [c.command for c in ws.commands] if ws else []
-        return completions(self.input.text(), self.history.items, profile, saved)
+        return completions(self.input.text(), self.history.items, None, saved, common=False)
 
     def pick(self, command: str) -> None:
         """A command picked from the list goes to the input line, to be completed and sent."""
@@ -501,14 +566,21 @@ class Console(QWidget):
         self.input.setFocus()
 
     def complete(self) -> None:
-        """Ctrl+Space: one suggestion is filled in at once; several open a list to pick from."""
+        """Tab: one suggestion is filled in at once. With several, the part they all start with is
+        filled in and a list opens to pick from (Tab or Enter takes the highlighted one)."""
         found = self.suggestions()
         if len(found) == 1:
             self._apply_completion(found[0])
             return
+        if not found:
+            return
+        typed = self.input.text()
+        starts = [c for c in found if c.casefold().startswith(typed.strip().casefold())]
+        common = _common_prefix(starts) if starts else ""
+        if len(common) > len(typed):
+            self.input.setText(common)
         self.suggest_model.setStringList(found)
-        if found:
-            self.completer.complete()
+        self.completer.complete()
 
     def _typed(self, _text: str) -> None:
         self.history.reset_navigation()
@@ -530,8 +602,7 @@ class Console(QWidget):
         entry = (datetime.now(), kind, text)
         self.entries.append(entry)
         if self.session_log is not None:
-            # the log's own mark says "sent", so drop the transcript's "> "
-            self.session_log.write(kind, text[2:] if kind == "tx" and text.startswith("> ") else text, entry[0])
+            self.session_log.write(kind, text, entry[0])
         self._render(entry)
         if not self.find_bar.isHidden():
             self._search()
@@ -588,20 +659,30 @@ class Console(QWidget):
         self._search()
 
     def _render(self, entry: tuple[datetime, str, str]) -> None:
+        """One line per entry: time, a tag (TX, RX, ERR, SYS) and the text. The lines of a
+        multi-line reply line up under the first one's text."""
         when, kind, text = entry
         fmt = QTextCharFormat()
-        if LINE_COLORS.get(kind):
-            fmt.setForeground(QColor(LINE_COLORS[kind]))
+        fmt.setForeground(QColor(LINE_COLORS.get(kind) or TERMINAL["text"]))
+        if kind == "note":
+            fmt.setFontItalic(True)
         stamp_fmt = QTextCharFormat()
-        stamp_fmt.setForeground(QColor(LINE_COLORS["note"]))
-        stamp = when.strftime("%H:%M:%S.%f")[:-3] + "  " if self.timestamps.isChecked() else ""
+        stamp_fmt.setForeground(QColor(TERMINAL["stamp"]))
+        tag, tag_color = LINE_TAGS.get(kind, LINE_TAGS["rx"])
+        tag_fmt = QTextCharFormat()
+        tag_fmt.setForeground(QColor(tag_color))
+        stamp = when.strftime("%H:%M:%S.%f")[:-3] + " " if self.timestamps.isChecked() else ""
+        head = stamp + tag.ljust(TAG_WIDTH)
         cursor = QTextCursor(self.output.document())
         cursor.movePosition(QTextCursor.End)
         for i, line in enumerate(text.split("\n")):
             if not self.output.document().isEmpty():
                 cursor.insertBlock()
-            if stamp:
-                cursor.insertText(stamp if i == 0 else " " * len(stamp), stamp_fmt)
+            if i == 0:
+                cursor.insertText(stamp, stamp_fmt)
+                cursor.insertText(tag.ljust(TAG_WIDTH), tag_fmt)
+            else:
+                cursor.insertText(" " * len(head), stamp_fmt)
             cursor.insertText(line, fmt)
 
     def _send_typed(self) -> None:
@@ -617,7 +698,7 @@ class Console(QWidget):
         self.send(text)
 
     def send(self, text: str) -> None:
-        self.log(f"> {text}", "tx")
+        self.log(text, "tx")
         self.main.device.submit(lambda t: run_command(t, text), self._reply,
                                 lambda e: self.log(f"error: {describe_error(e)}", "error"))
 
@@ -628,7 +709,7 @@ class Console(QWidget):
             self.log(reply, "error" if reply.startswith("(no reply") else "rx")
 
     def send_break(self) -> None:
-        self.log("> break (250 ms)", "tx")
+        self.log("break (250 ms)", "tx")
         self.main.device.submit(lambda t: t.send_break(250), lambda _r: self.note("break sent"),
                                 lambda e: self.log(f"error: {describe_error(e)}", "error"))
 
@@ -642,7 +723,7 @@ class Console(QWidget):
                 out.append(str(err))
             return out or ['0,"No error"']
 
-        self.log("> error queue", "tx")
+        self.log("error queue (SYST:ERR? until empty)", "tx")
         self.main.device.submit(job, lambda lines: self.log("\n".join(lines)),
                                 lambda e: self.log(f"error: {describe_error(e)}", "error"))
 

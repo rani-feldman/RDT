@@ -203,7 +203,7 @@ Console features taken from ComPort-Zone (an open serial terminal); rani approve
 | ID | Requirement | Status | Design |
 | --- | --- | --- | --- |
 | CON-1 | The console keeps its command history across launches, per user and shared by the GUI and CLI; it can be listed, re-sent and deleted (2026-10-12) | Done | [D-CON-1](#d-con-1-saved-history) |
-| CON-2 | Autocomplete in the console from the history, the profile's commands and common IEEE 488.2 commands (2026-10-12) | Done | [D-CON-2](#d-con-2-autocomplete) |
+| CON-2 | Tab completion in the console from the history and the imported known commands (2026-10-12; sources narrowed and Tab added 2026-10-12) | Done | [D-CON-2](#d-con-2-autocomplete) |
 | CON-3 | The console transcript shows each line's time to the millisecond (optional) and colours commands, replies, errors and notes differently (2026-10-12) | Done | [D-CON-3](#d-con-3-timestamps-and-colours) |
 | CON-4 | Search the console transcript (Ctrl+F) with highlighted matches and a counter; Ctrl+K clears it (2026-10-12) | Done | [D-CON-4](#d-con-4-transcript-search) |
 | CON-5 | Log the console session to a text file, every line with date, time and direction (2026-10-12) | Done | [D-CON-5](#d-con-5-session-log) |
@@ -214,6 +214,7 @@ Console features taken from ComPort-Zone (an open serial terminal); rani approve
 | CON-10 | Send a serial break on a COM port link (2026-10-12) | Done | [D-CON-10](#d-con-10-serial-break) |
 | CON-11 | The console text size can be changed and long lines wrapped or not, remembered per user (2026-10-12) | Done | [D-CON-11](#d-con-11-text-size-and-wrap) |
 | CON-12 | The GUI lists every keyboard shortcut in one window (2026-10-12) | Done | [D-CON-12](#d-con-12-keyboard-shortcuts) |
+| CON-13 | The GUI console looks like a terminal: dark, each line with its time and a TX, RX, ERR or SYS tag, and the prompt as its last line, with no separate line or button for sending (2026-10-12) | Done | [D-CON-13](#d-con-13-terminal-look) |
 
 ### 2.18 Removed and not in v1
 
@@ -984,14 +985,14 @@ The console code that is not Qt lives in `rdt/console.py`, so the GUI console (`
 
 #### D-CON-2 Autocomplete
 
-`completions(text, history, profile)` returns up to 20 suggestions, without duplicates (case-insensitive): those starting with `text` first, then those containing it. Within each group the order is: history, newest first; the profile's commands (the read and write templates up to their first field, such as `MEMory:READ? `, and the error, size and probe queries); then the IEEE 488.2 common commands `*IDN?`, `*RST`, `*CLS`, `*OPC?`, `*ESR?`, `*STB?`, `*TST?`, `*WAI` and `SYSTem:ERRor?`.
+Suggestions come from the history and the workspace's known commands (D-CON-7) only, as rani asked on 2026-10-12: a suggestion is always a command really sent before or one imported for this device. `completions(text, history, profile, extra, common=False)` returns up to 20, without duplicates (case-insensitive): those starting with `text` first, then those containing it, each group ordered history (newest first) then known commands. (With a profile and `common=True` it can also offer the profile's command heads and the IEEE 488.2 common commands; neither console uses that any more.)
 
-- **GUI:** Ctrl+Space. One suggestion is filled in at once; several open a `QCompleter` popup that refreshes as you type.
+- **GUI:** Tab (Ctrl+Space too). An event filter on the input line takes the Tab before Qt moves the focus. One suggestion is filled in at once. With several, the part they all start with is filled in and a `QCompleter` popup lists them; it refreshes as you type, and Tab or Enter takes the highlighted one.
 - **CLI:** Tab, through readline, completing the whole line (the completer delimiters are cleared, since SCPI headers hold `:`, `?` and `*`). The console's own `.` commands are offered as well.
 
 #### D-CON-3 Timestamps and colours
 
-- **GUI:** the console keeps its last 5000 lines as entries of (time, kind, text), the kind being `tx` (sent), `rx` (reply), `error` (no reply, the link going down, any failure) or `note` (RDT's own: the other link state changes from `MainWindow._show_state`, a command sent with no reply expected, log start and stop). Each line is drawn with its time as `HH:MM:SS.mmm` in grey, then its text: `tx` green `#2e9d4f`, `error` red `#d64545`, `note` grey `#888888`, `rx` in the theme's text colour so it reads on light and dark themes. The **Timestamps** check box redraws the transcript from the entries with or without times.
+- **GUI:** the console keeps its last 5000 lines as entries of (time, kind, text), the kind being `tx` (sent), `rx` (reply), `error` (no reply, the link going down, any failure) or `note` (RDT's own: the other link state changes from `MainWindow._show_state`, a command sent with no reply expected, log start and stop). How they are drawn is D-CON-13. The **Timestamps** check box redraws the transcript from the entries with or without times.
 - **CLI:** `rdt console --timestamps` wraps the output in a writer that starts every line with the time, and echoes each command as `> COMMAND` so the command has a time too. The CLI has no colours.
 
 #### D-CON-4 Transcript search
@@ -1035,6 +1036,14 @@ A list of the device's commands, so nobody has to remember the exact SCPI spelli
 #### D-CON-11 Text size and wrap
 
 Ctrl+= (or Ctrl++), Ctrl+- and Ctrl+mouse wheel over the transcript change the console's font size (transcript and input line together) between 6 and 32 points; Ctrl+0 goes back to the system's fixed-width size. The **Wrap** check box switches the transcript between wrapping at the panel's width and no wrapping (the default, so long replies such as hex dumps scroll sideways). Both are kept per user in `console.ini` (a `QSettings` INI file) next to the console history (D-CON-1), not in the workspace.
+
+#### D-CON-13 Terminal look
+
+The console panel (`Console` in `rdt/gui/panels.py`) is a dark terminal whatever the window's theme, styled from the `TERMINAL`, `LINE_COLORS` and `LINE_TAGS` tables:
+
+- **Lines:** `HH:MM:SS.mmm` in grey (when **Timestamps** is on), a four-character tag, then the text. `TX` (sent) is green with light green text, `RX` (reply) blue with the normal light text, `ERR` red with red text, `SYS` (RDT's notes) grey with grey italic text. The lines of a multi-line reply are indented to line up under the first line's text. A command is shown as typed, without the old `> `; the session log file (D-CON-5) keeps its own `>`, `<`, `!`, `#` marks.
+- **Prompt:** the last line of the terminal is the link's address (`COM3`, `192.168.1.20:5025`), green while the link is up and grey when it is not, then `>`, then the input line. Its placeholder reads "type a command — ↑ recalls history, Tab completes", or "not connected". Enter sends; there is no **Send** button or separate input row.
+- **Buttons:** Commands, History, Error queue, Clear and Log to file, with the Timestamps and Wrap check boxes, sit in one row above the terminal.
 
 #### D-CON-12 Keyboard shortcuts
 
@@ -1104,7 +1113,7 @@ Budgets for the firmware part, to check once it exists:
 - **Host tests** (`tests/test_host_*.py`): run against the simulator over TCP, UDP with dropped datagrams, and a serial pseudo-terminal. They cover user-defined commands, split reads and writes, write confirmation, a silent MCU, a cut link and reconnect, and a second SCPI client sharing the device and its error queue.
 - **Symbol tests** (`tests/test_symbols.py`): a corpus in `tests/elf` of one C program with structs, unions, anonymous members, bit fields, enums, 2-D arrays, pointer chains, function pointers and clashing file-statics. It is built by Clang for little-endian Cortex-M4 (DWARF 4), by Clang for big-endian ARM (DWARF 5), and by GCC for x86-64 (64-bit pointers), plus a "rebuilt" image for reload tests. `build.sh` rebuilds them; the ELFs are committed.
 - **Scheduler and workspace tests** (`tests/test_scheduler.py`, `test_workspace.py`): block planning, peripheral ranges, fallback to item-by-item reads, tabs, shared items, older files, scaling and write safety.
-- **Console tests** (`tests/test_console.py`, console tests in `test_host_cli.py` and `test_gui.py`): the saved history shared by two consoles, its limit and an unwritable file, Up and Down with the draft, completion order, the session log format, hex and text conversion, reading, merging and saving known commands, `rdt console --timestamps`, `--log`, `.history`, `!N`, `.commands`, `.info`, `.reconnect` and `.break`, `rdt commands`, `send --expect`, a break and reconnect over a serial pseudo-terminal, and in the GUI Ctrl+Space, the history dialog, the commands panel, colours, timestamps, search, Ctrl+K, text size, wrap and the shortcuts list.
+- **Console tests** (`tests/test_console.py`, console tests in `test_host_cli.py` and `test_gui.py`): the saved history shared by two consoles, its limit and an unwritable file, Up and Down with the draft, completion order, the session log format, hex and text conversion, reading, merging and saving known commands, `rdt console --timestamps`, `--log`, `.history`, `!N`, `.commands`, `.info`, `.reconnect` and `.break`, `rdt commands`, `send --expect`, a break and reconnect over a serial pseudo-terminal, and in the GUI Tab completion (keys and a real Tab that keeps the focus), the terminal tags, colours and prompt, the history dialog, the commands panel, colours, timestamps, search, Ctrl+K, text size, wrap and the shortcuts list.
 - **GUI tests** (`tests/test_gui.py`): pytest-qt drives the window against the simulator, offscreen. They cover connect, watch tabs, editing, the chart, statistics, the CSV log and the console.
 - **M5 tests** (`tests/test_identity.py`, the read-only default tests in `test_workspace.py`, and in `test_gui.py`): a matching ELF, a copy of the ELF with another version string (writes refused, then allowed, then refused again after reconnect), an unknown or `.bss` identity variable, a silent MCU, `--allow-mismatch`; the read-only default's order of rules, saving it, `rdt read-only`, refused raw writes; reopening the last workspace, including a moved and a deleted file.
 
@@ -1119,7 +1128,7 @@ Later, with the firmware: region-boundary tests on the target, and measuring the
 | M2 | Host core and `rdt` CLI over SCPI, several MCUs, reconnect (PR #7) | Done 2026-10-11 |
 | M3 | Symbols by name (PR #9), workspace (PR #10), GUI (PR #12) | Done 2026-10-11 |
 | M4 | Poll scheduler, live chart, statistics, CSV log (PR #14); watch tabs and removing command buttons (PR #16) | Done 2026-10-11 |
-| Console | Console features from ComPort-Zone, CON-1 to CON-12 | Done 2026-10-12 |
+| Console | Console features from ComPort-Zone, CON-1 to CON-12; terminal look CON-13 | Done 2026-10-12 |
 | M5 | ELF identity check (SYM-8), global read-only default (WS-4), reopen last workspace (WSP-3) | Done 2026-10-12 |
 | M6 | Installer and packaged documentation | Planned |
 | Later | Firmware memory commands on real hardware; binary protocol (RM-4) | Waiting on firmware |
@@ -1153,6 +1162,7 @@ The application is built against the simulator. As soon as the firmware has the 
 | 2026-10-12 | The full design document lives in the repository as this file, organised by requirement; DESIGN.md removed |
 | 2026-10-12 | Console features from ComPort-Zone: saved history, autocomplete, timestamps and colours, search, session log, hex/text conversion (CON-1 to CON-6). Scripts and multi-line paste declined |
 | 2026-10-12 | Second round from ComPort-Zone: a list of known commands kept in the workspace and imported from CSV or text, `send --expect`, `.reconnect` and `.info`, serial break, text size and wrap, a shortcuts list (CON-7 to CON-12). Running a file and several console tabs declined |
+| 2026-10-12 | Console as a terminal (CON-13): dark, TX/RX/ERR/SYS tags, the prompt as the last line, no Send button. Tab completes from the history and the imported commands only (CON-2 narrowed) |
 | 2026-10-12 | M5 built: ELF identity check by a constant variable or the GNU build ID, a mismatch refuses writes until allowed (SYM-8); the workspace's read-only default, which also refuses raw writes (WS-4); the GUI reopens the last workspace (WSP-3) |
 
 ## 9. Appendix: binary protocol (planned)
