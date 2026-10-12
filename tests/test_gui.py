@@ -184,13 +184,12 @@ def test_console_and_memory(qtbot, win):
 
 
 def test_console_history_and_completion(qtbot, win):
-    from PySide6.QtCore import QEvent
-    from PySide6.QtGui import QKeyEvent
+    from PySide6.QtTest import QTest
     from rdt.console import CommandHistory
     from rdt.gui.panels import HistoryDialog
 
     def key(k, mods=Qt.NoModifier):
-        con.keys.eventFilter(con.input, QKeyEvent(QEvent.KeyPress, k, mods))
+        QTest.keyClick(con.output, k, mods)
 
     connect(qtbot, win)
     con = win.console
@@ -225,6 +224,22 @@ def test_console_history_and_completion(qtbot, win):
     con.input.setText("*i")
     key(Qt.Key_Space, Qt.ControlModifier)             # Ctrl+Space does the same
     assert con.input.text() == "*IDN?"
+
+    # as you type, the best suggestion shows in grey after the cursor; Right or Tab takes it
+    con.input.setText("")
+    QTest.keyClicks(con.output, "sy")
+    assert con.input.text() == "sy" and con.output.ghost() == "STem:ERRor?"
+    key(Qt.Key_Right)
+    assert con.input.text() == "SYSTem:ERRor?" and con.output.ghost() == ""
+    con.input.setText("")
+    QTest.keyClicks(con.output, "*")
+    assert con.output.ghost() == "IDN?"                # the history comes first
+    key(Qt.Key_Tab)
+    assert con.input.text() == "*IDN?"
+    QTest.keyClicks(con.output, "x")
+    assert con.output.ghost() == ""                    # nothing starts with *IDN?x
+    con.input.setText("")
+    assert con.output.ghost() == con.output.hint
 
     # the history dialog sends again and deletes
     dlg = HistoryDialog(con)
@@ -314,12 +329,17 @@ def test_console_transcript(qtbot, win, tmp_path, monkeypatch):
     con.send("BOGUS?")
     qtbot.waitUntil(lambda: con.entries[-1][1] == "error", timeout=3000)
     text = con.output.toPlainText().splitlines()
-    assert re.fullmatch(r"\d\d:\d\d:\d\d\.\d{3} TX  BOGUS\?", text[-2])
-    assert re.fullmatch(r"\d\d:\d\d:\d\d\.\d{3} ERR \(no reply.*", text[-1])
+    assert re.fullmatch(r"\d\d:\d\d:\d\d\.\d{3} TX  BOGUS\?", text[-3])
+    assert re.fullmatch(r"\d\d:\d\d:\d\d\.\d{3} ERR \(no reply.*", text[-2])
+    assert text[-1] == win.ws.config.connection.address + " > "   # the prompt is the last line
     con.timestamps.setChecked(False)
-    assert con.output.toPlainText().splitlines()[-2] == "TX  BOGUS?"
+    assert con.output.toPlainText().splitlines()[-3] == "TX  BOGUS?"
+    con.input.setText("half typed")
     con.log("line one\nline two")                    # a multi-line reply lines up under its text
-    assert con.output.toPlainText().splitlines()[-2:] == ["RX  line one", "    line two"]
+    assert con.output.toPlainText().splitlines()[-3:] == [
+        "RX  line one", "    line two", win.ws.config.connection.address + " > half typed"]
+    assert con.input.text() == "half typed"            # a reply arriving keeps what you are typing
+    con.input.setText("")
 
     def fragments(block):
         it, out = block.begin(), []
@@ -334,7 +354,7 @@ def test_console_transcript(qtbot, win, tmp_path, monkeypatch):
     assert blocks["tx"][0] == ("TX  ", "#3fb950") and blocks["tx"][1][1] == "#7ee787"
     assert blocks["error"][0] == ("ERR ", "#f85149") and blocks["error"][1][1] == "#ff7b72"
     assert blocks["note"][0] == ("SYS ", "#8b949e")
-    assert con.prompt_label.text() == win.ws.config.connection.address and "Tab completes" in con.input.placeholderText()
+    assert "Tab" in con.output.hint
 
     # search: every match highlighted, Enter and Shift+Enter step, newest first
     con.show_find()
@@ -383,7 +403,7 @@ def test_console_transcript(qtbot, win, tmp_path, monkeypatch):
     qtbot.keyClick(con.input, Qt.Key_Tab)             # a real Tab completes and keeps the focus
     assert con.input.text() == "*IDN?" and con.input.hasFocus()
     qtbot.keyClick(con.input, Qt.Key_K, Qt.ControlModifier)
-    assert con.output.toPlainText() == "" and not con.entries
+    assert con.output.toPlainText() == win.ws.config.connection.address + " > *IDN?" and not con.entries
 
 
 def test_watch_tabs(qtbot, win, monkeypatch, tmp_path):
@@ -497,10 +517,14 @@ def test_elf_rebuild_remaps(qtbot, win, tmp_path):
 
 def test_link_down_greys_panels(qtbot, win, sim):
     connect(qtbot, win)
-    assert win.console.input.isEnabled()
+    from PySide6.QtTest import QTest
+    assert win.console.output.input_enabled
     win.disconnect()
     qtbot.waitUntil(lambda: win.bar.connect_button.text() == "Connect", timeout=3000)
-    assert not win.console.input.isEnabled() and win.console.input.placeholderText() == "not connected"
+    con = win.console
+    assert not con.output.input_enabled and con.output.hint == "not connected"
+    QTest.keyClicks(con.output, "abc")                 # nothing can be typed while disconnected
+    assert con.input.text() == ""
     assert win.console.commands_button.isEnabled()      # the list, search and log work offline
     assert win.bar.transport.isEnabled()
 
