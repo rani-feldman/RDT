@@ -2,7 +2,7 @@
 
 RDT (Remote Debugger Tool) reads and writes a running device's firmware variables and raw memory over the link the product already has, a COM port or LAN, so a live system can be inspected and tuned without a JTAG/SWD probe.
 
-The full, living design document is [RDT Design Document](https://claude.ai/code/artifact/01fb6748-f6db-46d8-a10b-bd96ece091f2). This file summarizes the decisions as of 2026-10-11.
+The full design document is [DESIGN_DOCUMENT.md](DESIGN_DOCUMENT.md) in this folder (its living copy is the [RDT Design Document](https://claude.ai/code/artifact/01fb6748-f6db-46d8-a10b-bd96ece091f2)). This file summarizes the decisions.
 
 ## Scope
 
