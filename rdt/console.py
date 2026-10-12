@@ -4,9 +4,12 @@ conversion (CON-6). No Qt here."""
 
 from __future__ import annotations
 
+import csv
+import io
 import logging
 import os
 import sys
+from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 
@@ -213,3 +216,75 @@ def hex_to_text(text: str) -> str:
         raise ValueError(f"an odd number of hex digits ({len(digits)})")
     data = bytes.fromhex(digits)
     return "".join(chr(b) if 32 <= b < 127 or b in (9, 10) else f"\\x{b:02X}" for b in data)
+
+
+# --- saved commands (CON-7) ------------------------------------------------------------------
+
+COMMAND_COLUMNS = ("command", "name", "group", "description")
+
+
+@dataclass
+class SavedCommand:
+    """One known command of the device, as imported from a list."""
+
+    command: str
+    name: str = ""
+    group: str = ""
+    description: str = ""
+
+
+def read_commands(path: str | Path) -> list[SavedCommand]:
+    """Read a command list: a CSV file (``.csv``) with the columns command, name, group and
+    description (a header row names them in any order; without one they are taken in that
+    order), or any other text file with one command per line. Blank lines and lines starting
+    with ``#`` are skipped. Raises ValueError for a CSV file with no command column."""
+    path = Path(path)
+    text = path.read_text(encoding="utf-8-sig")
+    if path.suffix.lower() != ".csv":
+        return [SavedCommand(line.strip()) for line in text.splitlines()
+                if line.strip() and not line.lstrip().startswith("#")]
+    rows = [r for r in csv.reader(io.StringIO(text)) if any(c.strip() for c in r)]
+    if not rows:
+        return []
+    header = [c.strip().lower() for c in rows[0]]
+    if "command" in header:
+        index = {col: header.index(col) for col in COMMAND_COLUMNS if col in header}
+        if "name" not in index and "label" in header:
+            index["name"] = header.index("label")
+        rows = rows[1:]
+    elif any(h in COMMAND_COLUMNS for h in header):
+        raise ValueError(f"{path.name}: the header has no 'command' column")
+    else:
+        index = {col: i for i, col in enumerate(COMMAND_COLUMNS)}
+    out = []
+    for r in rows:
+        cell = {col: (r[i].strip() if i < len(r) else "") for col, i in index.items()}
+        if cell.get("command") and not cell["command"].startswith("#"):
+            out.append(SavedCommand(**cell))
+    return out
+
+
+def write_commands(path: str | Path, commands: list[SavedCommand]) -> None:
+    """Write a command list as CSV with a header row, UTF-8 with a BOM so Excel opens it."""
+    with open(path, "w", encoding="utf-8-sig", newline="") as f:
+        w = csv.writer(f)
+        w.writerow(COMMAND_COLUMNS)
+        for c in commands:
+            w.writerow([c.command, c.name, c.group, c.description])
+
+
+def merge_commands(current: list[SavedCommand], new: list[SavedCommand],
+                   replace: bool = False) -> tuple[list[SavedCommand], int, int]:
+    """Append ``new`` to ``current`` (or replace it), skipping commands already in the list,
+    compared without case. Returns the list, how many were added and how many skipped."""
+    out = [] if replace else list(current)
+    seen = {c.command.casefold() for c in out}
+    added = 0
+    for c in new:
+        key = c.command.casefold()
+        if key in seen:
+            continue
+        seen.add(key)
+        out.append(c)
+        added += 1
+    return out, added, len(new) - added

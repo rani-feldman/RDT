@@ -10,6 +10,7 @@
     rdt -t bench.toml watch main:motor.speed -i 100
     rdt -t bench.toml console
     rdt history
+    rdt -w bench.rdtw commands import fw_commands.csv
 
 Without a target file, give the link and the MCUs on the command line:
 
@@ -19,14 +20,17 @@ Without a target file, give the link and the MCUs on the command line:
 from __future__ import annotations
 
 import argparse
+import csv
 import logging
+import re
 import sys
 import time
 from datetime import datetime
 from pathlib import Path
 
 from . import __version__, codec
-from .console import CommandHistory, SessionLog, completions
+from .console import (CommandHistory, SavedCommand, SessionLog, completions, merge_commands, read_commands,
+                      write_commands)
 from .csvlog import CsvLog
 from .errors import CommandTimeout, ConfigError, LinkDown, RdtError, SymbolError
 from .profile import Profile, parse_int
@@ -112,6 +116,8 @@ def build_parser() -> argparse.ArgumentParser:
     reply.add_argument("--reply", dest="expect", action="store_true", default=None,
                        help="wait for a reply even if the header has no '?'")
     reply.add_argument("--no-reply", dest="expect", action="store_false", help="don't wait for a reply")
+    p.add_argument("--expect", dest="pattern", metavar="REGEX",
+                   help="check the reply: exit code 11 if no part of it matches REGEX or no reply came")
 
     sub.add_parser("errors", help="read the SCPI error queue until it is empty")
 
@@ -164,6 +170,16 @@ def build_parser() -> argparse.ArgumentParser:
     q.add_argument("name")
     q.add_argument("new_name")
     tab.add_parser("remove", help="remove a tab and its items").add_argument("name")
+
+    p = sub.add_parser("commands", help="the workspace's list of known SCPI commands (no device needed)")
+    cmds = p.add_subparsers(dest="commands_cmd", metavar="ACTION", required=True)
+    q = cmds.add_parser("list", help="show the list, by group")
+    q.add_argument("text", nargs="?", default="", help="only commands, names or descriptions containing this")
+    q = cmds.add_parser("import", help="add commands from a CSV or text file, skipping ones already listed")
+    q.add_argument("file", type=Path)
+    q.add_argument("--replace", action="store_true", help="replace the list instead of adding to it")
+    cmds.add_parser("export", help="write the list to a CSV file").add_argument("file", type=Path)
+    cmds.add_parser("clear", help="empty the list")
     return ap
 
 
@@ -416,8 +432,29 @@ def _send(t: Target, text: str, expect: bool | None, out) -> int:
     return 1
 
 
+EXIT_EXPECT_FAILED = 11
+
+
 def cmd_send(t: Target, args, out) -> int:
-    return _send(t, " ".join(args.command), args.expect, out)
+    text = " ".join(args.command)
+    if args.pattern is None:
+        return _send(t, text, args.expect, out)
+    if args.expect is False:
+        raise ConfigError("--expect needs a reply, so it can't go with --no-reply")
+    try:
+        pattern = re.compile(args.pattern)
+    except re.error as e:
+        raise ConfigError(f"--expect {args.pattern!r}: {e}") from None
+    reply = t.command(text, True)
+    if reply is None:
+        print("(no reply)", file=out)
+        print(f"rdt: expected a reply matching {args.pattern!r}, but none came", file=sys.stderr)
+        return EXIT_EXPECT_FAILED
+    print(reply, file=out)
+    if not pattern.search(reply):
+        print(f"rdt: the reply does not match {args.pattern!r}", file=sys.stderr)
+        return EXIT_EXPECT_FAILED
+    return 0
 
 
 def cmd_errors(t: Target, args, out) -> int:
@@ -619,16 +656,67 @@ def cmd_tab(t: Target, args, out) -> int:
     return 0
 
 
+def _print_commands(commands: list[SavedCommand], text: str, out) -> None:
+    needle = text.casefold()
+    shown = [c for c in commands if needle in f"{c.command} {c.name} {c.description}".casefold()]
+    group = None
+    for c in sorted(shown, key=lambda c: c.group.casefold()):
+        if c.group != group:
+            group = c.group
+            print(f"[{group or 'no group'}]", file=out)
+        extra = " - ".join(x for x in (c.name, c.description) if x)
+        print(f"  {c.command}" + (f"    {extra}" if extra else ""), file=out)
+    if not shown:
+        print("(no saved commands" + (f" matching {text!r}" if text else "") + ")", file=out)
+
+
+def cmd_commands(t: Target | None, args, out) -> int:
+    ws = args.ws
+    if args.commands_cmd == "list":
+        _print_commands(ws.commands, args.text, out)
+        return 0
+    if args.commands_cmd == "export":
+        try:
+            write_commands(args.file, ws.commands)
+        except OSError as e:
+            raise ConfigError(f"cannot write {args.file}: {e.strerror}") from None
+        print(f"wrote {len(ws.commands)} commands to {args.file}", file=out)
+        return 0
+    ws = _need_file(ws)
+    if args.commands_cmd == "clear":
+        n = len(ws.commands)
+        ws.commands = []
+        msg = f"removed {n} commands"
+    else:
+        try:
+            new = read_commands(args.file)
+        except OSError as e:
+            raise ConfigError(f"cannot read {args.file}: {e.strerror}") from None
+        except (ValueError, csv.Error) as e:
+            raise ConfigError(str(e)) from None
+        ws.commands, added, skipped = merge_commands(ws.commands, new, args.replace)
+        msg = f"imported {added} commands" + (f", skipped {skipped} already listed" if skipped else "")
+    ws.save()
+    print(f"{msg} in {ws.path}", file=out)
+    return 0
+
+
 CONSOLE_HELP = """Type any SCPI command; queries (header ending in '?') wait for a reply.
   .read EXPR...         read values, such as .read main:motor @main:0x20000010:u32
   .write EXPR VALUE     write a value and confirm it
   .err                  read the error queue
   .history [N|clear]    the saved command history (last 20, or N), or delete it
+  .commands [TEXT]      the workspace's known commands (those containing TEXT)
+  .info                 the device, max response size and each MCU's memory, as rdt info
+  .reconnect            close the link and open it again, such as after a board reset
+  .break                send a 250 ms break (COM port only)
   !N                    send history entry N again
   .help                 this text
   .quit                 leave (or Ctrl+D)
-Up and Down walk the history; Tab completes from the history, the profile and common SCPI commands."""
-CONSOLE_DOT_COMMANDS = (".read ", ".write ", ".err", ".history", ".help", ".quit")
+Up and Down walk the history; Tab completes from the history, the known commands, the profile and
+common SCPI commands."""
+CONSOLE_DOT_COMMANDS = (".read ", ".write ", ".err", ".history", ".commands", ".info", ".reconnect", ".break",
+                        ".help", ".quit")
 
 
 class _Logged:
@@ -677,7 +765,7 @@ class _Stamped:
         self.out.flush()
 
 
-def _setup_line_editing(history: CommandHistory, profile: Profile) -> None:
+def _setup_line_editing(history: CommandHistory, profile: Profile, saved: list[str]) -> None:
     """On a terminal: Up and Down over the saved history, Tab completion. Needs readline
     (pyreadline3 on Windows); without it the console still works, without either."""
     try:
@@ -692,7 +780,7 @@ def _setup_line_editing(history: CommandHistory, profile: Profile) -> None:
     def complete(text: str, state: int) -> str | None:
         if state == 0:
             line = readline.get_line_buffer()
-            matches[:] = completions(line, history.items, profile, CONSOLE_DOT_COMMANDS)
+            matches[:] = completions(line, history.items, profile, [*saved, *CONSOLE_DOT_COMMANDS])
         return matches[state] if state < len(matches) else None
 
     readline.set_completer_delims("")      # complete the whole line: SCPI headers hold : ? *
@@ -723,7 +811,7 @@ def cmd_console(t: Target, args, out) -> int:
     history = CommandHistory()
     interactive = sys.stdin.isatty()
     if interactive:
-        _setup_line_editing(history, t.profile)
+        _setup_line_editing(history, t.profile, [c.command for c in args.ws.commands])
     session_log = None
     if getattr(args, "log", None):
         try:
@@ -781,6 +869,16 @@ def _console_loop(t: Target, args, history: CommandHistory, interactive: bool, o
                 if not arg.isdigit():
                     raise ConfigError(".history takes a count or 'clear'")
                 _print_history(history, int(arg), out)
+            elif line == ".info":
+                cmd_info(t, args, out)
+            elif line == ".reconnect":
+                t.reconnect()
+                print(f"reconnected to {t.idn or t.config.connection.describe()}", file=out)
+            elif line == ".break":
+                t.send_break()
+                print("break sent (250 ms)", file=out)
+            elif line == ".commands" or line.startswith(".commands "):
+                _print_commands(args.ws.commands, line[len(".commands"):].strip(), out)
             elif line.startswith(".read "):
                 for text in line.split()[1:]:
                     loc = t.resolve(text)
@@ -802,11 +900,11 @@ def _console_loop(t: Target, args, history: CommandHistory, interactive: bool, o
 COMMANDS = {
     "init": cmd_init, "list": cmd_list, "add": cmd_add, "remove": cmd_remove, "tab": cmd_tab,
     "info": cmd_info, "symbols": cmd_symbols, "ptype": cmd_ptype, "read": cmd_read, "write": cmd_write, "dump": cmd_dump, "poke": cmd_poke,
-    "send": cmd_send, "errors": cmd_errors, "watch": cmd_watch, "console": cmd_console, "history": cmd_history,
+    "send": cmd_send, "errors": cmd_errors, "watch": cmd_watch, "console": cmd_console, "history": cmd_history, "commands": cmd_commands,
 }
 
 
-OFFLINE = ("symbols", "ptype", "init", "list", "add", "remove", "tab")   # never open the link
+OFFLINE = ("symbols", "ptype", "init", "list", "add", "remove", "tab", "commands")   # never open the link
 
 
 def main(argv: list[str] | None = None, out=None) -> int:

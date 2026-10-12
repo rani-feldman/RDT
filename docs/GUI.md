@@ -14,7 +14,7 @@ rdt-gui examples/sim_bench.rdtw          # or: python -m rdt.gui examples/sim_be
 
 - **Transport**: `tcp` or `udp` with the device's IP address and port, or `serial` with a COM port and baud rate.
 - **Profile**: opens the SCPI profile editor (below). The button shows the profile's name and, when it comes from a file of its own, the file.
-- **Connect / Disconnect** (F5). The state next to it is green while the link is up, red while it is down and RDT is reconnecting, and grey when not connected. The console and memory view are disabled unless the link is up, and the connection fields can only be changed while disconnected.
+- **Connect / Disconnect** (F5). The state next to it is green while the link is up, red while it is down and RDT is reconnecting, and grey when not connected. The memory view and sending from the console are disabled unless the link is up (the transcript, search, log and command list still work), and the connection fields can only be changed while disconnected.
 - **Poll**: the global polling interval. `Off` (0) stops polling; items set to their own interval still poll.
 - **Log CSV** (Ctrl+L): log every watched value to a CSV file. See [CSV log](#csv-log).
 
@@ -107,11 +107,18 @@ Choose the MCU, type an address (`0x20000000`) or a variable name (`motor`), a l
 Type any SCPI command and press Enter. Because the firmware sends nothing back when a command fails, a query with no reply shows `(no reply; error queue: ...)` with what `SYST:ERR?` said. **Error queue** reads `SYST:ERR?` until the queue is empty.
 
 - **History.** Every command you send is saved, per user, in `%LOCALAPPDATA%\rdt\console_history.txt` (the last 500, a repeated command moved to the end). The GUI and `rdt console` share it, and it is kept across launches. Up and Down walk through it; going past the newest gives back what you were typing. **History** lists it newest first: double-click or **Send** sends an entry again, **Delete** removes one, **Clear all** empties it.
-- **Autocomplete.** Ctrl+Space suggests commands that start with (then contain) what you typed: your history first, newest first, then the profile's own commands (read, write, error, size and probe queries) and the common IEEE 488.2 commands (`*IDN?`, `*RST`, `*CLS`, `*OPC?` ...). A single match is filled in at once.
+- **Known commands.** **Commands** shows the workspace's list of the device's commands beside the transcript, by group, with a filter box; a command's description is its tooltip. Double-click one to put it in the input line, fill in any values, and press Enter. **Import...** reads a CSV file (columns `command`, `name`, `group`, `description`) or a text file with one command per line, and asks whether to add to the list (skipping commands already in it) or replace it. **Export...** writes the list as CSV, and **Clear** empties it. The list is saved in the workspace and works while disconnected.
+- **Autocomplete.** Ctrl+Space suggests commands that start with (then contain) what you typed: your history first, newest first, then the known commands, the profile's own commands (read, write, error, size and probe queries) and the common IEEE 488.2 commands (`*IDN?`, `*RST`, `*CLS`, `*OPC?` ...). A single match is filled in at once.
 - **Transcript.** Each line starts with its time to the millisecond (**Timestamps** hides it). Commands sent are green, replies in the normal text colour, errors (no reply, link down) red, and RDT's notes (connected, link down, reconnecting, sent with no reply expected) grey.
 - **Search.** Ctrl+F opens a find bar under the transcript. Every match is highlighted, the counter shows which one you are on (`3 of 12`), Enter and Shift+Enter go to the next and previous match, and Esc closes it. Ctrl+K clears the transcript, like **Clear**.
+- **Text size and wrap.** Ctrl+= and Ctrl+- (or Ctrl+mouse wheel over the transcript) make the console text larger or smaller, and Ctrl+0 resets it. **Wrap** wraps long lines; off (the default), they scroll sideways. Both are remembered for next time.
+- **Send break.** On a COM port link, the transcript's right-click menu has **Send break (250 ms)**, for firmware that resets its parser on a break.
 - **Hex and text.** Select part of the transcript and right-click: **Selection as hex** shows its bytes (`Hi` is `48 69`), and **Hex selection as text** turns hex such as `48656C6C6F`, `48 65 6C` or `0x48,0x65` back into text (`Hello`), with any non-printable byte as `\xNN`. The result opens in a small window with **Copy**.
 - **Log to file.** Asks for a text file and appends every console line to it, with its date and time and a mark: `>` sent, `<` reply, `!` error, `#` note. Click again to stop. The file is appended to, never overwritten. This is separate from the CSV value log.
+
+## Keyboard shortcuts
+
+**Help > Keyboard shortcuts** (F1) lists every shortcut in the menus and the console in one table.
 
 ## SCPI profile editor
 

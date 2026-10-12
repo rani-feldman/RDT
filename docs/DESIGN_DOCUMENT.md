@@ -208,6 +208,12 @@ Console features taken from ComPort-Zone (an open serial terminal); rani approve
 | CON-4 | Search the console transcript (Ctrl+F) with highlighted matches and a counter; Ctrl+K clears it (2026-10-12) | Done | [D-CON-4](#d-con-4-transcript-search) |
 | CON-5 | Log the console session to a text file, every line with date, time and direction (2026-10-12) | Done | [D-CON-5](#d-con-5-session-log) |
 | CON-6 | Convert a transcript selection between hex and text (2026-10-12) | Done | [D-CON-6](#d-con-6-hex-and-text) |
+| CON-7 | A list of the device's known commands, kept in the workspace, imported from and exported to a file, and picked from in the console (2026-10-12) | Done | [D-CON-7](#d-con-7-known-commands) |
+| CON-8 | `rdt send --expect REGEX` checks a reply, with its own exit code (2026-10-12) | Done | [D-CON-8](#d-con-8-checking-a-reply) |
+| CON-9 | `rdt console` can reconnect and show the device info without leaving (2026-10-12) | Done | [D-CON-9](#d-con-9-reconnect-and-info-in-the-console) |
+| CON-10 | Send a serial break on a COM port link (2026-10-12) | Done | [D-CON-10](#d-con-10-serial-break) |
+| CON-11 | The console text size can be changed and long lines wrapped or not, remembered per user (2026-10-12) | Done | [D-CON-11](#d-con-11-text-size-and-wrap) |
+| CON-12 | The GUI lists every keyboard shortcut in one window (2026-10-12) | Done | [D-CON-12](#d-con-12-keyboard-shortcuts) |
 
 ### 2.18 Removed and not in v1
 
@@ -217,7 +223,7 @@ Console features taken from ComPort-Zone (an open serial terminal); rani approve
 | RM-2 | Map file input (2026-10-05, ELF only) | Removed | [D-SYM-1](#d-sym-1-elf-and-dwarf-only) |
 | RM-3 | Not in v1 (2026-10-05): multi-address read command, on-target recorder, alarms, stimulus, computed values, log replay, dashboards | Removed | none |
 | RM-4 | Binary protocol, a faster alternative to SCPI | Planned | [Appendix](#9-appendix-binary-protocol-planned) |
-| RM-5 | Not taken from ComPort-Zone (2026-10-12): command files (scripts) and sending several pasted lines, both declined by rani; its saved-command library (same idea as RM-1) and control panel (covered by watch tabs) were not proposed | Removed | none |
+| RM-5 | Not taken from ComPort-Zone (2026-10-12): command files (scripts), running a file of commands, sending several pasted lines and several console tabs, all declined by rani; its control panel (covered by watch tabs) was not proposed | Removed | none |
 
 Requirements on the firmware itself (FW-1 to FW-9) are in [section 5](#5-firmware-specification).
 
@@ -262,7 +268,7 @@ rdt/
   scheduler.py                                      poll scheduler: block merging, one poll for many items
   stats.py, csvlog.py                               statistics, CSV log
   workspace.py, scaling.py, tomlw.py                workspace file, display formats and scaling, write safety
-  console.py                                        console history, autocomplete, session log, hex/text
+  console.py                                        console history, autocomplete, session log, hex/text, known commands
   cli.py                                            command line
   gui/         app.py       main window, connection bar, menus, polling tick, ELF check
                device.py    device worker thread
@@ -861,6 +867,11 @@ name = "Motor"
 
 [chart]
 window_s = 30
+
+[[command]]                   # the device's known commands (D-CON-7)
+command     = "MOTor:SPEed?"
+group       = "Motor"
+description = "Motor speed in rpm"
 ```
 
 Every key in a `[[tab.watch]]` except `expr` is optional. Saving rewrites the whole file (`rdt/tomlw.py`), so comments are not kept. Paths are stored relative to the file. On the CLI, `-w` opens a workspace (`-t` is the same option), and `rdt init FILE` saves the current target as a new workspace. [`examples/sim_bench.rdtw`](../examples/sim_bench.rdtw) is a working example for the simulator.
@@ -985,6 +996,37 @@ Ctrl+F (a shortcut on the console panel) opens a find bar under the transcript, 
 
 `text_to_hex` gives a string's UTF-8 bytes as spaced hex (`Hi` is `48 69`). `hex_to_text` takes hex with or without spaces, commas, colons or `0x`, refuses anything else or an odd number of digits, and shows printable ASCII as is, tab and newline as themselves, and any other byte as `\xNN`. In the GUI, the transcript's right-click menu adds **Selection as hex** and **Hex selection as text**, shown in a small window with **Copy**; an invalid selection shows why.
 
+#### D-CON-7 Known commands
+
+A list of the device's commands, so nobody has to remember the exact SCPI spelling. Unlike the removed command buttons (RM-1), an entry is never sent by a click: it goes to the input line to be checked and completed first.
+
+- **Model:** `SavedCommand(command, name, group, description)` in `rdt/console.py`; `Workspace.commands` holds the list, saved as `[[command]]` tables in the `.rdtw` (empty keys left out). It lives in the workspace because the list belongs to one firmware, like the profile (rani, 2026-10-12).
+- **Import:** `read_commands` reads a `.csv` file whose header names the columns `command`, `name` (or `label`), `group` and `description` in any order; without a header the columns are taken in that order. A header with no `command` column is refused. Any other file is plain text, one command per line. Blank lines and lines starting with `#` are skipped, and a UTF-8 BOM (Excel) is accepted. `merge_commands` appends, skipping commands already in the list (ignoring case), or replaces the list, and reports how many were added and skipped.
+- **Export:** `write_commands` writes CSV with a header, UTF-8 with a BOM so Excel opens it.
+- **GUI:** the console's **Commands** button shows `CommandsPanel` beside the transcript: a filter box, a tree by group (descriptions as tooltips), Import, Export and Clear. Double-click puts the command in the input line. Changes mark the workspace changed. The panel, transcript, search and log stay usable while the link is down; only sending is disabled (`Console.set_link_up`).
+- **CLI:** `rdt commands list|import|export|clear` (offline, needs `-w`), and `.commands [TEXT]` in `rdt console`.
+- **Autocomplete:** the known commands come right after the history in CON-2's suggestions, in the GUI and in Tab completion.
+
+#### D-CON-8 Checking a reply
+
+`rdt send COMMAND --expect REGEX` waits for a reply (even without `?`), prints it, and exits 0 if `re.search` finds the pattern in it. If no reply comes or it doesn't match, it says so on stderr and exits 11 (`EXIT_EXPECT_FAILED`), so a batch file can tell a wrong reply from a broken link (1). `--expect` with `--no-reply` is refused.
+
+#### D-CON-9 Reconnect and info in the console
+
+`rdt console` takes `.reconnect`, which calls `Target.reconnect()` (close the session and connect again, with the probe and size query), and `.info`, which prints the same as `rdt info`. The GUI has Connect and Disconnect already.
+
+#### D-CON-10 Serial break
+
+`Transport.send_break(seconds)` refuses by default; `SerialTransport` calls pyserial's `send_break`. `Session.send_break(ms)` and `Target.send_break(ms=250)` run it under the session lock while the link is up. The GUI offers **Send break (250 ms)** in the transcript's right-click menu, enabled only on a COM port link while connected; `rdt console` has `.break`. A TCP or UDP link answers "a break can only be sent on a COM port".
+
+#### D-CON-11 Text size and wrap
+
+Ctrl+= (or Ctrl++), Ctrl+- and Ctrl+mouse wheel over the transcript change the console's font size (transcript and input line together) between 6 and 32 points; Ctrl+0 goes back to the system's fixed-width size. The **Wrap** check box switches the transcript between wrapping at the panel's width and no wrapping (the default, so long replies such as hex dumps scroll sideways). Both are kept per user in `console.ini` (a `QSettings` INI file) next to the console history (D-CON-1), not in the workspace.
+
+#### D-CON-12 Keyboard shortcuts
+
+**Help > Keyboard shortcuts** (F1) shows one table of where, what and keys. The menu rows are read from the menus' own actions (`MainWindow.shortcut_rows`), so a new menu shortcut appears there by itself; the console's keys, which are not menu actions, come from `CONSOLE_KEYS` in `rdt/gui/panels.py`, kept next to their bindings.
+
 ### 4.18 Removed
 
 #### D-RM-1 Command buttons
@@ -1048,7 +1090,7 @@ Budgets for the firmware part, to check once it exists:
 - **Host tests** (`tests/test_host_*.py`): run against the simulator over TCP, UDP with dropped datagrams, and a serial pseudo-terminal. They cover user-defined commands, split reads and writes, write confirmation, a silent MCU, a cut link and reconnect, and a second SCPI client sharing the device and its error queue.
 - **Symbol tests** (`tests/test_symbols.py`): a corpus in `tests/elf` of one C program with structs, unions, anonymous members, bit fields, enums, 2-D arrays, pointer chains, function pointers and clashing file-statics. It is built by Clang for little-endian Cortex-M4 (DWARF 4), by Clang for big-endian ARM (DWARF 5), and by GCC for x86-64 (64-bit pointers), plus a "rebuilt" image for reload tests. `build.sh` rebuilds them; the ELFs are committed.
 - **Scheduler and workspace tests** (`tests/test_scheduler.py`, `test_workspace.py`): block planning, peripheral ranges, fallback to item-by-item reads, tabs, shared items, older files, scaling and write safety.
-- **Console tests** (`tests/test_console.py`, console tests in `test_host_cli.py` and `test_gui.py`): the saved history shared by two consoles, its limit and an unwritable file, Up and Down with the draft, completion order, the session log format, hex and text conversion, `rdt console --timestamps`, `--log`, `.history` and `!N`, and in the GUI Ctrl+Space, the history dialog, colours, timestamps, search and Ctrl+K.
+- **Console tests** (`tests/test_console.py`, console tests in `test_host_cli.py` and `test_gui.py`): the saved history shared by two consoles, its limit and an unwritable file, Up and Down with the draft, completion order, the session log format, hex and text conversion, reading, merging and saving known commands, `rdt console --timestamps`, `--log`, `.history`, `!N`, `.commands`, `.info`, `.reconnect` and `.break`, `rdt commands`, `send --expect`, a break and reconnect over a serial pseudo-terminal, and in the GUI Ctrl+Space, the history dialog, the commands panel, colours, timestamps, search, Ctrl+K, text size, wrap and the shortcuts list.
 - **GUI tests** (`tests/test_gui.py`): pytest-qt drives the window against the simulator, offscreen. They cover connect, watch tabs, editing, the chart, statistics, the CSV log and the console.
 
 Later, with the firmware: region-boundary tests on the target, and measuring the round trip against FW budgets on real hardware.
@@ -1062,7 +1104,7 @@ Later, with the firmware: region-boundary tests on the target, and measuring the
 | M2 | Host core and `rdt` CLI over SCPI, several MCUs, reconnect (PR #7) | Done 2026-10-11 |
 | M3 | Symbols by name (PR #9), workspace (PR #10), GUI (PR #12) | Done 2026-10-11 |
 | M4 | Poll scheduler, live chart, statistics, CSV log (PR #14); watch tabs and removing command buttons (PR #16) | Done 2026-10-11 |
-| Console | Console features from ComPort-Zone, CON-1 to CON-6 | Done 2026-10-12 |
+| Console | Console features from ComPort-Zone, CON-1 to CON-12 | Done 2026-10-12 |
 | M5 | Build-ID check (SYM-8), global read-only default (WS-4), reopen last workspace (WSP-3) | Planned |
 | M6 | Installer and packaged documentation | Planned |
 | Later | Firmware memory commands on real hardware; binary protocol (RM-4) | Waiting on firmware |
@@ -1095,6 +1137,7 @@ The application is built against the simulator. As soon as the firmware has the 
 | 2026-10-11 | Several watch tabs; command buttons removed |
 | 2026-10-12 | The full design document lives in the repository as this file, organised by requirement; DESIGN.md removed |
 | 2026-10-12 | Console features from ComPort-Zone: saved history, autocomplete, timestamps and colours, search, session log, hex/text conversion (CON-1 to CON-6). Scripts and multi-line paste declined |
+| 2026-10-12 | Second round from ComPort-Zone: a list of known commands kept in the workspace and imported from CSV or text, `send --expect`, `.reconnect` and `.info`, serial break, text size and wrap, a shortcuts list (CON-7 to CON-12). Running a file and several console tabs declined |
 
 ## 9. Appendix: binary protocol (planned)
 

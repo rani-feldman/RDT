@@ -26,6 +26,7 @@ from pathlib import Path
 from typing import Callable
 
 from . import scheduler, tomlw
+from .console import SavedCommand
 from .errors import ConfigError, RdtError, SymbolError, WriteRefused
 from .profile import Profile, Range
 from .scaling import Display
@@ -158,6 +159,7 @@ class Workspace:
     tabs: list[Tab] = field(default_factory=list)
     poll_ms: int = DEFAULT_POLL_MS   # the global polling interval; 0 is off
     chart: dict = field(default_factory=dict)   # owned by the GUI's chart; kept as written
+    commands: list[SavedCommand] = field(default_factory=list)   # the device's known commands (CON-7)
     path: Path | None = None
     warnings: list[str] = field(default_factory=list)   # about the file as it was loaded
 
@@ -188,7 +190,7 @@ class Workspace:
         chart = raw.get("chart", {})
         if not isinstance(chart, dict):
             raise ConfigError("[chart] must be a table")
-        ws = cls(TargetConfig.from_dict(raw, base), tabs, poll, chart)
+        ws = cls(TargetConfig.from_dict(raw, base), tabs, poll, chart, _commands_from(raw))
         if raw.get("button"):
             ws.warnings.append("command buttons are no longer supported: the [[button]] tables are ignored "
                                "and are left out when the workspace is saved")
@@ -238,6 +240,9 @@ class Workspace:
             d["tab"] = tabs
         if self.chart:
             d["chart"] = self.chart
+        if self.commands:
+            d["command"] = [{k: v for k, v in (("command", c.command), ("name", c.name), ("group", c.group),
+                                                ("description", c.description)) if v} for c in self.commands]
         return d
 
     def save(self, path: str | Path | None = None) -> Path:
@@ -524,6 +529,18 @@ def _tabs_from(raw: dict) -> list[Tab]:
         take(tab, t.get("watch", []))
         tabs.append(tab)
     return tabs
+
+
+def _commands_from(raw: dict) -> list[SavedCommand]:
+    out = []
+    for t in raw.get("command", []):
+        if not isinstance(t, dict) or not isinstance(t.get("command"), str) or not t["command"].strip():
+            raise ConfigError("every [[command]] must be a table with a command")
+        unknown = set(t) - {"command", "name", "group", "description"}
+        if unknown:
+            raise ConfigError(f"[[command]] {t['command']!r}: unknown keys {', '.join(sorted(unknown))}")
+        out.append(SavedCommand(t["command"].strip(), *(str(t.get(k, "")) for k in ("name", "group", "description"))))
+    return out
 
 
 def _num(v: float) -> float | int:
