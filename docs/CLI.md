@@ -224,7 +224,7 @@ time,seconds,main:motor.speed [rpm],main:motor.mode,main:tick_count,event
 
 ## SCPI profile
 
-The profile is the same `[scpi]` table the simulator reads ([`default_profile.toml`](../sim/examples/default_profile.toml)); see [SCPI profile](DESIGN.md#scpi-profile) in the design. The host also reads these keys, which the simulator ignores:
+The profile is the same `[scpi]` table the simulator reads ([`default_profile.toml`](../sim/examples/default_profile.toml)); see [D-SCPI-1](DESIGN_DOCUMENT.md#d-scpi-1-scpi-profile) in the design. The host also reads these keys, which the simulator ignores:
 
 | Key | Default | Meaning |
 | --- | --- | --- |
