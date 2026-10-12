@@ -232,9 +232,9 @@ def cmd_info(t: Target, args, out) -> int:
         if m.identity is not None:
             print(f"    identity: {m.identity.status}, {m.identity.detail}", file=out)
         for a in m.memory.areas:
-            kind = "range" if a.peripheral else "section"
+            kind = a.kind
             access = "rw" if a.writable else "ro"
-            print(f"    0x{a.start:08X}  {a.size:8d}  {access}  {kind:7s}  {a.name}", file=out)
+            print(f"    0x{a.start:08X}  {a.size:8d}  {access}  {kind:10s}  {a.name}", file=out)
     return 0
 
 

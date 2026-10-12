@@ -86,27 +86,33 @@ def run_command(t: Target, text: str) -> str | None:
 # --- SCPI console ----------------------------------------------------------------------------
 
 
-class HistoryDialog(QDialog):
-    """The saved console history, newest first: send an entry again, delete it, or clear them all."""
+class HistoryPanel(QWidget):
+    """The saved console history, newest first, beside the transcript like the commands list:
+    send an entry again, delete it, or clear them all."""
 
     def __init__(self, console: "Console"):
-        super().__init__(console)
+        super().__init__()
         self.console = console
-        self.setWindowTitle("Console history")
-        self.resize(480, 400)
         layout = QVBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.addWidget(QLabel("History, newest first"))
         self.list = QListWidget()
         self.list.setFont(mono())
         self.list.itemDoubleClicked.connect(lambda _item: self.send())
         layout.addWidget(self.list, 1)
         row = QHBoxLayout()
-        for text, slot in (("Send", self.send), ("Delete", self.delete), ("Clear all", self.clear_all),
-                           ("Close", self.accept)):
+        # Lambdas, so the button's checked flag is not passed on.
+        for text, slot in (("Send", lambda: self.send()), ("Delete", lambda: self.delete()),
+                           ("Clear all", lambda: self.clear_all())):
             b = QPushButton(text)
             b.clicked.connect(slot)
             row.addWidget(b)
         layout.addLayout(row)
-        self.refresh()
+
+    def set_open(self, on: bool) -> None:
+        if on:
+            self.refresh()
+        self.setVisible(on)
 
     def refresh(self) -> None:
         self.list.clear()
@@ -259,6 +265,8 @@ class Console(QWidget):
         self.settings = QSettings(str(history_path().parent / "console.ini"), QSettings.IniFormat)
         self.commands = CommandsPanel(self)
         self.commands.hide()
+        self.history_panel = HistoryPanel(self)
+        self.history_panel.hide()
         self.entries: deque[tuple[datetime, str, str]] = deque(maxlen=TRANSCRIPT_LINES)
         self.history = CommandHistory()
         self.session_log: SessionLog | None = None
@@ -301,8 +309,10 @@ class Console(QWidget):
         split = QSplitter(Qt.Horizontal)
         split.addWidget(self.terminal)
         split.addWidget(self.commands)
+        split.addWidget(self.history_panel)        # with both open, side by side
         split.setStretchFactor(0, 3)
         split.setStretchFactor(1, 1)
+        split.setStretchFactor(2, 1)
         layout.addWidget(split, 1)
         self._find_bar(layout)
         self.set_link_up(False)
@@ -321,12 +331,10 @@ class Console(QWidget):
         self.commands_button.setCheckable(True)
         self.commands_button.setToolTip("The workspace's list of known commands: import, pick, export")
         self.commands_button.toggled.connect(self.commands.setVisible)
-        history = QPushButton("History")
-        history.setToolTip("The saved console history: send an entry again or delete it")
-        history.clicked.connect(lambda: HistoryDialog(self).exec())
-        self.errors_button = errors = QPushButton("Error queue")
-        errors.setToolTip("Read SYST:ERR? until the queue is empty")
-        errors.clicked.connect(lambda: self.drain_errors())
+        self.history_button = history = QPushButton("History")
+        history.setCheckable(True)
+        history.setToolTip("The saved console history, beside the transcript: send an entry again or delete it")
+        history.toggled.connect(self.history_panel.set_open)
         clear = QPushButton("Clear")
         clear.setToolTip("Clear the transcript (Ctrl+K)")
         clear.clicked.connect(lambda: self.clear())
@@ -342,7 +350,7 @@ class Console(QWidget):
         self.log_button.setCheckable(True)
         self.log_button.setToolTip("Append every console line, with date and time, to a text file")
         self.log_button.clicked.connect(self._toggle_log)
-        for w in (self.commands_button, history, errors, clear, self.log_button):
+        for w in (self.commands_button, history, clear, self.log_button):
             row.addWidget(w)
         row.addStretch(1)
         row.addWidget(self.timestamps)
@@ -508,7 +516,6 @@ class Console(QWidget):
     def set_link_up(self, up: bool) -> None:
         """Sending needs the link; the transcript, search, log and the command list don't."""
         self.link_up = up
-        self.errors_button.setEnabled(up)
         self.output.input_enabled = up
         self.output.hint = "type a command \u2014 \u2191 recalls history, \u2192 takes the suggestion, Tab lists matches" if up \
             else "not connected"
@@ -551,7 +558,16 @@ class Console(QWidget):
             self.input.setText(common)
         self.suggest_model.setStringList(found)
         self.output.suggestion = ""
-        self.completer.complete(self.output.cursorRect())
+        self.completer.complete(self._popup_rect())
+
+    def _popup_rect(self):
+        """Where the list opens: under the cursor, wide enough for its longest command (the
+        completer takes the popup's width from this rectangle, and the cursor is 1 pixel wide)."""
+        rect = self.output.cursorRect()
+        popup = self.completer.popup()
+        width = popup.sizeHintForColumn(0) + popup.verticalScrollBar().sizeHint().width() + 2 * popup.frameWidth() + 8
+        rect.setWidth(max(width, 200))
+        return rect
 
     def _typed(self, _text: str) -> None:
         """As you type, the best suggestion shows in grey after the cursor (CON-14): the newest
@@ -675,6 +691,8 @@ class Console(QWidget):
     def send_command(self, text: str) -> None:
         """Send a command typed (or picked from the history) by hand and keep it in the history."""
         self.history.add(text)
+        if not self.history_panel.isHidden():
+            self.history_panel.refresh()
         self.send(text)
 
     def send(self, text: str) -> None:
@@ -691,20 +709,6 @@ class Console(QWidget):
     def send_break(self) -> None:
         self.log("break (250 ms)", "tx")
         self.main.device.submit(lambda t: t.send_break(250), lambda _r: self.note("break sent"),
-                                lambda e: self.log(f"error: {describe_error(e)}", "error"))
-
-    def drain_errors(self) -> None:
-        def job(t: Target):
-            out = []
-            for _ in range(64):
-                err = t.error_query()
-                if err is None:
-                    break
-                out.append(str(err))
-            return out or ['0,"No error"']
-
-        self.log("error queue (SYST:ERR? until empty)", "tx")
-        self.main.device.submit(job, lambda lines: self.log("\n".join(lines)),
                                 lambda e: self.log(f"error: {describe_error(e)}", "error"))
 
 

@@ -19,12 +19,22 @@ DATA_FORMATS = ("hex", "bytes_csv", "decimal", "ieee_block")
 TEMPLATE_FIELDS = {"read": {"mcu", "addr", "len"}, "write": {"mcu", "addr", "value", "size"}}
 
 
+RANGE_KINDS = ("peripheral", "memory")
+
+
 @dataclass
 class Range:
-    """Memory with no ELF section behind it, such as a peripheral block.
+    """Memory RDT may access beyond the ELF's sections.
 
-    Ranges are never merged with neighbouring reads, because reading a register can clear a flag
-    or pop a FIFO. ``mcu`` limits the range to one MCU (by name or id); empty means every MCU.
+    ``kind`` says what it is:
+
+    - ``peripheral`` (the default): registers, such as a GPIO block. Never merged with neighbouring
+      reads, because reading a register can clear a flag or pop a FIFO; an access must stay inside
+      it, and it may not overlap anything else.
+    - ``memory``: plain RAM or flash, such as the whole of a RAM bank. It may overlap the ELF's
+      sections, and reads in it are merged like reads in the ELF's sections.
+
+    ``mcu`` limits the range to one MCU (by name or id); empty means every MCU.
     """
 
     name: str
@@ -32,6 +42,7 @@ class Range:
     size: int
     writable: bool = True
     mcu: str | int | None = None
+    kind: str = "peripheral"
 
     @property
     def end(self) -> int:
@@ -39,13 +50,20 @@ class Range:
 
     @classmethod
     def from_dict(cls, table: dict) -> Range:
+        name = str(table.get("name", "range"))
+        if ("size" in table) == ("end" in table):
+            raise ConfigError(f"range {name}: give either size or end (the last address in it)")
         try:
-            r = cls(name=str(table.get("name", "range")), start=int(table["start"]), size=int(table["size"]),
-                    writable=bool(table.get("writable", True)), mcu=table.get("mcu"))
+            start = int(table["start"])
+            size = int(table["size"]) if "size" in table else int(table["end"]) - start + 1
+            r = cls(name=name, start=start, size=size, writable=bool(table.get("writable", True)),
+                    mcu=table.get("mcu"), kind=str(table.get("kind", "peripheral")))
         except (KeyError, TypeError, ValueError) as e:
             raise ConfigError(f"range {table!r}: needs integer start and size ({e})") from None
         if r.size < 1 or r.start < 0:
-            raise ConfigError(f"range {r.name}: start must be >= 0 and size >= 1")
+            raise ConfigError(f"range {r.name}: start must be >= 0 and size (or end) must leave at least 1 byte")
+        if r.kind not in RANGE_KINDS:
+            raise ConfigError(f"range {r.name}: kind must be {' or '.join(RANGE_KINDS)}, not {r.kind!r}")
         return r
 
 
