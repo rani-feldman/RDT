@@ -86,27 +86,33 @@ def run_command(t: Target, text: str) -> str | None:
 # --- SCPI console ----------------------------------------------------------------------------
 
 
-class HistoryDialog(QDialog):
-    """The saved console history, newest first: send an entry again, delete it, or clear them all."""
+class HistoryPanel(QWidget):
+    """The saved console history, newest first, beside the transcript like the commands list:
+    send an entry again, delete it, or clear them all."""
 
     def __init__(self, console: "Console"):
-        super().__init__(console)
+        super().__init__()
         self.console = console
-        self.setWindowTitle("Console history")
-        self.resize(480, 400)
         layout = QVBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.addWidget(QLabel("History, newest first"))
         self.list = QListWidget()
         self.list.setFont(mono())
         self.list.itemDoubleClicked.connect(lambda _item: self.send())
         layout.addWidget(self.list, 1)
         row = QHBoxLayout()
-        for text, slot in (("Send", self.send), ("Delete", self.delete), ("Clear all", self.clear_all),
-                           ("Close", self.accept)):
+        # Lambdas, so the button's checked flag is not passed on.
+        for text, slot in (("Send", lambda: self.send()), ("Delete", lambda: self.delete()),
+                           ("Clear all", lambda: self.clear_all())):
             b = QPushButton(text)
             b.clicked.connect(slot)
             row.addWidget(b)
         layout.addLayout(row)
-        self.refresh()
+
+    def set_open(self, on: bool) -> None:
+        if on:
+            self.refresh()
+        self.setVisible(on)
 
     def refresh(self) -> None:
         self.list.clear()
@@ -259,6 +265,8 @@ class Console(QWidget):
         self.settings = QSettings(str(history_path().parent / "console.ini"), QSettings.IniFormat)
         self.commands = CommandsPanel(self)
         self.commands.hide()
+        self.history_panel = HistoryPanel(self)
+        self.history_panel.hide()
         self.entries: deque[tuple[datetime, str, str]] = deque(maxlen=TRANSCRIPT_LINES)
         self.history = CommandHistory()
         self.session_log: SessionLog | None = None
@@ -301,8 +309,10 @@ class Console(QWidget):
         split = QSplitter(Qt.Horizontal)
         split.addWidget(self.terminal)
         split.addWidget(self.commands)
+        split.addWidget(self.history_panel)        # with both open, side by side
         split.setStretchFactor(0, 3)
         split.setStretchFactor(1, 1)
+        split.setStretchFactor(2, 1)
         layout.addWidget(split, 1)
         self._find_bar(layout)
         self.set_link_up(False)
@@ -321,9 +331,10 @@ class Console(QWidget):
         self.commands_button.setCheckable(True)
         self.commands_button.setToolTip("The workspace's list of known commands: import, pick, export")
         self.commands_button.toggled.connect(self.commands.setVisible)
-        history = QPushButton("History")
-        history.setToolTip("The saved console history: send an entry again or delete it")
-        history.clicked.connect(lambda: HistoryDialog(self).exec())
+        self.history_button = history = QPushButton("History")
+        history.setCheckable(True)
+        history.setToolTip("The saved console history, beside the transcript: send an entry again or delete it")
+        history.toggled.connect(self.history_panel.set_open)
         self.errors_button = errors = QPushButton("Error queue")
         errors.setToolTip("Read SYST:ERR? until the queue is empty")
         errors.clicked.connect(lambda: self.drain_errors())
@@ -684,6 +695,8 @@ class Console(QWidget):
     def send_command(self, text: str) -> None:
         """Send a command typed (or picked from the history) by hand and keep it in the history."""
         self.history.add(text)
+        if not self.history_panel.isHidden():
+            self.history_panel.refresh()
         self.send(text)
 
     def send(self, text: str) -> None:

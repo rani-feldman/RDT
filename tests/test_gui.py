@@ -186,7 +186,6 @@ def test_console_and_memory(qtbot, win):
 def test_console_history_and_completion(qtbot, win):
     from PySide6.QtTest import QTest
     from rdt.console import CommandHistory
-    from rdt.gui.panels import HistoryDialog
 
     def key(k, mods=Qt.NoModifier):
         QTest.keyClick(con.output, k, mods)
@@ -250,8 +249,13 @@ def test_console_history_and_completion(qtbot, win):
     con.input.setText("")
     assert con.output.ghost() == con.output.hint
 
-    # the history dialog sends again and deletes
-    dlg = HistoryDialog(con)
+    # the history panel opens beside the transcript, next to the commands list, sends again and deletes
+    con.commands_button.setChecked(True)
+    con.history_button.setChecked(True)
+    dlg = con.history_panel
+    assert not dlg.isHidden() and not con.commands.isHidden()
+    split = dlg.parentWidget()
+    assert split is con.commands.parentWidget() and split.indexOf(dlg) == split.indexOf(con.commands) + 1
     assert [dlg.list.item(i).text() for i in range(dlg.list.count())] == ["MEMory:MAX?", "*IDN?"]
     dlg.list.setCurrentRow(1)
     dlg.send()
@@ -259,6 +263,8 @@ def test_console_history_and_completion(qtbot, win):
     dlg.list.setCurrentRow(0)
     dlg.delete()
     assert CommandHistory().items == ["MEMory:MAX?"]
+    con.history_button.setChecked(False)
+    assert dlg.isHidden() and not con.commands.isHidden()
 
 
 def test_console_commands_list(qtbot, win, tmp_path, monkeypatch):
