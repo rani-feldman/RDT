@@ -27,11 +27,11 @@ Windows has no built-in virtual COM pair, so install [com0com](https://com0com.s
 
 ## Commands
 
-The read, write, size and error commands come from the SCPI profile, the same `[scpi]` table the host uses (see [`default_profile.toml`](../sim/examples/default_profile.toml)). The simulator answers whatever templates the profile defines, so a different command set can be tried before the firmware has it.
+The read, write and error commands come from the SCPI profile, the same `[scpi]` table the host uses (see [`default_profile.toml`](../sim/examples/default_profile.toml)). The simulator answers whatever templates the profile defines, so a different command set can be tried before the firmware has it.
 
 | Command (default profile) | Reply |
 | --- | --- |
-| `MEMory:READ? <mcu>,<addr>,<len>` | `<len>` bytes, lowest address first, in the profile's `data_format` |
+| `MEMory:READ? <mcu>,<addr>,<len>` | `<len>` bytes in bare hex, lowest address first, such as `0000C03F` |
 | `MEMory:WRITE <mcu>,<addr>,<value>,<size>` | none. `<size>` is 1, 2, 4 or 8 bytes, at most `max_write` |
 | `SYSTem:ERRor?` | oldest error, or `0,"No error"` |
 | `*IDN?`, `*RST`, `*CLS`, `*OPC?` | standard. `*RST` reloads every MCU's memory from its image |
@@ -39,16 +39,9 @@ The read, write, size and error commands come from the SCPI profile, the same `[
 | `SIMulation:MCU:SILent? <mcu>` | `1` or `0` |
 | `SIMulation:MCU:LIST?` | `0,"main",1,"motorctl"` |
 
-Long and short header forms both work, in any case (`MEMORY:READ?`, `mem:read?`). Numbers are decimal, `0x..`, or SCPI `#H..`. If the profile's `addr_format` or `value_format` is bare hex such as `{value:X}`, that field is parsed as hex.
+Long and short header forms both work, in any case (`MEMORY:READ?`, `mem:read?`).
 
-Read reply formats (`data_format`):
-
-| Format | 4 bytes `00 00 C0 3F` |
-| --- | --- |
-| `hex` | `0000C03F` |
-| `bytes_csv` | `00,00,C0,3F` |
-| `decimal` | `0,0,192,63` |
-| `ieee_block` | `#14` followed by the 4 raw bytes |
+`<addr>` and `<value>` are bare hex with no prefix, as in the firmware: address `0x11AABBCCDD` is sent as `11AABBCCDD`, and a write of 1.5 as a float is `MEMory:WRITE 0,20000004,3FC00000,4`. A prefixed or signed number (`0x20000000`, `#H20`, `-1`) fails with `-104,"Data type error"`. `<mcu>`, `<len>` and `<size>` are decimal. A read reply is the bytes in bare hex, lowest address first: the 4 bytes `00 00 C0 3F` come back as `0000C03F`.
 
 ## Errors
 
