@@ -78,6 +78,8 @@ def build_parser() -> argparse.ArgumentParser:
     g.add_argument("--mcu", type=_mcu_option, action="append", metavar="NAME=ID[:ELF]",
                    help="an MCU of the device; repeat for each. Replaces the target file's MCUs")
     g.add_argument("--timeout", type=float, metavar="MS", help="reply timeout in ms, for every MCU")
+    g.add_argument("--allow-mismatch", action="store_true",
+                   help="write even to an MCU whose ELF does not match its firmware")
     ap.add_argument("-v", "--verbose", action="count", default=0,
                     help="-v: link events, -vv: every command and reply")
 
@@ -154,7 +156,8 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--offset", type=float)
     p.add_argument("--unit")
     p.add_argument("--poll", metavar="MS|global|manual", help="polling for this item")
-    p.add_argument("--read-only", action=argparse.BooleanOptionalAction, default=None)
+    p.add_argument("--read-only", action=argparse.BooleanOptionalAction, default=None,
+                   help="refuse writes; --no-read-only allows them even when the workspace is read-only")
     p.add_argument("--min", type=float, help="lowest value a write may set, in shown units")
     p.add_argument("--max", type=float, help="highest value a write may set, in shown units")
     p.add_argument("--confirm", action=argparse.BooleanOptionalAction, default=None, help="ask before writing")
@@ -162,6 +165,10 @@ def build_parser() -> argparse.ArgumentParser:
     p = sub.add_parser("remove", help="remove an item from the workspace's watch list (no device needed)")
     p.add_argument("expr", metavar="EXPR")
     p.add_argument("--tab", metavar="NAME", help="remove it from this watch tab only (default: from every tab)")
+
+    p = sub.add_parser("read-only", help="show or set the workspace's read-only default (no device needed)")
+    p.add_argument("state", nargs="?", choices=("on", "off"),
+                   help="on: every item refuses writes unless it allows them (add --no-read-only)")
 
     p = sub.add_parser("tab", help="add, rename or remove a watch tab (no device needed)")
     tab = p.add_subparsers(dest="tab_cmd", metavar="ACTION", required=True)
@@ -222,6 +229,8 @@ def cmd_info(t: Target, args, out) -> int:
     for m in t.mcus.values():
         elf = m.elf.path.name if m.elf else "no ELF"
         print(f"MCU {m.id} {m.name} ({elf}, {m.byte_order} endian)", file=out)
+        if m.identity is not None:
+            print(f"    identity: {m.identity.status}, {m.identity.detail}", file=out)
         for a in m.memory.areas:
             kind = "range" if a.peripheral else "section"
             access = "rw" if a.writable else "ro"
@@ -410,6 +419,7 @@ def cmd_poke(t: Target, args, out) -> int:
         data = bytes.fromhex(args.data)
     except ValueError:
         raise ConfigError(f"{args.data!r} is not hex bytes") from None
+    args.ws.check_raw_write(args.mcu_name, args.addr)
     t.write(args.mcu_name, args.addr, data)
     print(f"wrote {len(data)} bytes at 0x{args.addr:08X} on {args.mcu_name} (confirmed by read-back)", file=out)
     return 0
@@ -516,6 +526,10 @@ def cmd_watch(t: Target, args, out) -> int:
                 next_elf_check = now + 1.0
                 for name in t.refresh_elfs():
                     event.append(f"ELF rebuilt for {name}")
+                    for ident in t.check_identity(name):
+                        if ident.status == "mismatch":
+                            event.append(f"ELF does not match the firmware on {name}")
+                            print(f"# {ident}", file=out, flush=True)
                     for i, loc in enumerate(locs):
                         if loc is not None and loc.mcu == name:
                             locs[i], note = t.remap(loc)
@@ -584,7 +598,8 @@ def cmd_list(t: Target, args, out) -> int:
     ws = _need_file(args.ws)
     poll = f"every {ws.poll_ms} ms" if ws.poll_ms else "off"
     tabs = f"{len(ws.tabs)} tab{'' if len(ws.tabs) == 1 else 's'}"
-    print(f"{ws.path}: {len(ws.watches)} watched items in {tabs}, polling {poll}", file=out)
+    ro = ", every item read-only unless it allows writes" if ws.read_only else ""
+    print(f"{ws.path}: {len(ws.watches)} watched items in {tabs}, polling {poll}{ro}", file=out)
     width = max((len(w.expr) for w in ws.watches), default=0)
     for tab in ws.tabs:
         print(f"tab {tab.name!r}: {len(tab.watches)} items", file=out)
@@ -636,6 +651,18 @@ def cmd_remove(t: Target, args, out) -> int:
     ws.save()
     where = f"tab {ws.tab(args.tab).name!r} of " if args.tab else ""
     print(f"removed {w.expr} from {where}{ws.path}", file=out)
+    return 0
+
+
+def cmd_read_only(t: Target, args, out) -> int:
+    ws = _need_file(args.ws)
+    if args.state is not None:
+        ws.read_only = args.state == "on"
+        ws.save()
+    if ws.read_only:
+        print(f"{ws.path}: every item is read-only unless it allows writes; raw writes are refused", file=out)
+    else:
+        print(f"{ws.path}: items are writable unless they are read-only", file=out)
     return 0
 
 
@@ -874,6 +901,11 @@ def _console_loop(t: Target, args, history: CommandHistory, interactive: bool, o
             elif line == ".reconnect":
                 t.reconnect()
                 print(f"reconnected to {t.idn or t.config.connection.describe()}", file=out)
+                for m in t.mcus.values():
+                    if m.identity is not None and m.identity.status == "mismatch":
+                        if args.allow_mismatch:
+                            t.allow_mismatch(m)
+                        print(f"warning: {m.identity}", file=out)
             elif line == ".break":
                 t.send_break()
                 print("break sent (250 ms)", file=out)
@@ -899,12 +931,13 @@ def _console_loop(t: Target, args, history: CommandHistory, interactive: bool, o
 
 COMMANDS = {
     "init": cmd_init, "list": cmd_list, "add": cmd_add, "remove": cmd_remove, "tab": cmd_tab,
+    "read-only": cmd_read_only,
     "info": cmd_info, "symbols": cmd_symbols, "ptype": cmd_ptype, "read": cmd_read, "write": cmd_write, "dump": cmd_dump, "poke": cmd_poke,
     "send": cmd_send, "errors": cmd_errors, "watch": cmd_watch, "console": cmd_console, "history": cmd_history, "commands": cmd_commands,
 }
 
 
-OFFLINE = ("symbols", "ptype", "init", "list", "add", "remove", "tab", "commands")   # never open the link
+OFFLINE = ("symbols", "ptype", "init", "list", "add", "remove", "tab", "commands", "read-only")   # never open the link
 
 
 def main(argv: list[str] | None = None, out=None) -> int:
@@ -924,6 +957,13 @@ def main(argv: list[str] | None = None, out=None) -> int:
         if args.cmd in OFFLINE:
             return COMMANDS[args.cmd](target, args, out)
         target.connect()
+        for m in target.mcus.values():
+            if m.identity is not None and m.identity.status == "mismatch":
+                if args.allow_mismatch:
+                    target.allow_mismatch(m)
+                print(f"rdt: warning: {m.identity}" +
+                      ("" if args.allow_mismatch else "; writes to it are refused (--allow-mismatch to write anyway)"),
+                      file=sys.stderr)
         try:
             return COMMANDS[args.cmd](target, args, out)
         finally:
