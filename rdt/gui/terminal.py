@@ -15,12 +15,12 @@ class Terminal(QPlainTextEdit):
     """A transcript you type into. Everything before the prompt's input is fixed; typing anywhere
     goes to the end of the last line. Enter sends that line (``returnPressed``), the transcript's
     new lines are inserted above the prompt, and a grey suggestion after the cursor is taken with
-    Tab or Right."""
+    Right; Tab asks for completion, which fills in a single match or lists several."""
 
     returnPressed = Signal()
     textEdited = Signal(str)
     history_step = Signal(int)          # Up (-1) or Down (+1)
-    complete_requested = Signal()       # Tab with no suggestion shown, or Ctrl+Space
+    complete_requested = Signal()       # Tab or Ctrl+Space
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -140,8 +140,7 @@ class Terminal(QPlainTextEdit):
         if (key == Qt.Key_Tab and not mods & ~Qt.KeypadModifier) or \
                 (key == Qt.Key_Space and mods & Qt.ControlModifier):
             if self.input_enabled:
-                if key == Qt.Key_Tab and self.accept_suggestion():
-                    return
+                self.suggestion = ""
                 self.complete_requested.emit()
             return
         if key == Qt.Key_Escape:
