@@ -127,6 +127,16 @@ def test_read_and_merge_commands(tmp_path):
     bad.write_text("name,group\n", encoding="utf-8")
     with pytest.raises(ValueError, match="no 'command' column"):
         read_commands(bad)
+    semi = tmp_path / "e.csv"   # Excel in some regions: semicolons, and the Windows code page
+    semi.write_bytes("command;name;group\n*RST;*CLS reset;Basic\nMEAS:TEMP?;Temp \xb0C;Measure\n".encode("cp1252"))
+    assert read_commands(semi) == [SavedCommand("*RST", "*CLS reset", "Basic"),
+                                   SavedCommand("MEAS:TEMP?", "Temp \xb0C", "Measure")]
+    tabs = tmp_path / "f.csv"
+    tabs.write_text("*IDN?\tIdentify\nSYST:ERR?\tErrors\n", encoding="utf-8")
+    assert [(c.command, c.name) for c in read_commands(tabs)] == [("*IDN?", "Identify"), ("SYST:ERR?", "Errors")]
+    commas = tmp_path / "g.csv"   # a semicolon inside a command doesn't change the separator
+    commas.write_text("*RST;*CLS,Reset all\n", encoding="utf-8")
+    assert read_commands(commas) == [SavedCommand("*RST;*CLS", "Reset all")]
     cur = [SavedCommand("*IDN?")]
     merged, added, skipped = merge_commands(cur, [SavedCommand("*idn?"), SavedCommand("A"), SavedCommand("A")])
     assert ([c.command for c in merged], added, skipped) == (["*IDN?", "A"], 1, 2)

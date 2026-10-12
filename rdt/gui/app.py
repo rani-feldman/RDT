@@ -239,7 +239,7 @@ class MainWindow(QMainWindow):
         action(m, "Load profile file...", self.load_profile)
         action(m, "&MCUs and ELF files...", self.edit_mcus)
         m.addSeparator()
-        action(m, "Check ELF &identity", self.check_identity)
+        action(m, "Check ELF &identity", lambda: self.check_identity())
         self.allow_action = action(m, "Allow writes despite ELF &mismatch", self.allow_mismatch)
         self.allow_action.setEnabled(False)
         m = self.menuBar().addMenu("&Watch")
