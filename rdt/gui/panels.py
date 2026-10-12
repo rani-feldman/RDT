@@ -24,6 +24,7 @@ from ..profile import DATA_FORMATS, Profile, parse_int
 from ..target import McuConfig, Target
 from ..workspace import Workspace
 from .device import describe_error
+from .terminal import Terminal
 
 BYTES_PER_ROW = 16
 TRANSCRIPT_LINES = 5000
@@ -33,6 +34,7 @@ FONT_MIN, FONT_MAX = 6, 32   # console font size, in points
 CONSOLE_KEYS = [
     ("Enter", "Send the command"),
     ("Up / Down", "Walk the command history"),
+    ("\u2192 / Tab", "Take the grey suggestion shown while typing"),
     ("Tab / Ctrl+Space", "Complete the command from the history and the known commands"),
     ("Ctrl+F", "Find in the transcript"),
     ("Enter / Shift+Enter", "Next / previous match, in the find bar"),
@@ -82,30 +84,6 @@ def run_command(t: Target, text: str) -> str | None:
 
 
 # --- SCPI console ----------------------------------------------------------------------------
-
-
-class _InputKeys(QObject):
-    """Keys of the console's input line: Up and Down walk the saved history, Tab (or Ctrl+Space)
-    completes."""
-
-    def __init__(self, console: "Console"):
-        super().__init__(console.input)
-        self.console = console
-        console.input.installEventFilter(self)
-
-    def eventFilter(self, obj, event) -> bool:
-        if event.type() != QEvent.KeyPress:
-            return False
-        con = self.console
-        if event.key() in (Qt.Key_Up, Qt.Key_Down) and not con.completer.popup().isVisible():
-            step = -1 if event.key() == Qt.Key_Up else 1
-            con.input.setText(con.history.navigate(step, con.input.text()))
-            return True
-        if (event.key() == Qt.Key_Tab and not event.modifiers() & ~Qt.KeypadModifier) or \
-                (event.key() == Qt.Key_Space and event.modifiers() & Qt.ControlModifier):
-            con.complete()
-            return True
-        return False
 
 
 class HistoryDialog(QDialog):
@@ -297,36 +275,28 @@ class Console(QWidget):
         term = QVBoxLayout(self.terminal)
         term.setContentsMargins(4, 2, 4, 2)
         term.setSpacing(0)
-        self.output = QPlainTextEdit(readOnly=True)
+        # One text area: the transcript, and its last line is the prompt you type on (CON-14).
+        self.output = Terminal()
         self.output.setFont(mono())
         self.output.setMaximumBlockCount(TRANSCRIPT_LINES)
+        self.output.text_color = TERMINAL["text"]
+        self.output.ghost_color = TERMINAL["placeholder"]
+        self.output.arrow_color = TERMINAL["stamp"]
         self.output.viewport().installEventFilter(self)
         self.output.setContextMenuPolicy(Qt.CustomContextMenu)
         self.output.customContextMenuRequested.connect(self._context_menu)
+        self.input = self.output          # the prompt line's text(), setText() and signals
+        self.output.returnPressed.connect(self._send_typed)
+        self.output.textEdited.connect(self._typed)
+        self.output.history_step.connect(self._history_step)
+        self.output.complete_requested.connect(self.complete)
         term.addWidget(self.output, 1)
-        prompt = QHBoxLayout()
-        prompt.setSpacing(6)
-        self.prompt_label = QLabel()
-        self.prompt_label.setFont(mono())
-        self.prompt_arrow = QLabel(">")
-        self.prompt_arrow.setFont(mono())
-        self.input = QLineEdit()
-        self.input.setFont(mono())
-        palette = self.input.palette()
-        palette.setColor(palette.ColorRole.PlaceholderText, QColor(TERMINAL["placeholder"]))
-        self.input.setPalette(palette)
-        self.input.returnPressed.connect(self._send_typed)
-        self.input.textEdited.connect(self._typed)
         self.suggest_model = QStringListModel(self)
         self.completer = QCompleter(self.suggest_model, self)
-        self.completer.setWidget(self.input)
+        self.completer.setWidget(self.output)
         self.completer.setCompletionMode(QCompleter.UnfilteredPopupCompletion)
         self.completer.activated.connect(self._apply_completion)
-        self.keys = _InputKeys(self)
-        prompt.addWidget(self.prompt_label)
-        prompt.addWidget(self.prompt_arrow)
-        prompt.addWidget(self.input, 1)
-        term.addLayout(prompt)
+        self.output.popup_open = lambda: self.completer.popup().isVisible()
 
         split = QSplitter(Qt.Horizontal)
         split.addWidget(self.terminal)
@@ -396,7 +366,7 @@ class Console(QWidget):
 
     def set_font_size(self, size: int) -> None:
         size = max(FONT_MIN, min(FONT_MAX, size))
-        for w in (self.output, self.input, self.prompt_label, self.prompt_arrow):
+        for w in (self.output,):
             f = w.font()
             f.setPointSize(size)
             w.setFont(f)
@@ -417,7 +387,7 @@ class Console(QWidget):
             act.setEnabled(bool(selected))
         menu.addSeparator()
         act = menu.addAction("Send break (250 ms)", self.send_break)
-        act.setEnabled(self.input.isEnabled() and self.main.ws.config.connection.transport == "serial")
+        act.setEnabled(self.output.input_enabled and self.main.ws.config.connection.transport == "serial")
         act.setToolTip("Hold the COM port line in the break state; only on a COM port link")
         menu.exec(self.output.mapToGlobal(pos))
 
@@ -482,6 +452,7 @@ class Console(QWidget):
         self.find_bar.hide()
         self.matches, self.match = [], -1
         self.output.setExtraSelections([])
+        self.output._to_end()
         self.input.setFocus()
 
     def find_next(self) -> None:
@@ -537,18 +508,17 @@ class Console(QWidget):
     def set_link_up(self, up: bool) -> None:
         """Sending needs the link; the transcript, search, log and the command list don't."""
         self.link_up = up
-        for w in (self.input, self.errors_button):
-            w.setEnabled(up)
-        self.input.setPlaceholderText("type a command \u2014 \u2191 recalls history, Tab completes" if up
-                                      else "not connected")
+        self.errors_button.setEnabled(up)
+        self.output.input_enabled = up
+        self.output.hint = "type a command \u2014 \u2191 recalls history, Tab or \u2192 takes a suggestion" if up \
+            else "not connected"
         self._show_prompt()
 
     def _show_prompt(self) -> None:
         """The prompt names the link, such as COM3 or 192.168.1.20:5025: green while it is up."""
         ws = getattr(self.main, "ws", None)
-        self.prompt_label.setText(ws.config.connection.address if ws else "")
         color = TERMINAL["prompt"] if getattr(self, "link_up", False) else TERMINAL["stamp"]
-        self.prompt_label.setStyleSheet(f"color: {color};")
+        self.output.set_prompt(ws.config.connection.address if ws else "", color)
 
     def set_workspace(self, ws: Workspace) -> None:
         self.commands.refresh()
@@ -580,20 +550,33 @@ class Console(QWidget):
         if len(common) > len(typed):
             self.input.setText(common)
         self.suggest_model.setStringList(found)
-        self.completer.complete()
+        self.output.suggestion = ""
+        self.completer.complete(self.output.cursorRect())
 
     def _typed(self, _text: str) -> None:
+        """As you type, the best suggestion shows in grey after the cursor (CON-14): the newest
+        history entry, else the first known command, that starts with what is typed."""
         self.history.reset_navigation()
+        found = self.suggestions() if self.input.text().strip() else []
+        typed = self.input.text().casefold()
+        self.output.suggestion = next((c for c in found if c.casefold().startswith(typed)), "")
+        self.output.viewport().update()
         if self.completer.popup().isVisible():
-            found = self.suggestions()
             self.suggest_model.setStringList(found)
             if not found:
                 self.completer.popup().hide()
 
+    def _history_step(self, step: int) -> None:
+        if self.completer.popup().isVisible():
+            return
+        self.output.suggestion = ""
+        self.input.setText(self.history.navigate(step, self.input.text()))
+
     def _apply_completion(self, text: str) -> None:
         self.completer.popup().hide()
+        self.output.suggestion = ""
         self.input.setText(text)
-        self.input.setFocus()
+        self.output.setFocus()
 
     # --- transcript --------------------------------------------------------------------------
 
@@ -606,8 +589,6 @@ class Console(QWidget):
         self._render(entry)
         if not self.find_bar.isHidden():
             self._search()
-        else:
-            self.output.moveCursor(QTextCursor.End)
 
     def start_log(self, path: str | Path) -> bool:
         self.stop_log()
@@ -648,14 +629,13 @@ class Console(QWidget):
 
     def clear(self) -> None:
         self.entries.clear()
-        self.output.clear()
+        self.output.clear_transcript()
         self._search()
 
     def rerender(self) -> None:
-        self.output.clear()
+        self.output.clear_transcript()
         for entry in self.entries:
             self._render(entry)
-        self.output.moveCursor(QTextCursor.End)
         self._search()
 
     def _render(self, entry: tuple[datetime, str, str]) -> None:
@@ -673,23 +653,23 @@ class Console(QWidget):
         tag_fmt.setForeground(QColor(tag_color))
         stamp = when.strftime("%H:%M:%S.%f")[:-3] + " " if self.timestamps.isChecked() else ""
         head = stamp + tag.ljust(TAG_WIDTH)
-        cursor = QTextCursor(self.output.document())
-        cursor.movePosition(QTextCursor.End)
+        follow = self.output._cursor_in_input()
+        cursor = self.output.insert_above()
         for i, line in enumerate(text.split("\n")):
-            if not self.output.document().isEmpty():
-                cursor.insertBlock()
             if i == 0:
                 cursor.insertText(stamp, stamp_fmt)
                 cursor.insertText(tag.ljust(TAG_WIDTH), tag_fmt)
             else:
                 cursor.insertText(" " * len(head), stamp_fmt)
             cursor.insertText(line, fmt)
+            cursor.insertBlock()
+        self.output.done_inserting(follow)
 
     def _send_typed(self) -> None:
         text = self.input.text().strip()
         if not text:
             return
-        self.input.clear()
+        self.input.setText("")
         self.send_command(text)
 
     def send_command(self, text: str) -> None:

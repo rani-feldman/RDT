@@ -215,6 +215,7 @@ Console features taken from ComPort-Zone (an open serial terminal); rani approve
 | CON-11 | The console text size can be changed and long lines wrapped or not, remembered per user (2026-10-12) | Done | [D-CON-11](#d-con-11-text-size-and-wrap) |
 | CON-12 | The GUI lists every keyboard shortcut in one window (2026-10-12) | Done | [D-CON-12](#d-con-12-keyboard-shortcuts) |
 | CON-13 | The GUI console looks like a terminal: dark, each line with its time and a TX, RX, ERR or SYS tag, and the prompt as its last line, with no separate line or button for sending (2026-10-12) | Done | [D-CON-13](#d-con-13-terminal-look) |
+| CON-14 | Commands are typed on the console's next free line, inside the transcript, and the best suggestion from the history or the known commands shows while typing, without pressing Tab (2026-10-12) | Done | [D-CON-14](#d-con-14-typing-in-the-transcript) |
 
 ### 2.18 Removed and not in v1
 
@@ -987,7 +988,7 @@ The console code that is not Qt lives in `rdt/console.py`, so the GUI console (`
 
 Suggestions come from the history and the workspace's known commands (D-CON-7) only, as rani asked on 2026-10-12: a suggestion is always a command really sent before or one imported for this device. `completions(text, history, profile, extra, common=False)` returns up to 20, without duplicates (case-insensitive): those starting with `text` first, then those containing it, each group ordered history (newest first) then known commands. (With a profile and `common=True` it can also offer the profile's command heads and the IEEE 488.2 common commands; neither console uses that any more.)
 
-- **GUI:** Tab (Ctrl+Space too). An event filter on the input line takes the Tab before Qt moves the focus. One suggestion is filled in at once. With several, the part they all start with is filled in and a `QCompleter` popup lists them; it refreshes as you type, and Tab or Enter takes the highlighted one.
+- **GUI:** while typing, the best suggestion shows in grey after the cursor (D-CON-14); Right or Tab takes it. With no suggestion shown, Tab (Ctrl+Space too) completes: one match is filled in at once; with several, the part they all start with is filled in and a `QCompleter` popup lists them at the cursor; it refreshes as you type, and Tab or Enter takes the highlighted one.
 - **CLI:** Tab, through readline, completing the whole line (the completer delimiters are cleared, since SCPI headers hold `:`, `?` and `*`). The console's own `.` commands are offered as well.
 
 #### D-CON-3 Timestamps and colours
@@ -1042,8 +1043,17 @@ Ctrl+= (or Ctrl++), Ctrl+- and Ctrl+mouse wheel over the transcript change the c
 The console panel (`Console` in `rdt/gui/panels.py`) is a dark terminal whatever the window's theme, styled from the `TERMINAL`, `LINE_COLORS` and `LINE_TAGS` tables:
 
 - **Lines:** `HH:MM:SS.mmm` in grey (when **Timestamps** is on), a four-character tag, then the text. `TX` (sent) is green with light green text, `RX` (reply) blue with the normal light text, `ERR` red with red text, `SYS` (RDT's notes) grey with grey italic text. The lines of a multi-line reply are indented to line up under the first line's text. A command is shown as typed, without the old `> `; the session log file (D-CON-5) keeps its own `>`, `<`, `!`, `#` marks.
-- **Prompt:** the last line of the terminal is the link's address (`COM3`, `192.168.1.20:5025`), green while the link is up and grey when it is not, then `>`, then the input line. Its placeholder reads "type a command — ↑ recalls history, Tab completes", or "not connected". Enter sends; there is no **Send** button or separate input row.
+- **Prompt:** the last line of the transcript is the link's address (`COM3`, `192.168.1.20:5025`), green while the link is up and grey when it is not, then `>`, then what you type (D-CON-14). Enter sends; there is no **Send** button or separate input row.
 - **Buttons:** Commands, History, Error queue, Clear and Log to file, with the Timestamps and Wrap check boxes, sit in one row above the terminal.
+
+#### D-CON-14 Typing in the transcript
+
+The transcript and the prompt are one editable `QPlainTextEdit`, `Terminal` in `rdt/gui/terminal.py`. Its last block is the prompt; everything before the input's start position is fixed.
+
+- **Typing:** a key that edits the text, or a paste, goes to the end of the prompt line, wherever the cursor was (clicking in the transcript to select and copy still works). Backspace and Left stop at the input's start, and Home goes there. A paste becomes one line. While the link is down nothing can be typed.
+- **New lines:** a reply or note is inserted above the prompt line, so what you are typing stays, and the view follows the prompt while the cursor is on it. Enter turns the typed line into a `TX` line above, and the prompt is free again on the next line.
+- **Suggestion while typing:** after every edit the console takes the first suggestion (D-CON-2, history newest first, then known commands) that starts with the typed text, ignoring case, and the terminal paints the rest of it in grey after the cursor. Right (or End) at the end of the line, or Tab, takes it; Esc hides it. On an empty prompt the grey text is a hint ("type a command — ↑ recalls history, Tab or → takes a suggestion", or "not connected").
+- **Keys:** Up and Down walk the history (D-CON-1); Ctrl+C copies a selection; the console's Ctrl+F, Ctrl+K and zoom shortcuts work as before.
 
 #### D-CON-12 Keyboard shortcuts
 
@@ -1113,7 +1123,7 @@ Budgets for the firmware part, to check once it exists:
 - **Host tests** (`tests/test_host_*.py`): run against the simulator over TCP, UDP with dropped datagrams, and a serial pseudo-terminal. They cover user-defined commands, split reads and writes, write confirmation, a silent MCU, a cut link and reconnect, and a second SCPI client sharing the device and its error queue.
 - **Symbol tests** (`tests/test_symbols.py`): a corpus in `tests/elf` of one C program with structs, unions, anonymous members, bit fields, enums, 2-D arrays, pointer chains, function pointers and clashing file-statics. It is built by Clang for little-endian Cortex-M4 (DWARF 4), by Clang for big-endian ARM (DWARF 5), and by GCC for x86-64 (64-bit pointers), plus a "rebuilt" image for reload tests. `build.sh` rebuilds them; the ELFs are committed.
 - **Scheduler and workspace tests** (`tests/test_scheduler.py`, `test_workspace.py`): block planning, peripheral ranges, fallback to item-by-item reads, tabs, shared items, older files, scaling and write safety.
-- **Console tests** (`tests/test_console.py`, console tests in `test_host_cli.py` and `test_gui.py`): the saved history shared by two consoles, its limit and an unwritable file, Up and Down with the draft, completion order, the session log format, hex and text conversion, reading, merging and saving known commands, `rdt console --timestamps`, `--log`, `.history`, `!N`, `.commands`, `.info`, `.reconnect` and `.break`, `rdt commands`, `send --expect`, a break and reconnect over a serial pseudo-terminal, and in the GUI Tab completion (keys and a real Tab that keeps the focus), the terminal tags, colours and prompt, the history dialog, the commands panel, colours, timestamps, search, Ctrl+K, text size, wrap and the shortcuts list.
+- **Console tests** (`tests/test_console.py`, console tests in `test_host_cli.py` and `test_gui.py`): the saved history shared by two consoles, its limit and an unwritable file, Up and Down with the draft, completion order, the session log format, hex and text conversion, reading, merging and saving known commands, `rdt console --timestamps`, `--log`, `.history`, `!N`, `.commands`, `.info`, `.reconnect` and `.break`, `rdt commands`, `send --expect`, a break and reconnect over a serial pseudo-terminal, and in the GUI typing on the prompt line, the grey suggestion and taking it with Right or Tab, replies arriving while typing, no typing while disconnected, Tab completion (keys and a real Tab that keeps the focus), the terminal tags, colours and prompt, the history dialog, the commands panel, colours, timestamps, search, Ctrl+K, text size, wrap and the shortcuts list.
 - **GUI tests** (`tests/test_gui.py`): pytest-qt drives the window against the simulator, offscreen. They cover connect, watch tabs, editing, the chart, statistics, the CSV log and the console.
 - **M5 tests** (`tests/test_identity.py`, the read-only default tests in `test_workspace.py`, and in `test_gui.py`): a matching ELF, a copy of the ELF with another version string (writes refused, then allowed, then refused again after reconnect), an unknown or `.bss` identity variable, a silent MCU, `--allow-mismatch`; the read-only default's order of rules, saving it, `rdt read-only`, refused raw writes; reopening the last workspace, including a moved and a deleted file.
 
@@ -1128,7 +1138,7 @@ Later, with the firmware: region-boundary tests on the target, and measuring the
 | M2 | Host core and `rdt` CLI over SCPI, several MCUs, reconnect (PR #7) | Done 2026-10-11 |
 | M3 | Symbols by name (PR #9), workspace (PR #10), GUI (PR #12) | Done 2026-10-11 |
 | M4 | Poll scheduler, live chart, statistics, CSV log (PR #14); watch tabs and removing command buttons (PR #16) | Done 2026-10-11 |
-| Console | Console features from ComPort-Zone, CON-1 to CON-12; terminal look CON-13 | Done 2026-10-12 |
+| Console | Console features from ComPort-Zone, CON-1 to CON-12; terminal look and typing in it CON-13, CON-14 | Done 2026-10-12 |
 | M5 | ELF identity check (SYM-8), global read-only default (WS-4), reopen last workspace (WSP-3) | Done 2026-10-12 |
 | M6 | Installer and packaged documentation | Planned |
 | Later | Firmware memory commands on real hardware; binary protocol (RM-4) | Waiting on firmware |
@@ -1163,6 +1173,7 @@ The application is built against the simulator. As soon as the firmware has the 
 | 2026-10-12 | Console features from ComPort-Zone: saved history, autocomplete, timestamps and colours, search, session log, hex/text conversion (CON-1 to CON-6). Scripts and multi-line paste declined |
 | 2026-10-12 | Second round from ComPort-Zone: a list of known commands kept in the workspace and imported from CSV or text, `send --expect`, `.reconnect` and `.info`, serial break, text size and wrap, a shortcuts list (CON-7 to CON-12). Running a file and several console tabs declined |
 | 2026-10-12 | Console as a terminal (CON-13): dark, TX/RX/ERR/SYS tags, the prompt as the last line, no Send button. Tab completes from the history and the imported commands only (CON-2 narrowed) |
+| 2026-10-12 | Typing on the transcript's next free line and a grey suggestion while typing (CON-14), at rani's request after CON-13 |
 | 2026-10-12 | M5 built: ELF identity check by a constant variable or the GNU build ID, a mismatch refuses writes until allowed (SYM-8); the workspace's read-only default, which also refuses raw writes (WS-4); the GUI reopens the last workspace (WSP-3) |
 
 ## 9. Appendix: binary protocol (planned)
