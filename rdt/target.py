@@ -332,6 +332,11 @@ class Target:
     def max_response(self) -> int:
         return self.session.max_response
 
+    @property
+    def align(self) -> int:
+        """Every read and write covers whole aligned words of this many bytes."""
+        return self.session.profile.align
+
     def is_silent(self, mcu: str | Mcu) -> bool:
         return self.session.is_silent(self.mcu(mcu).id)
 
@@ -363,7 +368,7 @@ class Target:
 
     def _check(self, m: Mcu, addr: int, size: int, write: bool) -> None:
         try:
-            m.memory.check(addr, size, write)
+            m.memory.check_aligned(addr, size, self.align, write)
         except AccessRefused as e:
             raise AccessRefused(f"MCU {m.name}: {e}") from None
 

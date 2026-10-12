@@ -13,7 +13,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from .errors import AccessRefused, ConfigError
-from .profile import Range
+from .profile import Range, align_span
 
 
 @dataclass
@@ -106,6 +106,31 @@ class MemoryMap:
             for a in touched:   # a read-only section stays read-only inside a writable memory range
                 if not a.writable:
                     raise AccessRefused(f"{what} is in read-only {a.name}")
+        return covered
+
+    def check_aligned(self, addr: int, size: int, align: int, write: bool = False) -> list[Area]:
+        """Check an access that the device makes in whole aligned words.
+
+        The bytes asked for must pass ``check``. The extra bytes the aligned words add around
+        them are allowed in unlisted memory or another section, since the firmware reads whole
+        words anyway, but not in a peripheral range the access is not already in (reading a
+        register can clear a flag), nor in a read-only area when the words are written back.
+        """
+        covered = self.check(addr, size, write)
+        start, end = align_span(addr, size, align)
+        if (start, end) == (addr, addr + size):
+            return covered
+        what = f"the {align}-byte aligned access 0x{start:08X}..0x{end - 1:08X}"
+        for p in (a for a in covered if a.peripheral):
+            if start < p.start or end > p.end:
+                raise AccessRefused(f"{what} crosses the edge of range {p.name}")
+        for lo, hi in ((start, addr), (addr + size, end)):
+            for a in self.areas:
+                if a.start < hi and lo < a.end:
+                    if a.peripheral and a not in covered:
+                        raise AccessRefused(f"{what} reaches into range {a.name}")
+                    if write and not a.writable:
+                        raise AccessRefused(f"{what} reaches into read-only {a.name}")
         return covered
 
     def find(self, addr: int) -> Area | None:
