@@ -216,6 +216,8 @@ def test_console_history_and_completion(qtbot, win):
     assert con.input.text() == "MEMory:"
     assert con.completer.model().stringList() == ["MEMory:MAX?", "MEMory:READ? 0,0x20000000,4"]
     assert con.completer.popup().isVisible()
+    popup = con.completer.popup()                     # wide enough to read the commands
+    assert popup.width() >= popup.sizeHintForColumn(0)
     con.completer.activated.emit("MEMory:READ? 0,0x20000000,4")
     assert con.input.text() == "MEMory:READ? 0,0x20000000,4" and not con.completer.popup().isVisible()
     con.input.setText("*rs")
