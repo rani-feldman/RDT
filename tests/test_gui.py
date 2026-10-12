@@ -668,3 +668,19 @@ def test_elf_identity(qtbot, win, tmp_path, monkeypatch):
     win.allow_action.trigger()
     qtbot.waitUntil(lambda: not win.allow_action.isEnabled(), timeout=3000)
     assert "Writes allowed to main" in win.message.text()
+
+
+def test_commands_import_and_export_buttons(qtbot, win, tmp_path, monkeypatch):
+    """The real buttons: clicked() must not hand its checked flag to import_file as the path."""
+    from PySide6.QtWidgets import QFileDialog, QPushButton
+    panel = win.console.commands
+    buttons = {b.text(): b for b in panel.findChildren(QPushButton)}
+    src = tmp_path / "fw.txt"
+    src.write_text("*IDN?\nMOTor:SPEed?\n", encoding="utf-8")
+    monkeypatch.setattr(QFileDialog, "getOpenFileName", lambda *a, **k: (str(src), ""))
+    buttons["Import..."].click()
+    assert [c.command for c in win.ws.commands] == ["*IDN?", "MOTor:SPEed?"]
+    out = tmp_path / "out.csv"
+    monkeypatch.setattr(QFileDialog, "getSaveFileName", lambda *a, **k: (str(out), ""))
+    buttons["Export..."].click()
+    assert out.read_text(encoding="utf-8-sig").splitlines()[1:] == ["*IDN?,,,", "MOTor:SPEed?,,,"]
