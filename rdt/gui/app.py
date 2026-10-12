@@ -13,7 +13,7 @@ import time
 from datetime import datetime
 from pathlib import Path
 
-from PySide6.QtCore import Qt, QTimer
+from PySide6.QtCore import QSettings, Qt, QTimer
 from PySide6.QtGui import QAction, QKeySequence
 from PySide6.QtWidgets import (
     QAbstractItemView, QApplication, QComboBox, QDialog, QDialogButtonBox, QDockWidget, QFileDialog, QLabel,
@@ -21,6 +21,7 @@ from PySide6.QtWidgets import (
     QVBoxLayout,
 )
 
+from ..console import history_path
 from ..csvlog import CsvLog
 from ..errors import ConfigError, LinkDown
 from ..profile import Profile
@@ -237,6 +238,10 @@ class MainWindow(QMainWindow):
         action(m, "SCPI &profile...", self.edit_profile)
         action(m, "Load profile file...", self.load_profile)
         action(m, "&MCUs and ELF files...", self.edit_mcus)
+        m.addSeparator()
+        action(m, "Check ELF &identity", self.check_identity)
+        self.allow_action = action(m, "Allow writes despite ELF &mismatch", self.allow_mismatch)
+        self.allow_action.setEnabled(False)
         m = self.menuBar().addMenu("&Watch")
         action(m, "&Add expression...", self.add_expression, "Ctrl+E")
         action(m, "&Read all now", self.read_all, "F6")
@@ -255,6 +260,8 @@ class MainWindow(QMainWindow):
         action(m, "Reset &statistics", lambda: self.watch_tabs.reset_stats())
         self.log_action = action(m, "&Log to CSV...", self.toggle_log, "Ctrl+L")
         self.log_action.setCheckable(True)
+        self.read_only_action = action(m, "All items &read-only", self.set_read_only)
+        self.read_only_action.setCheckable(True)
         m = self.menuBar().addMenu("&View")
         for dock in self.docks.values():
             m.addAction(dock.toggleViewAction())
@@ -309,6 +316,7 @@ class MainWindow(QMainWindow):
         self.symbols.set_workspace(self.ws)
         self.memory.set_workspace(self.ws)
         self.console.set_workspace(self.ws)
+        self.read_only_action.setChecked(self.ws.read_only)
         self.set_dirty(False)
 
     @property
@@ -357,11 +365,32 @@ class MainWindow(QMainWindow):
         self.load(ws)
         return True
 
+    @staticmethod
+    def settings() -> QSettings:
+        """Per-user GUI settings, next to the console history."""
+        return QSettings(str(history_path().parent / "gui.ini"), QSettings.IniFormat)
+
+    def remember(self, path: Path | None) -> None:
+        """Remember the workspace file, to reopen it on the next start (WSP-3)."""
+        if path is not None:
+            self.settings().setValue("last_workspace", str(Path(path).resolve()))
+
+    def reopen_last(self) -> bool:
+        """Open the workspace that was open last time, if its file is still there."""
+        last = self.settings().value("last_workspace", "")
+        if not last:
+            return False
+        if not Path(last).is_file():
+            self.status(f"The last workspace {last} is gone; starting with a new one")
+            return False
+        return self.open_path(last)
+
     def load(self, ws: Workspace) -> None:
         self.stop_log()
         if self.device.target is not None:
             self.device.close()
         self.ws = ws
+        self.remember(ws.path)
         self.show_workspace()
         msg = f"Opened {ws.path}" if ws.path else "New workspace"
         self.status("; ".join([msg] + ws.warnings))
@@ -388,6 +417,7 @@ class MainWindow(QMainWindow):
             QMessageBox.warning(self, "Save workspace", str(e))
             return False
         self.set_dirty(False)
+        self.remember(path)
         self.status(f"Saved {path}")
         return True
 
@@ -409,6 +439,16 @@ class MainWindow(QMainWindow):
 
     def _take_connection(self) -> None:
         self.ws.config.connection = self.bar.connection()
+
+    def set_read_only(self, on: bool) -> None:
+        """The workspace's read-only default (WS-4): every item refuses writes unless its own
+        settings allow them."""
+        if on != self.ws.read_only:
+            self.ws.read_only = on
+            self.set_dirty()
+            self.watch_tabs.decorate()
+            self.status("Every item is read-only unless its settings allow writes" if on
+                        else "Items are writable unless their settings make them read-only")
 
     def set_poll_ms(self, ms: int) -> None:
         if ms != self.ws.poll_ms:
@@ -438,6 +478,7 @@ class MainWindow(QMainWindow):
     def disconnect(self) -> None:
         self._connecting = False
         self.device.close(lambda _: self.status("Disconnected"))
+        self.allow_action.setEnabled(False)
         self._show_state()
 
     def reconnect(self) -> None:
@@ -447,8 +488,55 @@ class MainWindow(QMainWindow):
     def _opened(self, t) -> None:
         self._connecting = False
         self.status(f"Connected to {t.idn or self.ws.config.connection.describe()}")
+        self.show_identity([m.identity for m in t.mcus.values() if m.identity is not None])
         self.read_all()
         self._show_state()
+
+    # --- ELF identity (SYM-8) ------------------------------------------------------------------
+
+    def show_identity(self, results) -> None:
+        """Note each MCU's identity check in the console; a mismatch also goes to the status bar
+        and enables Target > Allow writes despite ELF mismatch."""
+        for r in results:
+            if r.status != "unchecked":
+                self.console.log(str(r), "error" if r.status == "mismatch" else "note")
+        bad = [r for r in results if r.status == "mismatch"]
+        if bad:
+            self.status("ELF does not match the firmware on " + ", ".join(r.mcu for r in bad) +
+                        "; writes to it are refused (Target > Allow writes despite ELF mismatch)", error=True)
+        t = self.device.target
+        self.allow_action.setEnabled(t is not None and any(
+            m.identity is not None and m.identity.status == "mismatch" and not m.allow_mismatch
+            for m in t.mcus.values()))
+
+    def check_identity(self, mcus: list[str] | None = None) -> None:
+        """Compare the ELFs with the firmware again, such as after flashing."""
+        if self.device.target is None:
+            self.status("Connect first to check the ELF identity", error=True)
+            return
+
+        def done(results):
+            self.show_identity(results)
+            if not any(r.status == "mismatch" for r in results):
+                self.status("ELF identity: " + "; ".join(f"{r.mcu} {r.status}" for r in results))
+
+        self.device.submit(lambda t: [r for name in (mcus or list(t.mcus)) for r in t.check_identity(name)],
+                           done, lambda e: self.status(describe_error(e), True))
+
+    def allow_mismatch(self) -> None:
+        def allow(t):
+            names = [m.name for m in t.mcus.values() if m.identity is not None and m.identity.status == "mismatch"]
+            for n in names:
+                t.allow_mismatch(n)
+            return names
+
+        def done(names):
+            self.allow_action.setEnabled(False)
+            if names:
+                self.status(f"Writes allowed to {', '.join(names)} although its ELF does not match")
+                self.console.log(f"writes allowed despite ELF mismatch: {', '.join(names)}", "note")
+
+        self.device.submit(allow, done)
 
     def _open_failed(self, e: Exception) -> None:
         self._connecting = False
@@ -490,6 +578,7 @@ class MainWindow(QMainWindow):
                 self.status(f"ELF rebuilt for {', '.join(mcus)}; watch items found again by name")
                 self.watch_tabs.remap(mcus)
                 self.symbols.reload()
+                self.check_identity(mcus)
 
         self.device.submit(lambda t: t.refresh_elfs(), reloaded, lambda e: self.status(describe_error(e), True),
                            key="elfs")
@@ -656,6 +745,8 @@ def main(argv: list[str] | None = None) -> int:
     win = MainWindow()
     if argv:
         win.open_path(argv[0])
+    else:
+        win.reopen_last()
     win.show()
     return app.exec()
 
