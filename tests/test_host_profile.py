@@ -38,6 +38,9 @@ def test_a_template_may_pad_but_not_change_the_base():
     {"read": "MEM:RD? {mcu},{addr}"},            # no length
     {"write": "MEM:WR {mcu},{addr}"},            # no value
     {"max_write": 3},
+    {"align": 3},
+    {"max_write": 2},                            # narrower than the 4-byte align
+    {"max_response": 2},
     {"timeout": 500},                            # typo for timeout_ms
 ])
 def test_bad_profiles_are_refused(table):
@@ -80,7 +83,7 @@ def test_error_replies():
 
 def test_host_and_simulator_read_the_profile_the_same_way():
     host, sim = Profile.load(DEFAULT_PROFILE), SimProfile.load(DEFAULT_PROFILE)
-    for key in ("read", "write", "max_write",
+    for key in ("read", "write", "max_write", "align",
                 "max_response", "error_query", "terminator"):
         assert getattr(host, key) == getattr(sim, key), key
     assert host.timeout_ms == 500

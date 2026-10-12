@@ -31,8 +31,8 @@ The read, write and error commands come from the SCPI profile, the same `[scpi]`
 
 | Command (default profile) | Reply |
 | --- | --- |
-| `MEMory:READ? <mcu>,<addr>,<len>` | `<len>` bytes in bare hex, lowest address first, such as `0000C03F` |
-| `MEMory:WRITE <mcu>,<addr>,<value>,<size>` | none. `<size>` is 1, 2, 4 or 8 bytes, at most `max_write` |
+| `MEMory:READ? <mcu>,<addr>,<len>` | `<len>` bytes in bare hex, lowest address first, such as `0000C03F`. `<addr>` and `<len>` are multiples of `align` |
+| `MEMory:WRITE <mcu>,<addr>,<value>,<size>` | none. `<size>` is 1, 2, 4 or 8 bytes, at least `align` and at most `max_write`; `<addr>` is a multiple of `align` |
 | `SYSTem:ERRor?` | oldest error, or `0,"No error"` |
 | `*IDN?`, `*RST`, `*CLS`, `*OPC?` | standard. `*RST` reloads every MCU's memory from its image |
 | `SIMulation:MCU:SILent <mcu>,ON\|OFF` | none. Makes a secondary MCU stop answering |
@@ -41,7 +41,7 @@ The read, write and error commands come from the SCPI profile, the same `[scpi]`
 
 Long and short header forms both work, in any case (`MEMORY:READ?`, `mem:read?`).
 
-`<addr>` and `<value>` are bare hex with no prefix, as in the firmware: address `0x11AABBCCDD` is sent as `11AABBCCDD`, and a write of 1.5 as a float is `MEMory:WRITE 0,20000004,3FC00000,4`. A prefixed or signed number (`0x20000000`, `#H20`, `-1`) fails with `-104,"Data type error"`. `<mcu>`, `<len>` and `<size>` are decimal. A read reply is the bytes in bare hex, lowest address first: the 4 bytes `00 00 C0 3F` come back as `0000C03F`.
+`<addr>` and `<value>` are bare hex with no prefix, as in the firmware: address `0x11AABBCCDD` is sent as `11AABBCCDD`, and a write of 1.5 as a float is `MEMory:WRITE 0,20000004,3FC00000,4`. A prefixed or signed number (`0x20000000`, `#H20`, `-1`) fails with `-104,"Data type error"`. `<mcu>`, `<len>` and `<size>` are decimal. Reads and writes are whole aligned words: with the default `align = 4`, `MEMory:READ? 0,20000002,2` fails with `-224`, and RDT asks for `MEMory:READ? 0,20000000,4` instead. A read reply is the bytes in bare hex, lowest address first: the 4 bytes `00 00 C0 3F` come back as `0000C03F`.
 
 ## Errors
 
@@ -54,7 +54,7 @@ As in the firmware, a failed command sends no reply at all, so a failed read end
 | `-113,"Undefined header"` | Unknown command |
 | `-222,"Data out of range"` | Address not mapped, write to read-only memory, or value too wide for its size |
 | `-223,"Too much data"` | Read longer than `max_response` |
-| `-224,"Illegal parameter value"` | Unknown MCU, bad length or write size |
+| `-224,"Illegal parameter value"` | Unknown MCU, bad length or write size, or an address, length or size that is not a multiple of `align` |
 | `-240,"MCU not responding"` | A secondary MCU is silent. The main MCU waits `internal_timeout_ms`, then queues this error |
 | `-350,"Queue overflow"` | More than 16 errors queued |
 

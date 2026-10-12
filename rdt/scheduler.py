@@ -22,6 +22,7 @@ from dataclasses import dataclass, field
 from typing import Sequence
 
 from .errors import LinkDown, McuSilent, RdtError
+from .profile import align_span
 from .symbols import Location
 from .target import Target
 
@@ -63,7 +64,7 @@ def plan(t: Target, locs: Sequence[Location | None], gap: int = MERGE_GAP) -> li
         if loc is not None:
             by_mcu.setdefault(loc.mcu, []).append(i)
     blocks: list[Block] = []
-    limit = t.max_response
+    limit = t.max_response - t.max_response % t.align   # the largest aligned read one reply carries
     for mcu, idx in by_mcu.items():
         memory = t.mcu(mcu).memory
         idx.sort(key=lambda i: (locs[i].addr, -locs[i].size))
@@ -74,7 +75,8 @@ def plan(t: Target, locs: Sequence[Location | None], gap: int = MERGE_GAP) -> li
             peripheral = area is not None and area.peripheral
             if cur is not None and not peripheral and not cur.peripheral:
                 end = max(cur.end, loc.addr + loc.size)
-                if loc.addr - cur.end <= gap and (end - cur.addr <= limit or end == cur.end) \
+                a0, a1 = align_span(cur.addr, end - cur.addr, t.align)
+                if loc.addr - cur.end <= gap and (a1 - a0 <= limit or end == cur.end) \
                         and _readable(memory, cur.addr, end - cur.addr):
                     cur.size = end - cur.addr
                     cur.items.append(i)

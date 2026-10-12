@@ -148,6 +148,12 @@ class Device:
             raise _illegal_value(f"unknown MCU {args['mcu']}")
         return mcu
 
+    def _aligned(self, addr: int, size: int) -> None:
+        """The firmware takes only whole aligned words: address and length multiples of align."""
+        align = self.profile.align
+        if addr % align or size % align:
+            raise _illegal_value(f"addr {addr:X} and size {size} must be multiples of {align}")
+
     def _reach(self, mcu: Mcu) -> None:
         """Model the main MCU asking a silent secondary MCU and giving up after its timeout."""
         if mcu.silent:
@@ -164,6 +170,7 @@ class Device:
             raise _illegal_value(f"len={size}")
         if size > self.profile.max_response:
             raise _too_much_data(f"len {size} > max {self.profile.max_response}")
+        self._aligned(addr, size)
         self._reach(mcu)
         try:
             data = mcu.read(addr, size)
@@ -178,6 +185,7 @@ class Device:
         size = self._int(args, "size") if "size" in args else self.profile.max_write
         if size not in WRITE_SIZES or size > self.profile.max_write:
             raise _illegal_value(f"size={size}")
+        self._aligned(addr, size)
         bits = 8 * size
         if value >= 1 << bits:
             raise _out_of_range(f"value does not fit in {size} bytes")

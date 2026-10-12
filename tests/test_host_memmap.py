@@ -1,8 +1,8 @@
 import pytest
 
 from rdt import AccessRefused, codec
-from rdt.memmap import MemoryMap, load_elf_sections
-from rdt.profile import Range
+from rdt.memmap import Area, MemoryMap, load_elf_sections
+from rdt.profile import Range, align_span
 from rdt.session import split_write
 
 from host_helpers import FIRMWARE
@@ -144,3 +144,35 @@ def test_scheduler_merges_inside_memory_ranges(banks):
     from rdt.scheduler import _readable
     assert _readable(banks, 0x20000000, 0x100)       # across .bss's end into the rest of DTCM
     assert not _readable(banks, 0x48000000, 8)       # a peripheral: never merged
+
+
+# --- 4-byte aligned access (rani, 2026-10-12) ---------------------------------------------------
+
+def test_aligned_padding_may_fall_outside_a_section():
+    mm = MemoryMap([Area(".data", 0x20000000, 0x1E, True, False)])
+    mm.check_aligned(0x2000001C, 2, 4)                 # the word runs 2 bytes past .data
+    mm.check_aligned(0x2000001C, 2, 4, write=True)
+
+
+def test_aligned_padding_never_reaches_into_a_peripheral():
+    mm = MemoryMap([Area(".data", 0x20000000, 0x102, True, False)],
+                   [Range("REG", 0x20000102, 2), Range("GPIOA", 0x48000000, 0x400)])
+    with pytest.raises(AccessRefused, match="reaches into range REG"):
+        mm.check_aligned(0x20000100, 2, 4)
+    with pytest.raises(AccessRefused, match="crosses the edge of range REG"):
+        mm.check_aligned(0x20000102, 2, 4)
+    mm.check_aligned(0x48000002, 2, 4)                 # inside GPIOA: the word is in GPIOA too
+
+
+def test_aligned_padding_is_not_written_into_read_only_memory():
+    mm = MemoryMap([Area(".rodata", 0x20000000, 0x10, False, False), Area(".data", 0x20000010, 0x10, True, False)])
+    with pytest.raises(AccessRefused, match="read-only .rodata"):
+        mm.check_aligned(0x2000000E, 4, 4, write=True)
+    mm.check_aligned(0x2000000E, 4, 4)                 # reading it is fine
+
+
+def test_align_span():
+    assert align_span(0x20000086, 2, 4) == (0x20000084, 0x20000088)
+    assert align_span(0x20000084, 4, 4) == (0x20000084, 0x20000088)
+    assert align_span(0x20000083, 2, 4) == (0x20000080, 0x20000088)
+    assert align_span(0x20000083, 2, 1) == (0x20000083, 0x20000085)

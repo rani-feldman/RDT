@@ -5,6 +5,10 @@ The session is where the firmware's habits are handled:
   error query is sent once and its answer kept as a hint. The queue is shared with other tools
   on the link, so the hint is never relied on.
 - A write sends no reply either way, so every write is confirmed by reading the value back.
+- Every read and write covers whole aligned words (the profile's ``align``, 4 by default). A read
+  of 2 bytes reads the 4-byte word and keeps the 2 bytes asked for. A write smaller than a word,
+  or not on a word boundary, reads the word, replaces the bytes and writes the whole word back
+  (read-modify-write). A neighbouring value the firmware changes in between is overwritten.
 - A secondary MCU that stops answering is marked silent: on the -240 error, or after three
   timeouts in a row while the main MCU still answers. Only that MCU's accesses fail, and it is
   probed again every few seconds.
@@ -26,7 +30,7 @@ from typing import Callable
 from .errors import (
     BadReply, CommandRejected, CommandTimeout, DeviceError, LinkDown, LinkError, McuSilent, WriteNotConfirmed,
 )
-from .profile import Profile
+from .profile import Profile, align_span
 from .protocol import ScpiProtocol
 from .transport import Transport
 
@@ -225,14 +229,18 @@ class Session:
     # --- reads -------------------------------------------------------------------------------
 
     def read(self, mcu: int, addr: int, size: int) -> bytes:
-        """Read ``size`` bytes, in pieces of at most ``max_response`` bytes."""
+        """Read ``size`` bytes. The device is asked for whole aligned words, in pieces of at most
+        ``max_response`` bytes, and the bytes asked for are cut out of the result."""
         if size < 1:
             raise ValueError("size must be at least 1")
+        align = self.profile.align
+        start, end = align_span(addr, size, align)
+        chunk = self.max_response - self.max_response % align
         out = bytearray()
         with self._lock:
-            for piece in range(addr, addr + size, self.max_response):
-                out += self._read_piece(mcu, piece, min(self.max_response, addr + size - piece))
-        return bytes(out)
+            for piece in range(start, end, chunk):
+                out += self._read_piece(mcu, piece, min(chunk, end - piece))
+        return bytes(out[addr - start:addr - start + size])
 
     def _read_piece(self, mcu: int, addr: int, size: int) -> bytes:
         self._require_up()
@@ -317,31 +325,44 @@ class Session:
     def write(self, mcu: int, addr: int, data: bytes, byte_order: str = "little") -> None:
         """Write ``data`` one value at a time and confirm it by reading it back.
 
-        Values wider than ``max_write`` are split. A multi-piece write is not atomic.
+        Every write covers whole aligned words. When ``data`` does not, the words are read first
+        and ``data`` is put into them (read-modify-write). Values wider than ``max_write`` are
+        split. A multi-piece write is not atomic.
         """
         if not data:
             raise ValueError("nothing to write")
+        start, end = align_span(addr, len(data), self.profile.align)
+        off = addr - start
         with self._lock:
             self._require_up()
             if self.is_silent(mcu):
                 raise McuSilent(f"{self._name(mcu)} is not responding; write refused")
-            pieces = split_write(addr, data, self.profile.max_write)
+            if (start, end) == (addr, addr + len(data)):
+                words = data
+            else:
+                words = self._patch(self._read_words(mcu, addr, data, start, end), off, data)
+            pieces = split_write(start, words, self.profile.max_write)
             try:
                 self._send_pieces(mcu, pieces, byte_order)
             except LinkError as e:
                 raise self._link_lost(str(e)) from None
-            back = self._read_back(mcu, addr, data)
+            words_back = self._read_back(mcu, addr, data, start, end)
+            back = words_back[off:off + len(data)]
             # Over UDP a write datagram can be lost. It is re-sent only after the read-back
-            # showed it did not land, never blindly.
+            # showed it did not land, never blindly. Bytes around the value are taken from the
+            # latest read-back, so a re-send does not undo a change the firmware made to them.
             tries = self.profile.retries if self.transport.lossy else 0
             while back != data and tries > 0:
                 tries -= 1
-                wrong = [(a, chunk) for a, chunk in pieces if back[a - addr:a - addr + len(chunk)] != chunk]
+                words = self._patch(words_back, off, data)
+                wrong = [(a, words[a - start:a - start + len(chunk)]) for a, chunk in pieces
+                         if words_back[a - start:a - start + len(chunk)] != words[a - start:a - start + len(chunk)]]
                 try:
                     self._send_pieces(mcu, wrong, byte_order)
                 except LinkError as e:
                     raise self._link_lost(str(e)) from None
-                back = self._read_back(mcu, addr, data)
+                words_back = self._read_back(mcu, addr, data, start, end)
+                back = words_back[off:off + len(data)]
             if back == data:
                 return
             try:
@@ -354,13 +375,26 @@ class Session:
                 f"write to 0x{addr:08X} on {self._name(mcu)} not confirmed: wrote {data.hex().upper()}, "
                 f"read back {back.hex().upper()}", data, back, hint)
 
+    @staticmethod
+    def _patch(words: bytes, off: int, data: bytes) -> bytes:
+        return words[:off] + data + words[off + len(data):]
+
+    def _read_words(self, mcu: int, addr: int, data: bytes, start: int, end: int) -> bytes:
+        """Read the words a read-modify-write puts ``data`` into."""
+        try:
+            return self.read(mcu, start, end - start)
+        except (CommandTimeout, BadReply, McuSilent, CommandRejected) as e:
+            raise WriteNotConfirmed(f"write to 0x{addr:08X} on {self._name(mcu)} not sent: reading the "
+                                    f"{self.profile.align}-byte words around it failed: {e}",
+                                    data, None, getattr(e, "hint", None)) from None
+
     def _send_pieces(self, mcu: int, pieces: list[tuple[int, bytes]], byte_order: str) -> None:
         for a, chunk in pieces:
             self.protocol.write_mem(mcu, a, int.from_bytes(chunk, byte_order), len(chunk))
 
-    def _read_back(self, mcu: int, addr: int, data: bytes) -> bytes:
+    def _read_back(self, mcu: int, addr: int, data: bytes, start: int, end: int) -> bytes:
         try:
-            return self.read(mcu, addr, len(data))
+            return self.read(mcu, start, end - start)
         except (CommandTimeout, BadReply, McuSilent, CommandRejected) as e:
             raise WriteNotConfirmed(f"write to 0x{addr:08X} on {self._name(mcu)} sent, but the read-back failed: {e}",
                                     data, None, getattr(e, "hint", None)) from None
