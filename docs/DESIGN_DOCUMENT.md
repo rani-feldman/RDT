@@ -71,7 +71,6 @@ Each requirement links to its design section.
 | SCPI-4 | Read replies can be hex text, comma-separated bytes, decimal bytes, an IEEE 488.2 block, or matched by a regular expression | Done | [D-SCPI-4](#d-scpi-4-reply-formats) |
 | SCPI-5 | A failed command sends no reply and its error goes only to the error queue; RDT copes with that (2026-10-11) | Done | [D-SCPI-5](#d-scpi-5-failed-commands-send-no-reply) |
 | SCPI-6 | Every write is confirmed by reading the value back | Done | [D-SCPI-6](#d-scpi-6-write-confirmation) |
-| SCPI-7 | If the firmware offers a size query, RDT uses it to set the maximum response size on connect | Done | [D-SCPI-7](#d-scpi-7-size-query) |
 | SCPI-8 | A manual SCPI console sends any command and shows the raw reply (2026-10-05) | Done | [D-SCPI-8](#d-scpi-8-scpi-console) |
 | SCPI-9 | The profile can be edited in the GUI, with a preview of the commands and a test read | Done | [D-SCPI-9](#d-scpi-9-profile-editor) |
 
@@ -228,8 +227,9 @@ Console features taken from ComPort-Zone (an open serial terminal); rani approve
 | RM-3 | Not in v1 (2026-10-05): multi-address read command, on-target recorder, alarms, stimulus, computed values, log replay, dashboards | Removed | none |
 | RM-4 | Binary protocol, a faster alternative to SCPI | Planned | [Appendix](#9-appendix-binary-protocol-planned) |
 | RM-5 | Not taken from ComPort-Zone (2026-10-12): command files (scripts), running a file of commands, sending several pasted lines and several console tabs, all declined by rani; its control panel (covered by watch tabs) was not proposed | Removed | none |
+| RM-6 | Size query: RDT asking the firmware for its largest read (`MEMory:MAX?`) on connect. Built, then removed by rani on 2026-10-12; the maximum response size is set only in the SCPI configuration | Removed | [D-SCPI-2](#d-scpi-2-block-read) |
 
-Requirements on the firmware itself (FW-1 to FW-9) are in [section 5](#5-firmware-specification).
+Requirements on the firmware itself (FW-1 to FW-10) are in [section 5](#5-firmware-specification).
 
 ## 3. Architecture
 
@@ -379,7 +379,6 @@ write        = "MEMory:WRITE {mcu},{addr},{value},{size}"
 value_format = "0x{value:X}"   # raw integer; floats as their bit pattern
 addr_format  = "0x{addr:08X}"
 max_write    = 4               # largest value one write accepts: 1, 2, 4 or 8 bytes
-size_query   = "MEMory:MAX?"   # optional; its reply sets max_response on connect
 data_format  = "hex"           # hex | bytes_csv | decimal | ieee_block
 reply_regex  = ""              # optional; group "data" (or group 1) holds the data
 byte_order   = "little"        # only for an MCU without an ELF
@@ -395,7 +394,7 @@ Placeholders: `{mcu}`, `{addr}`, `{len}`, `{value}` and `{size}`. `{addr}` is wr
 
 #### D-SCPI-2 Block read
 
-`Session.read` (`rdt/session.py`) splits any read into pieces of at most `max_response` bytes and sends one read command per piece. The poll scheduler packs nearby items into those reads (D-POLL-3), which is what makes polling fast over SCPI. A multi-address read command is not planned; it would only be considered if scattered variables turn out to poll too slowly.
+`Session.read` (`rdt/session.py`) splits any read into pieces of at most `max_response` bytes and sends one read command per piece. The poll scheduler packs nearby items into those reads (D-POLL-3), which is what makes polling fast over SCPI. `max_response` comes only from the profile: RDT never asks the device for it (the size query was removed on 2026-10-12, RM-6), and an old profile or workspace that still has a `size_query` key loads with the key ignored. A multi-address read command is not planned; it would only be considered if scattered variables turn out to poll too slowly.
 
 #### D-SCPI-3 Single-value write
 
@@ -428,10 +427,6 @@ A `-240` error in the queue marks a secondary MCU silent (D-MCU-6). In the conso
 #### D-SCPI-6 Write confirmation
 
 A write gets no reply whether it succeeds or fails, so `Session.write` reads the written bytes back after every write and compares them. A mismatch raises `WriteNotConfirmed` with both values. Over UDP, a write whose read-back shows it missing is sent again, and only then. Bit-field writes are confirmed the same way (D-VAL-5).
-
-#### D-SCPI-7 Size query
-
-If the profile has a `size_query` (default `MEMory:MAX?`), the session sends it on connect, and its reply replaces `max_response` for that connection. Without it, or if it gets no reply, the profile's `max_response` is used. `rdt info` shows the value in use.
 
 #### D-SCPI-8 SCPI console
 
@@ -1062,7 +1057,7 @@ A list of the device's commands, so nobody has to remember the exact SCPI spelli
 
 #### D-CON-9 Reconnect and info in the console
 
-`rdt console` takes `.reconnect`, which calls `Target.reconnect()` (close the session and connect again, with the probe and size query), and `.info`, which prints the same as `rdt info`. The GUI has Connect and Disconnect already.
+`rdt console` takes `.reconnect`, which calls `Target.reconnect()` (close the session and connect again, with the probe), and `.info`, which prints the same as `rdt info`. The GUI has Connect and Disconnect already.
 
 #### D-CON-10 Serial break
 
@@ -1112,7 +1107,6 @@ The firmware side is not written yet; rani adds it to the existing firmware late
 | FW-5 | When a secondary MCU doesn't answer, the main MCU sends no reply and queues `-240,"MCU not responding"` |
 | FW-6 | Over TCP, each reply goes on the connection that asked; over UDP, to the sender's address and port |
 | FW-7 | Every address and length is checked against a region table built from the linker script; peripherals are excluded unless added on purpose; read and write permissions are separate. A bad request must never fault the MCU |
-| FW-8 | Optional: a size query (`MEMory:MAX?`) returning the largest read the firmware accepts |
 | FW-9 | The memory commands compile in only when `RDT_ENABLE` is defined, and the LAN listener is off unless the integrator enables it |
 | FW-10 | Recommended: a constant variable that changes with every build, such as a version string or a copy of the build ID, kept in flash, so RDT can check the ELF matches (D-SYM-8). Linking with `--build-id` and keeping `.note.gnu.build-id` in an allocated section also works |
 
@@ -1121,7 +1115,6 @@ Recommended shape, which the simulator and the default profile use:
 ```
 MEMory:READ? <mcu>,<addr>,<len>          -> hex bytes, lowest address first: 0000A041
 MEMory:WRITE <mcu>,<addr>,<value>,<size> ; no reply
-MEMory:MAX?                              -> largest <len> the read accepts
 SYSTem:ERRor?                            -> 0,"No error" or a code and text
 ```
 
@@ -1213,6 +1206,7 @@ The application is built against the simulator. As soon as the firmware has the 
 | 2026-10-12 | The console history opens beside the transcript like the commands list, side by side with it when both are open (CON-1), at rani's request |
 | 2026-10-12 | The GUI console's Error queue button removed, at rani's request (the CLI keeps `rdt errors` and `.err`) |
 | 2026-10-12 | M5 built: ELF identity check by a constant variable or the GNU build ID, a mismatch refuses writes until allowed (SYM-8); the workspace's read-only default, which also refuses raw writes (WS-4); the GUI reopens the last workspace (WSP-3) |
+| 2026-10-12 | No size query: the maximum response size comes only from the SCPI configuration, never from the device (SCPI-7 and FW-8 removed, now RM-6), at rani's request |
 
 ## 9. Appendix: binary protocol (planned)
 
