@@ -68,7 +68,7 @@ Each requirement links to its design section.
 | SCPI-1 | No SCPI command is hard-coded; the user defines the read and write commands and the reply format in an SCPI profile (2026-10-05) | Done | [D-SCPI-1](#d-scpi-1-scpi-profile) |
 | SCPI-2 | Memory is read with one command, `read mcu,startAddress,size`; one reply carries up to a configurable maximum response size (2026-10-05) | Done | [D-SCPI-2](#d-scpi-2-block-read) |
 | SCPI-3 | Memory is written one value per command, `write mcu,address,value,size`, with the value as a raw hex integer (2026-10-05) | Done | [D-SCPI-3](#d-scpi-3-single-value-write) |
-| SCPI-4 | Read replies can be hex text, comma-separated bytes, decimal bytes, an IEEE 488.2 block, or matched by a regular expression | Done | [D-SCPI-4](#d-scpi-4-reply-formats) |
+| SCPI-4 | Addresses and values in commands, and the data in read replies, are bare upper-case hex with no prefix: address 0x11AABBCCDD is sent as `11AABBCCDD` (2026-10-12). A regular expression can pick the hex data out of a longer reply | Done | [D-SCPI-4](#d-scpi-4-bare-hex) |
 | SCPI-5 | A failed command sends no reply and its error goes only to the error queue; RDT copes with that (2026-10-11) | Done | [D-SCPI-5](#d-scpi-5-failed-commands-send-no-reply) |
 | SCPI-6 | Every write is confirmed by reading the value back | Done | [D-SCPI-6](#d-scpi-6-write-confirmation) |
 | SCPI-8 | A manual SCPI console sends any command and shows the raw reply (2026-10-05) | Done | [D-SCPI-8](#d-scpi-8-scpi-console) |
@@ -330,7 +330,7 @@ On the CLI: `--serial COM5 --baud 115200`. In the GUI the connection bar lists t
 
 #### D-LNK-2 TCP
 
-`rdt/transport/tcp.py` opens a plain socket to `address = "192.168.1.20:5025"` (CLI `--tcp HOST:PORT`). Replies are framed by the profile's line terminator, or by the IEEE 488.2 block header for `ieee_block` replies.
+`rdt/transport/tcp.py` opens a plain socket to `address = "192.168.1.20:5025"` (CLI `--tcp HOST:PORT`). Replies are framed by the profile's line terminator.
 
 #### D-LNK-3 UDP
 
@@ -376,11 +376,8 @@ The profile (`rdt/profile.py`) is a `[scpi]` TOML table. It can be a file of its
 name         = "Motor controller v3"
 read         = "MEMory:READ? {mcu},{addr},{len}"
 write        = "MEMory:WRITE {mcu},{addr},{value},{size}"
-value_format = "0x{value:X}"   # raw integer; floats as their bit pattern
-addr_format  = "0x{addr:08X}"
 max_write    = 4               # largest value one write accepts: 1, 2, 4 or 8 bytes
-data_format  = "hex"           # hex | bytes_csv | decimal | ieee_block
-reply_regex  = ""              # optional; group "data" (or group 1) holds the data
+reply_regex  = ""              # optional; group "data" (or group 1) holds the hex data
 byte_order   = "little"        # only for an MCU without an ELF
 max_response = 1024            # bytes of data one read reply can carry
 error_query  = "SYSTem:ERRor?"
@@ -390,7 +387,7 @@ timeout_ms   = 500
 retries      = 2               # extra attempts after a read times out
 ```
 
-Placeholders: `{mcu}`, `{addr}`, `{len}`, `{value}` and `{size}`. `{addr}` is written with `addr_format` and `{value}` with `value_format`. The profile checks itself when loaded: an unknown placeholder, an unknown data format, a bad `max_write` or a non-positive timeout is a `ConfigError`. The GUI's profile editor also refuses a template that can't work, such as a read without `{len}`. A profile may also list `[[ranges]]` for every MCU, or for one MCU with `mcu = "name"` (D-MEM-2).
+Placeholders: `{mcu}`, `{addr}`, `{len}`, `{value}` and `{size}`. `{addr}` and `{value}` are always bare upper-case hex (D-SCPI-4); `{mcu}`, `{len}` and `{size}` are decimal. The profile checks itself when loaded: an unknown placeholder, a format spec on `{addr}` or `{value}` that changes the base, a bad `max_write` or a non-positive timeout is a `ConfigError`. The GUI's profile editor also refuses a template that can't work, such as a read without `{len}`. A profile may also list `[[ranges]]` for every MCU, or for one MCU with `mcu = "name"` (D-MEM-2).
 
 #### D-SCPI-2 Block read
 
@@ -398,20 +395,17 @@ Placeholders: `{mcu}`, `{addr}`, `{len}`, `{value}` and `{size}`. `{addr}` is wr
 
 #### D-SCPI-3 Single-value write
 
-A write sends one value per command. The value is the raw integer of the variable's bytes, in the variable's byte order, written with `value_format`. A float is sent as its bit pattern (1.5 becomes `0x3FC00000`), so the firmware never parses a float. `{size}` is the access width, so the firmware does a single store of the right width. Values wider than `max_write` are split (D-VAL-6). A later firmware may add a buffer write; the profile would then get a second write template.
+A write sends one value per command. The value is the raw integer of the variable's bytes, in the variable's byte order, written as bare hex. A float is sent as its bit pattern (1.5 becomes `3FC00000`), so the firmware never parses a float. `{size}` is the access width, so the firmware does a single store of the right width. Values wider than `max_write` are split (D-VAL-6). A later firmware may add a buffer write; the profile would then get a second write template.
 
-#### D-SCPI-4 Reply formats
+#### D-SCPI-4 Bare hex
 
-`Profile.parse_read` decodes a read reply with `data_format`:
+rani set this on 2026-10-12: addresses and values are hex with no prefix, in commands and in replies, so address 0x11AABBCCDD is sent as `11AABBCCDD`.
 
-| Format | 4 bytes `00 00 C0 3F` |
-| --- | --- |
-| `hex` | `0000C03F` |
-| `bytes_csv` | `00,00,C0,3F` |
-| `decimal` | `0,0,192,63` |
-| `ieee_block` | `#14` followed by the 4 raw bytes |
-
-For any other reply shape, `reply_regex` picks the data out of the reply (group `data`, or group 1) and `data_format` decodes it. `reply_regex` cannot be combined with `ieee_block`.
+- **Commands:** `fill_template` (`rdt/profile.py`) writes `{addr}` and `{value}` as upper-case hex with no prefix. A template may pad them, as in `{addr:08X}`, but any spec that changes the base is a `ConfigError`. A read of 4 bytes at 0x20000000 on MCU 0 is `MEMory:READ? 0,20000000,4`, and a write of 1.5 to a float is `MEMory:WRITE 0,20000004,3FC00000,4`.
+- **Read replies:** `Profile.decode_data` takes the bytes in bare hex, lowest address first. The 4 bytes `00 00 C0 3F` come back as `0000C03F`. Whitespace is ignored, and a prefix such as `0x` or an odd number of digits is a `BadReply`.
+- **Longer replies:** when the firmware wraps the data in other text, `reply_regex` picks the hex out of the reply (group `data`, or group 1).
+- **Old files:** the earlier `addr_format`, `value_format` and `data_format` keys (with the `bytes_csv`, `decimal` and `ieee_block` reply formats) are gone. A profile or workspace that still has them loads with those keys ignored.
+- **Simulator:** it takes addresses and values only in bare hex. A prefixed or signed number (`0x20000000`, `#H20`, `-1`) fails with `-104,"Data type error"`.
 
 #### D-SCPI-5 Failed commands send no reply
 
@@ -482,7 +476,7 @@ Each MCU (`Mcu` in `rdt/target.py`) loads its own ELF into its own symbol table 
 
 #### D-MCU-3 MCU in every command
 
-The profile's read and write templates take `{mcu}`, filled with the MCU's ID: `MEMory:READ? 1,0x20000000,64`. Commands typed in the console are sent as typed.
+The profile's read and write templates take `{mcu}`, filled with the MCU's ID: `MEMory:READ? 1,20000000,64`. Commands typed in the console are sent as typed.
 
 #### D-MCU-4 64-byte internal frames
 
@@ -1100,8 +1094,8 @@ The firmware side is not written yet; rani adds it to the existing firmware late
 
 | ID | Requirement |
 | --- | --- |
-| FW-1 | A memory read command with the MCU as a parameter, such as `MEMory:READ? <mcu>,<addr>,<len>`, replying with `len` bytes, lowest address first, in one of the reply formats (D-SCPI-4) |
-| FW-2 | A memory write command, such as `MEMory:WRITE <mcu>,<addr>,<value>,<size>`, storing one value of 1, 2 or 4 bytes as a single aligned store. The value is a raw integer in hex |
+| FW-1 | A memory read command with the MCU as a parameter, such as `MEMory:READ? <mcu>,<addr>,<len>`, replying with `len` bytes in bare hex, lowest address first (D-SCPI-4) |
+| FW-2 | A memory write command, such as `MEMory:WRITE <mcu>,<addr>,<value>,<size>`, storing one value of 1, 2 or 4 bytes as a single aligned store. The value is a raw integer in bare hex |
 | FW-3 | A failed command sends no reply and puts its error in the SCPI error queue, read with `SYSTem:ERRor?`. A read longer than the reply buffer is such a failure |
 | FW-4 | The main MCU forwards commands for MCUs 1 and up over the internal channel in 64-byte frames, and splits and joins larger reads |
 | FW-5 | When a secondary MCU doesn't answer, the main MCU sends no reply and queues `-240,"MCU not responding"` |
@@ -1113,19 +1107,22 @@ The firmware side is not written yet; rani adds it to the existing firmware late
 Recommended shape, which the simulator and the default profile use:
 
 ```
-MEMory:READ? <mcu>,<addr>,<len>          -> hex bytes, lowest address first: 0000A041
+MEMory:READ? <mcu>,<addr>,<len>          -> hex bytes, lowest address first
 MEMory:WRITE <mcu>,<addr>,<value>,<size> ; no reply
 SYSTem:ERRor?                            -> 0,"No error" or a code and text
+
+MEMory:READ? 0,20000000,4                -> 0000C03F
+MEMory:WRITE 0,20000004,3FC00000,4       ; no reply
 ```
 
-Addresses are accepted as `0x` hex. The read reply is plain hex text rather than an IEEE 488.2 block, because it is trivial to produce and readable in the console. Names are up to the firmware, since the profile maps them.
+`<addr>` and `<value>` are bare upper-case hex with no prefix (D-SCPI-4); `<mcu>`, `<len>` and `<size>` are decimal. The read reply is plain hex text because it is trivial to produce and readable in the console. Names are up to the firmware, since the profile maps them.
 
 Error codes the simulator uses, as a reference:
 
 | Error | When |
 | --- | --- |
 | `-102,"Syntax error"` | Known header, wrong parameters |
-| `-104,"Data type error"` | A parameter isn't a number |
+| `-104,"Data type error"` | A parameter isn't a number, or an address or value isn't bare hex (`0x20000000`, `#H20`, `-1`) |
 | `-113,"Undefined header"` | Unknown command |
 | `-222,"Data out of range"` | Address not mapped, write to read-only memory, or value too wide for its size |
 | `-223,"Too much data"` | Read longer than the maximum response |
@@ -1207,6 +1204,7 @@ The application is built against the simulator. As soon as the firmware has the 
 | 2026-10-12 | The GUI console's Error queue button removed, at rani's request (the CLI keeps `rdt errors` and `.err`) |
 | 2026-10-12 | M5 built: ELF identity check by a constant variable or the GNU build ID, a mismatch refuses writes until allowed (SYM-8); the workspace's read-only default, which also refuses raw writes (WS-4); the GUI reopens the last workspace (WSP-3) |
 | 2026-10-12 | No size query: the maximum response size comes only from the SCPI configuration, never from the device (SCPI-7 and FW-8 removed, now RM-6), at rani's request |
+| 2026-10-12 | Addresses and values in SCPI commands, and read-reply data, are bare hex with no prefix (`11AABBCCDD`); the address, value and reply format settings are removed (SCPI-4), at rani's request |
 
 ## 9. Appendix: binary protocol (planned)
 
