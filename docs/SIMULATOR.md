@@ -33,7 +33,6 @@ The read, write, size and error commands come from the SCPI profile, the same `[
 | --- | --- |
 | `MEMory:READ? <mcu>,<addr>,<len>` | `<len>` bytes, lowest address first, in the profile's `data_format` |
 | `MEMory:WRITE <mcu>,<addr>,<value>,<size>` | none. `<size>` is 1, 2, 4 or 8 bytes, at most `max_write` |
-| `MEMory:MAX?` | `max_response` |
 | `SYSTem:ERRor?` | oldest error, or `0,"No error"` |
 | `*IDN?`, `*RST`, `*CLS`, `*OPC?` | standard. `*RST` reloads every MCU's memory from its image |
 | `SIMulation:MCU:SILent <mcu>,ON\|OFF` | none. Makes a secondary MCU stop answering |

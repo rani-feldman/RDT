@@ -7,7 +7,6 @@ write        = "MEMory:WRITE {mcu},{addr},{value},{size}"
 value_format = "0x{value:X}"
 addr_format  = "0x{addr:08X}"
 max_write    = 4
-size_query   = "MEMory:MAX?"
 data_format  = "hex"           # hex | bytes_csv | decimal | ieee_block
 byte_order   = "little"
 max_response = 1024

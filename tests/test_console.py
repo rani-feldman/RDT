@@ -56,7 +56,7 @@ def test_history_path(monkeypatch, tmp_path):
 
 def test_profile_commands():
     p = Profile()
-    assert profile_commands(p) == ["MEMory:READ? ", "MEMory:WRITE ", "SYSTem:ERRor?", "MEMory:MAX?", "*IDN?"]
+    assert profile_commands(p) == ["MEMory:READ? ", "MEMory:WRITE ", "SYSTem:ERRor?", "*IDN?"]
     assert profile_commands(None) == []
 
 
@@ -69,7 +69,7 @@ def test_completions():
     assert "SYSTem:ERRor?" in found and "*RST" in found
     # case-insensitive; prefix matches before matches inside the command
     assert completions("mem", history, Profile()) == ["MEMory:READ? 0,0x20000000,4", "MEMory:READ? ",
-                                                      "MEMory:WRITE ", "MEMory:MAX?"]
+                                                      "MEMory:WRITE "]
     assert completions("err", [], Profile()) == ["SYSTem:ERRor?"]
     assert completions("*", [], None) == list(COMMON_COMMANDS[:-1])
     assert completions(".h", [], None, (".history", ".help")) == [".history", ".help"]

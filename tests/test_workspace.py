@@ -163,7 +163,7 @@ def test_an_old_workspace_loads(tmp_path):
 # --- files -----------------------------------------------------------------------------------
 
 def test_save_and_load(tmp_path):
-    profile = Profile(name="bench", timeout_ms=800, size_query=None,
+    profile = Profile(name="bench", timeout_ms=800,
                       ranges=[Range("SRAM2", 0x10000000, 0x8000, mcu="main")])
     cfg = TargetConfig(ConnectionConfig("serial", "COM5", 921600), profile,
                        [McuConfig(0, "main", FIRMWARE / "main.elf",
@@ -184,7 +184,7 @@ def test_save_and_load(tmp_path):
     back = Workspace.load(path)
     assert back.config.connection == cfg.connection
     assert back.config.profile.name == "bench" and back.config.profile.timeout_ms == 800
-    assert not back.config.profile.size_query
+    assert "size_query" not in text
     assert back.config.profile.ranges == profile.ranges
     assert [(m.id, m.name, m.elf.resolve(), m.timeout_ms, m.ranges) for m in back.config.mcus] == \
            [(m.id, m.name, m.elf.resolve(), m.timeout_ms, m.ranges) for m in cfg.mcus]

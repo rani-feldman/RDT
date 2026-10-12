@@ -73,7 +73,6 @@ class Device:
         commands = [
             (p.read, self._read, True),
             (p.write, self._write, False),
-            (p.size_query, lambda a: str(p.max_response), True),
             (p.error_query, lambda a: self._pop_error(), True),
             ("*IDN?", lambda a: self.idn, True),
             ("*RST", self._reset, False),
