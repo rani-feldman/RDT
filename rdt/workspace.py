@@ -598,6 +598,8 @@ def _range_dict(r: Range) -> dict:
         d["writable"] = False
     if r.mcu not in (None, ""):
         d["mcu"] = r.mcu
+    if r.kind != "peripheral":
+        d["kind"] = r.kind
     return d
 
 
