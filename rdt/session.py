@@ -377,6 +377,12 @@ class Session:
 
     # --- console -----------------------------------------------------------------------------
 
+    def send_break(self, ms: float = 250) -> None:
+        """Send a serial break (COM port only). Raises LinkError on another transport."""
+        with self._lock:
+            self._require_up()
+            self.transport.send_break(ms / 1000.0)
+
     def command(self, text: str, expect_reply: bool | None = None, timeout_ms: float | None = None) -> str | None:
         """Send any command by hand. Waits for a reply if the header ends in ``?`` (or if asked to).
 

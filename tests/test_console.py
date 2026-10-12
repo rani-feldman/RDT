@@ -108,3 +108,26 @@ def test_hex_and_text():
     for bad, msg in (("", "no hex"), ("486", "odd"), ("zz", "not hex")):
         with pytest.raises(ValueError, match=msg):
             hex_to_text(bad)
+
+
+def test_read_and_merge_commands(tmp_path):
+    import pytest
+    from rdt.console import SavedCommand, merge_commands, read_commands, write_commands
+    plain = tmp_path / "a.csv"
+    plain.write_text("MEAS:VOLT?,Volts,Measure,Output voltage\nOUTP ON\n\n#x,y\n", encoding="utf-8-sig")
+    assert read_commands(plain) == [SavedCommand("MEAS:VOLT?", "Volts", "Measure", "Output voltage"),
+                                    SavedCommand("OUTP ON")]
+    labelled = tmp_path / "b.csv"
+    labelled.write_text("Label,Command\nIdentify,*IDN?\n", encoding="utf-8")
+    assert read_commands(labelled) == [SavedCommand("*IDN?", "Identify")]
+    out = tmp_path / "c.csv"
+    write_commands(out, read_commands(plain))
+    assert read_commands(out) == read_commands(plain)
+    bad = tmp_path / "d.csv"
+    bad.write_text("name,group\n", encoding="utf-8")
+    with pytest.raises(ValueError, match="no 'command' column"):
+        read_commands(bad)
+    cur = [SavedCommand("*IDN?")]
+    merged, added, skipped = merge_commands(cur, [SavedCommand("*idn?"), SavedCommand("A"), SavedCommand("A")])
+    assert ([c.command for c in merged], added, skipped) == (["*IDN?", "A"], 1, 2)
+    assert merge_commands(cur, [SavedCommand("B")], replace=True)[0] == [SavedCommand("B")]

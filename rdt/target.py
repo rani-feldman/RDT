@@ -223,6 +223,16 @@ class Target:
     def close(self) -> None:
         self.session.close()
 
+    def reconnect(self) -> Target:
+        """Close the link and open it again, checking the device answers (CON-9)."""
+        self.session.close()
+        self.session.connect()
+        return self
+
+    def send_break(self, ms: float = 250) -> None:
+        """Send a serial break on a COM port link (CON-10)."""
+        self.session.send_break(ms)
+
     def __enter__(self) -> Target:
         return self.connect()
 

@@ -372,3 +372,15 @@ def test_cli_reads_and_writes_the_watch_list(sim, tmp_path, capsys):
     assert (code, out) == (0, "main:tick_count = 0x12345678\n")
     assert rdt(sim, path, "send", "SIM:MCU:SIL 1,ON")[0] == 0
     assert "MCU motorctl is not responding" in rdt(sim, path, "read", "motorctl:pwm_duty")[1]
+
+
+def test_saved_commands_round_trip(tmp_path):
+    from rdt.console import SavedCommand
+    ws = Workspace()
+    ws.commands = [SavedCommand("MOT:SPE?", "Speed", "Motor", "rpm"), SavedCommand("*IDN?")]
+    path = ws.save(tmp_path / "w.rdtw")
+    assert Workspace.load(path).commands == ws.commands
+    assert '[[command]]\ncommand = "*IDN?"\n' in path.read_text(encoding="utf-8")
+    path.write_text(path.read_text(encoding="utf-8") + '\n[[command]]\nname = "no command"\n', encoding="utf-8")
+    with pytest.raises(ConfigError, match=r"\[\[command\]\]"):
+        Workspace.load(path)
