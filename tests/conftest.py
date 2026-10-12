@@ -33,3 +33,9 @@ def ram_mcu(mcu_id=0, start=0x20000000, size=256, **kw):
 def _symbol_cache(tmp_path_factory, monkeypatch):
     """Keep the DWARF cache out of the user's cache folder; shared by the whole test run."""
     monkeypatch.setenv("RDT_CACHE_DIR", str(tmp_path_factory.getbasetemp() / "symbol-cache"))
+
+
+@pytest.fixture(autouse=True)
+def _console_history(tmp_path, monkeypatch):
+    """Each test gets its own console history file, never the user's."""
+    monkeypatch.setenv("RDT_HISTORY_FILE", str(tmp_path / "console_history.txt"))

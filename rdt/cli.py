@@ -9,6 +9,7 @@
     rdt -t bench.toml send "*IDN?"
     rdt -t bench.toml watch main:motor.speed -i 100
     rdt -t bench.toml console
+    rdt history
 
 Without a target file, give the link and the MCUs on the command line:
 
@@ -25,6 +26,7 @@ from datetime import datetime
 from pathlib import Path
 
 from . import __version__, codec
+from .console import CommandHistory, SessionLog, completions
 from .csvlog import CsvLog
 from .errors import CommandTimeout, ConfigError, LinkDown, RdtError, SymbolError
 from .profile import Profile, parse_int
@@ -121,7 +123,15 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("-n", "--count", type=int, default=0, help="stop after this many samples (default: run until Ctrl+C)")
     p.add_argument("--csv", type=Path, metavar="FILE", help="also log every value read to a CSV file")
 
-    sub.add_parser("console", help="interactive SCPI console")
+    p = sub.add_parser("console", help="interactive SCPI console")
+    p.add_argument("--timestamps", action="store_true",
+                   help="start every line with the time, to the millisecond, and echo each command sent")
+    p.add_argument("--log", type=Path, metavar="FILE",
+                   help="append every line sent and received, with date and time, to a text file")
+
+    p = sub.add_parser("history", help="list the saved console history, newest last (no device needed)")
+    p.add_argument("-n", "--limit", type=int, default=20, metavar="N", help="show the last N (default 20, 0 for all)")
+    p.add_argument("--clear", action="store_true", help="delete the whole history")
 
     p = sub.add_parser("init", help="save the target as a new workspace file (no device needed)")
     p.add_argument("file", type=Path)
@@ -613,17 +623,129 @@ CONSOLE_HELP = """Type any SCPI command; queries (header ending in '?') wait for
   .read EXPR...         read values, such as .read main:motor @main:0x20000010:u32
   .write EXPR VALUE     write a value and confirm it
   .err                  read the error queue
+  .history [N|clear]    the saved command history (last 20, or N), or delete it
+  !N                    send history entry N again
   .help                 this text
-  .quit                 leave (or Ctrl+D)"""
+  .quit                 leave (or Ctrl+D)
+Up and Down walk the history; Tab completes from the history, the profile and common SCPI commands."""
+CONSOLE_DOT_COMMANDS = (".read ", ".write ", ".err", ".history", ".help", ".quit")
+
+
+class _Logged:
+    """An output stream that also copies every finished line to the session log, as a reply, or as
+    an error for the console's error lines."""
+
+    def __init__(self, out, log: SessionLog):
+        self.out = out
+        self.log = log
+        self.pending = ""
+
+    def write(self, text: str) -> int:
+        self.out.write(text)
+        self.pending += text
+        *lines, self.pending = self.pending.split("\n")
+        for line in lines:
+            if line.startswith("> "):
+                kind = "tx"
+            elif line.startswith(("error:", "(no reply")):
+                kind = "error"
+            else:
+                kind = "rx"
+            self.log.write(kind, line[2:] if kind == "tx" else line)
+        return len(text)
+
+    def flush(self) -> None:
+        self.out.flush()
+
+
+class _Stamped:
+    """An output stream that starts every line with the time, for ``rdt console --timestamps``."""
+
+    def __init__(self, out):
+        self.out = out
+        self.at_line_start = True
+
+    def write(self, text: str) -> int:
+        for part in text.splitlines(keepends=True):
+            if self.at_line_start:
+                self.out.write(datetime.now().strftime("%H:%M:%S.%f")[:-3] + "  ")
+            self.out.write(part)
+            self.at_line_start = part.endswith("\n")
+        return len(text)
+
+    def flush(self) -> None:
+        self.out.flush()
+
+
+def _setup_line_editing(history: CommandHistory, profile: Profile) -> None:
+    """On a terminal: Up and Down over the saved history, Tab completion. Needs readline
+    (pyreadline3 on Windows); without it the console still works, without either."""
+    try:
+        import readline
+    except ImportError:
+        return
+    readline.clear_history()
+    for c in history.items:
+        readline.add_history(c)
+    matches: list[str] = []
+
+    def complete(text: str, state: int) -> str | None:
+        if state == 0:
+            line = readline.get_line_buffer()
+            matches[:] = completions(line, history.items, profile, CONSOLE_DOT_COMMANDS)
+        return matches[state] if state < len(matches) else None
+
+    readline.set_completer_delims("")      # complete the whole line: SCPI headers hold : ? *
+    readline.set_completer(complete)
+    readline.parse_and_bind("tab: complete")
+
+
+def _print_history(history: CommandHistory, limit: int, out) -> None:
+    items = history.items
+    first = max(0, len(items) - limit) if limit > 0 else 0
+    for i in range(first, len(items)):
+        print(f"{i + 1:4}  {items[i]}", file=out)
+    if not items:
+        print("(the console history is empty)", file=out)
+
+
+def cmd_history(t: Target | None, args, out) -> int:
+    history = CommandHistory()
+    if args.clear:
+        history.clear()
+        print(f"cleared the console history in {history.path}", file=out)
+    else:
+        _print_history(history, args.limit, out)
+    return 0
 
 
 def cmd_console(t: Target, args, out) -> int:
+    history = CommandHistory()
+    interactive = sys.stdin.isatty()
+    if interactive:
+        _setup_line_editing(history, t.profile)
+    session_log = None
+    if getattr(args, "log", None):
+        try:
+            session_log = SessionLog(args.log)
+        except OSError as e:
+            raise ConfigError(f"cannot write the console log {args.log}: {e}") from None
+    if getattr(args, "timestamps", False):
+        out = _Stamped(out)
+    banner = f"Connected to {t.idn or t.config.connection.describe()}. .help for help."
+    print(banner, file=out)
+    if session_log is not None:
+        session_log.write("note", banner)
+        out = _Logged(out, session_log)
     try:
-        import readline  # noqa: F401  (history and line editing where available)
-    except ImportError:
-        pass
-    print(f"Connected to {t.idn or t.config.connection.describe()}. .help for help.", file=out)
-    prompt = "rdt> " if sys.stdin.isatty() else ""
+        return _console_loop(t, args, history, interactive, out)
+    finally:
+        if session_log is not None:
+            session_log.close()
+
+
+def _console_loop(t: Target, args, history: CommandHistory, interactive: bool, out) -> int:
+    prompt = "rdt> " if interactive else ""
     while True:
         try:
             line = input(prompt)
@@ -634,6 +756,16 @@ def cmd_console(t: Target, args, out) -> int:
         if not line:
             continue
         try:
+            if line.startswith("!"):
+                n = line[1:].strip()
+                if not n.isdigit() or not 1 <= int(n) <= len(history.items):
+                    raise ConfigError(f"no history entry {n!r}; .history lists them")
+                line = history.items[int(n) - 1]
+                print(f"> {line}", file=out)
+            elif getattr(args, "timestamps", False):
+                print(f"> {line}", file=out)
+            elif isinstance(out, _Logged):
+                out.log.write("tx", line)
             if line in (".quit", ".exit"):
                 break
             if line == ".help":
@@ -641,6 +773,14 @@ def cmd_console(t: Target, args, out) -> int:
             elif line == ".err":
                 err = t.error_query()
                 print(err if err else '0,"No error"', file=out)
+            elif line == ".history clear":
+                history.clear()
+                print("console history cleared", file=out)
+            elif line == ".history" or line.startswith(".history "):
+                arg = line[len(".history"):].strip() or "20"
+                if not arg.isdigit():
+                    raise ConfigError(".history takes a count or 'clear'")
+                _print_history(history, int(arg), out)
             elif line.startswith(".read "):
                 for text in line.split()[1:]:
                     loc = t.resolve(text)
@@ -652,6 +792,7 @@ def cmd_console(t: Target, args, out) -> int:
                 args.expr, args.value, args.yes = parts[1], parts[2], False
                 cmd_write(t, args, out)
             else:
+                history.add(line)
                 _send(t, line, None, out)
         except RdtError as e:
             print(f"error: {e}", file=out)
@@ -661,7 +802,7 @@ def cmd_console(t: Target, args, out) -> int:
 COMMANDS = {
     "init": cmd_init, "list": cmd_list, "add": cmd_add, "remove": cmd_remove, "tab": cmd_tab,
     "info": cmd_info, "symbols": cmd_symbols, "ptype": cmd_ptype, "read": cmd_read, "write": cmd_write, "dump": cmd_dump, "poke": cmd_poke,
-    "send": cmd_send, "errors": cmd_errors, "watch": cmd_watch, "console": cmd_console,
+    "send": cmd_send, "errors": cmd_errors, "watch": cmd_watch, "console": cmd_console, "history": cmd_history,
 }
 
 
@@ -674,6 +815,8 @@ def main(argv: list[str] | None = None, out=None) -> int:
     level = [logging.WARNING, logging.INFO, logging.DEBUG][min(args.verbose, 2)]
     logging.basicConfig(level=level, format="%(asctime)s %(name)s %(message)s", stream=sys.stderr)
     try:
+        if args.cmd == "history":          # needs no workspace or device
+            return cmd_history(None, args, out)
         args.ws = load_workspace(args)
         for warning in args.ws.warnings:
             print(f"rdt: {warning}", file=sys.stderr)

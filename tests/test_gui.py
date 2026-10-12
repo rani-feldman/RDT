@@ -1,6 +1,7 @@
 """GUI tests: the main window against the simulated device, run offscreen with pytest-qt."""
 
 import os
+import re
 import shutil
 import time
 from pathlib import Path
@@ -165,6 +166,7 @@ def test_console_and_memory(qtbot, win):
     con.input.returnPressed.emit()
     qtbot.waitUntil(lambda: "SIM" in con.output.toPlainText().upper(), timeout=3000)
     assert con.history.items == ["*IDN?"]
+    assert ("tx", "> *IDN?") in [e[1:] for e in con.entries]
     con.send("BOGUS:COMMAND?")
     qtbot.waitUntil(lambda: "(no reply" in con.output.toPlainText(), timeout=3000)
 
@@ -178,6 +180,115 @@ def test_console_and_memory(qtbot, win):
     cell = mem.table.item(0, 4)        # first byte of gains
     cell.setText("7F")
     qtbot.waitUntil(lambda: mem.data[:1] == b"\x7f", timeout=3000)
+
+
+def test_console_history_and_completion(qtbot, win):
+    from PySide6.QtCore import QEvent
+    from PySide6.QtGui import QKeyEvent
+    from rdt.console import CommandHistory
+    from rdt.gui.panels import HistoryDialog
+
+    def key(k, mods=Qt.NoModifier):
+        con.keys.eventFilter(con.input, QKeyEvent(QEvent.KeyPress, k, mods))
+
+    connect(qtbot, win)
+    con = win.console
+    con.send_command("*IDN?")
+    con.send_command("MEMory:MAX?")
+    qtbot.waitUntil(lambda: len([e for e in con.entries if e[1] == "rx"]) == 2, timeout=3000)
+    assert CommandHistory().items == ["*IDN?", "MEMory:MAX?"]     # saved for the next launch
+    con.input.setText("draft")
+    key(Qt.Key_Up)
+    assert con.input.text() == "MEMory:MAX?"
+    key(Qt.Key_Up)
+    key(Qt.Key_Down)
+    key(Qt.Key_Down)
+    assert con.input.text() == "draft"
+
+    # Ctrl+Space: one match is filled in, several open a list
+    con.input.setText("syst")
+    key(Qt.Key_Space, Qt.ControlModifier)
+    assert con.input.text() == "SYSTem:ERRor?"
+    con.input.setText("mem")
+    key(Qt.Key_Space, Qt.ControlModifier)
+    assert con.completer.model().stringList() == ["MEMory:MAX?", "MEMory:READ? ", "MEMory:WRITE "]
+    assert con.completer.popup().isVisible()
+    con.completer.activated.emit("MEMory:READ? ")
+    assert con.input.text() == "MEMory:READ? " and not con.completer.popup().isVisible()
+
+    # the history dialog sends again and deletes
+    dlg = HistoryDialog(con)
+    assert [dlg.list.item(i).text() for i in range(dlg.list.count())] == ["MEMory:MAX?", "*IDN?"]
+    dlg.list.setCurrentRow(1)
+    dlg.send()
+    assert con.history.items == ["MEMory:MAX?", "*IDN?"] and con.entries[-1][2] == "> *IDN?"
+    dlg.list.setCurrentRow(0)
+    dlg.delete()
+    assert CommandHistory().items == ["MEMory:MAX?"]
+
+
+def test_console_transcript(qtbot, win, tmp_path, monkeypatch):
+    from PySide6.QtWidgets import QPlainTextEdit
+    from rdt.console import hex_to_text, text_to_hex
+
+    connect(qtbot, win)
+    con = win.console
+    assert con.entries[-1][1:] == ("note", "connected: " + win.device.target.idn[:40])
+    con.send("*IDN?")
+    qtbot.waitUntil(lambda: con.entries[-1][1] == "rx", timeout=3000)
+    con.send("BOGUS?")
+    qtbot.waitUntil(lambda: con.entries[-1][1] == "error", timeout=3000)
+    text = con.output.toPlainText().splitlines()
+    assert re.fullmatch(r"\d\d:\d\d:\d\d\.\d{3}  > BOGUS\?", text[-2])
+    con.timestamps.setChecked(False)
+    assert con.output.toPlainText().splitlines()[-2] == "> BOGUS?"
+    colors = {kind: con.output.document().findBlockByNumber(i).begin().fragment().charFormat().foreground().color().name()
+              for i, (_, kind, _) in enumerate(con.entries) if kind in ("tx", "error", "note")}
+    assert colors == {"tx": "#2e9d4f", "error": "#d64545", "note": "#888888"}
+
+    # search: every match highlighted, Enter and Shift+Enter step, newest first
+    con.show_find()
+    con.find_text.setText("bogus")
+    assert con.find_count.text() == "2 of 2"        # the command and the error line
+    con.find_next()
+    assert con.find_count.text() == "1 of 2"
+    con.find_previous()
+    assert con.find_count.text() == "2 of 2" and len(con.output.extraSelections()) == 2
+    con.find_text.setText("nothing here")
+    assert con.find_count.text() == "no match"
+    con.hide_find()
+    assert not con.output.extraSelections()
+
+    # hex and text
+    dlg = con.show_converted("Hex selection as text", hex_to_text, "48 65 6C 6C 6F")
+    assert dlg.findChild(QPlainTextEdit).toPlainText() == "Hello"
+    dlg.close()
+    dlg = con.show_converted("Selection as hex", text_to_hex, "Hi")
+    assert dlg.findChild(QPlainTextEdit).toPlainText() == "48 69"
+    dlg.close()
+    warnings = []
+    monkeypatch.setattr(QMessageBox, "warning", lambda *a: warnings.append(a[2]))
+    assert con.show_converted("Hex selection as text", hex_to_text, "Hello") is None
+    assert "not hex" in warnings[0]
+
+    # session log
+    log = tmp_path / "console.txt"
+    assert con.start_log(log)
+    con.send("*IDN?")
+    qtbot.waitUntil(lambda: con.entries[-1][1] == "rx", timeout=3000)
+    con.stop_log()
+    lines = [line[24:] for line in log.read_text(encoding="utf-8").splitlines()]
+    assert lines[:3] == ["# log started", f"# logging to {log}", "> *IDN?"]
+    assert lines[3].startswith("< RDT,Simulator") and lines[-1] == "# log stopped"
+
+    # Ctrl+K clears
+    win.show()
+    win.docks["Console"].raise_()
+    qtbot.waitExposed(win)
+    con.input.setFocus()
+    qtbot.waitUntil(con.input.hasFocus, timeout=3000)
+    qtbot.keyClick(con.input, Qt.Key_K, Qt.ControlModifier)
+    assert con.output.toPlainText() == "" and not con.entries
 
 
 def test_watch_tabs(qtbot, win, monkeypatch, tmp_path):
