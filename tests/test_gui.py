@@ -225,7 +225,7 @@ def test_console_history_and_completion(qtbot, win):
     key(Qt.Key_Space, Qt.ControlModifier)             # Ctrl+Space does the same
     assert con.input.text() == "*IDN?"
 
-    # as you type, the best suggestion shows in grey after the cursor; Right or Tab takes it
+    # as you type, the best suggestion shows in grey after the cursor; Right takes it
     con.input.setText("")
     QTest.keyClicks(con.output, "sy")
     assert con.input.text() == "sy" and con.output.ghost() == "STem:ERRor?"
@@ -234,10 +234,17 @@ def test_console_history_and_completion(qtbot, win):
     con.input.setText("")
     QTest.keyClicks(con.output, "*")
     assert con.output.ghost() == "IDN?"                # the history comes first
-    key(Qt.Key_Tab)
+    key(Qt.Key_Tab)                                    # a single match: Tab fills it in
     assert con.input.text() == "*IDN?"
     QTest.keyClicks(con.output, "x")
     assert con.output.ghost() == ""                    # nothing starts with *IDN?x
+    con.input.setText("")
+    QTest.keyClicks(con.output, "mem")
+    assert con.output.ghost() == "ory:MAX?"
+    key(Qt.Key_Tab)                                    # several: Tab lists them all, not just the grey one
+    assert con.input.text() == "MEMory:" and con.completer.popup().isVisible()
+    assert con.completer.model().stringList() == ["MEMory:MAX?", "MEMory:READ? 0,0x20000000,4"]
+    con.completer.popup().hide()
     con.input.setText("")
     assert con.output.ghost() == con.output.hint
 
@@ -310,7 +317,7 @@ def test_keyboard_shortcuts(qtbot, win):
     rows = win.shortcut_rows()
     assert ("Target", "Connect or disconnect", "F5") in rows
     assert ("Watch", "Add selected to chart", "Ctrl+G") in rows
-    assert ("Console", "Complete the command from the history and the known commands", "Tab / Ctrl+Space") in rows
+    assert ("Console", "Complete the command; with several matches, list them all", "Tab / Ctrl+Space") in rows
     dlg = win.show_shortcuts()
     from PySide6.QtWidgets import QTableWidget
     assert dlg.findChild(QTableWidget).rowCount() == len(rows)
