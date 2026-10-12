@@ -73,6 +73,7 @@ Each requirement links to its design section.
 | SCPI-6 | Every write is confirmed by reading the value back | Done | [D-SCPI-6](#d-scpi-6-write-confirmation) |
 | SCPI-8 | A manual SCPI console sends any command and shows the raw reply (2026-10-05) | Done | [D-SCPI-8](#d-scpi-8-scpi-console) |
 | SCPI-9 | The profile can be edited in the GUI, with a preview of the commands and a test read | Done | [D-SCPI-9](#d-scpi-9-profile-editor) |
+| SCPI-10 | Every SCPI read and write covers whole 4-byte aligned words: a 2-byte variable is read as its 4-byte word and the result is trimmed, and a smaller or unaligned write is done as read-modify-write (2026-10-12) | In review (PR #36) | [D-SCPI-10](#d-scpi-10-aligned-words) |
 
 ### 2.4 Multiple MCUs
 
@@ -377,6 +378,7 @@ name         = "Motor controller v3"
 read         = "MEMory:READ? {mcu},{addr},{len}"
 write        = "MEMory:WRITE {mcu},{addr},{value},{size}"
 max_write    = 4               # largest value one write accepts: 1, 2, 4 or 8 bytes
+align        = 4               # every read and write covers whole aligned words: 1, 2, 4 or 8
 reply_regex  = ""              # optional; group "data" (or group 1) holds the hex data
 byte_order   = "little"        # only for an MCU without an ELF
 max_response = 1024            # bytes of data one read reply can carry
@@ -387,7 +389,7 @@ timeout_ms   = 500
 retries      = 2               # extra attempts after a read times out
 ```
 
-Placeholders: `{mcu}`, `{addr}`, `{len}`, `{value}` and `{size}`. `{addr}` and `{value}` are always bare upper-case hex (D-SCPI-4); `{mcu}`, `{len}` and `{size}` are decimal. The profile checks itself when loaded: an unknown placeholder, a format spec on `{addr}` or `{value}` that changes the base, a bad `max_write` or a non-positive timeout is a `ConfigError`. The GUI's profile editor also refuses a template that can't work, such as a read without `{len}`. A profile may also list `[[ranges]]` for every MCU, or for one MCU with `mcu = "name"` (D-MEM-2).
+Placeholders: `{mcu}`, `{addr}`, `{len}`, `{value}` and `{size}`. `{addr}` and `{value}` are always bare upper-case hex (D-SCPI-4); `{mcu}`, `{len}` and `{size}` are decimal. The profile checks itself when loaded: an unknown placeholder, a format spec on `{addr}` or `{value}` that changes the base, a bad `max_write` or `align` or a non-positive timeout is a `ConfigError`. The GUI's profile editor also refuses a template that can't work, such as a read without `{len}`. A profile may also list `[[ranges]]` for every MCU, or for one MCU with `mcu = "name"` (D-MEM-2).
 
 #### D-SCPI-2 Block read
 
@@ -420,7 +422,7 @@ A `-240` error in the queue marks a secondary MCU silent (D-MCU-6). In the conso
 
 #### D-SCPI-6 Write confirmation
 
-A write gets no reply whether it succeeds or fails, so `Session.write` reads the written bytes back after every write and compares them. A mismatch raises `WriteNotConfirmed` with both values. Over UDP, a write whose read-back shows it missing is sent again, and only then. Bit-field writes are confirmed the same way (D-VAL-5).
+A write gets no reply whether it succeeds or fails, so `Session.write` reads the written bytes back after every write and compares them. The read-back covers whole aligned words, and only the bytes written are compared (D-SCPI-10). A mismatch raises `WriteNotConfirmed` with both values. Over UDP, a write whose read-back shows it missing is sent again, and only then. Bit-field writes are confirmed the same way (D-VAL-5).
 
 #### D-SCPI-8 SCPI console
 
@@ -436,6 +438,18 @@ A write gets no reply whether it succeeds or fails, so `Session.write` reads the
 - **Preview:** the read and write commands are shown as they will be sent, and a template that can't work is refused, such as a read without `{len}`.
 - **Test read:** while connected, it sends one read with the edited profile and shows the reply and the decoded bytes, before anything is applied.
 - **Apply:** OK stores the profile inside the workspace and reconnects. **Target > Load profile file** points the workspace at a profile file instead.
+
+#### D-SCPI-10 Aligned words
+
+rani set this on 2026-10-12: the firmware is only ever asked for whole 4-byte aligned words. The profile's `align` key holds the word size: 4 by default, and 1, 2, 4 or 8 are allowed. `max_write` and `max_response` must each be at least `align`, or loading the profile is a `ConfigError`. `align_span` in `rdt/profile.py` rounds the start of an access down and its end up to a multiple of `align`.
+
+- **Reads:** `Session.read` reads the aligned span in pieces of `max_response` rounded down to a multiple of `align`, then cuts out the bytes asked for. A 2-byte variable at 0x20000002 is read with `MEMory:READ? 0,20000000,4`, and RDT keeps its last 2 bytes.
+- **Writes:** a write that already covers whole aligned words is sent as is. Any other write is a read-modify-write: `Session.write` reads the aligned words, puts the new bytes into them, and writes the whole words back, split by `max_write` (D-VAL-6). rani chose this over refusing small writes on 2026-10-12. If the firmware changes a neighbouring value between the read and the write, that change is lost, as with bit fields (D-VAL-5).
+- **Confirmation:** the read-back covers the aligned words, but only the target bytes are compared (D-SCPI-6). Over UDP, a re-send takes the neighbouring bytes from the latest read-back, so it does not undo a change the firmware made to them.
+- **Access checks:** `MemoryMap.check_aligned` in `rdt/memmap.py` checks the bytes asked for as before (D-MEM-2). The padding bytes the aligned words add may lie outside ELF sections or in another section, because the firmware reads whole words anyway. They may never reach into a peripheral range the access isn't already in (D-MEM-4), and on a write they may not land in read-only memory (D-MEM-3).
+- **Polling:** the scheduler sizes each merged block by its aligned span, so a block never needs more than one reply (D-POLL-3).
+- **GUI:** the profile editor has an **Align** field. Its preview writes one word, and **Test read** sends an aligned read (D-SCPI-9).
+- **Simulator:** an address, length or write size that is not a multiple of `align` fails with `-224,"Illegal parameter value"`.
 
 ### 4.4 Multiple MCUs
 
@@ -584,7 +598,7 @@ RDT compares a few bytes that differ between firmware builds, read from the devi
 
 #### D-MEM-2 Known memory only
 
-`rdt/memmap.py` builds a memory map per MCU from its ELF's allocated sections plus the listed ranges (`[[mcu.ranges]]`, or `[[ranges]]` in the profile with `mcu = "name"`). `Target._check` refuses an access outside them with `AccessRefused` before anything is sent. A read that starts inside a known region and runs past its end is refused too, unless the next section or memory range continues it. An access that touches a peripheral range must stay entirely inside it. The firmware's own region table is a second check (FW-7).
+`rdt/memmap.py` builds a memory map per MCU from its ELF's allocated sections plus the listed ranges (`[[mcu.ranges]]`, or `[[ranges]]` in the profile with `mcu = "name"`). `Target._check` refuses an access outside them with `AccessRefused` before anything is sent. A read that starts inside a known region and runs past its end is refused too, unless the next section or memory range continues it. An access that touches a peripheral range must stay entirely inside it. The padding bytes added by aligned access follow the looser rules in D-SCPI-10. The firmware's own region table is a second check (FW-7).
 
 #### D-MEM-3 Read-only sections
 
@@ -713,7 +727,7 @@ Each top-level item has `poll = "global" | "manual" | <ms>`. `global` follows th
 
 1. Collect every due item, from every tab, once each (D-TAB-3).
 2. Group the items by MCU and sort them by address.
-3. Merge items at most 32 bytes apart (`MERGE_GAP`) into one block of up to `max_response` bytes. The gaps between them are read too.
+3. Merge items at most 32 bytes apart (`MERGE_GAP`) into one block whose aligned span (D-SCPI-10) fits in `max_response` bytes. The gaps between them are read too.
 4. Never merge an item in a peripheral range; read it alone at its exact size (D-MEM-4). Items in memory ranges merge like items in ELF sections (D-MEM-5).
 5. Send one read per block and decode every item from its block. Each `Sample` carries the PC time the reply arrived.
 6. If a merged read fails, read its items again one by one, so one bad item fails alone.
@@ -1094,8 +1108,8 @@ The firmware side is not written yet; rani adds it to the existing firmware late
 
 | ID | Requirement |
 | --- | --- |
-| FW-1 | A memory read command with the MCU as a parameter, such as `MEMory:READ? <mcu>,<addr>,<len>`, replying with `len` bytes in bare hex, lowest address first (D-SCPI-4) |
-| FW-2 | A memory write command, such as `MEMory:WRITE <mcu>,<addr>,<value>,<size>`, storing one value of 1, 2 or 4 bytes as a single aligned store. The value is a raw integer in bare hex |
+| FW-1 | A memory read command with the MCU as a parameter, such as `MEMory:READ? <mcu>,<addr>,<len>`, replying with `len` bytes in bare hex, lowest address first (D-SCPI-4). `addr` and `len` are multiples of 4 (D-SCPI-10) |
+| FW-2 | A memory write command, such as `MEMory:WRITE <mcu>,<addr>,<value>,<size>`, storing one aligned 4-byte word as a single store (D-SCPI-10). The value is a raw integer in bare hex |
 | FW-3 | A failed command sends no reply and puts its error in the SCPI error queue, read with `SYSTem:ERRor?`. A read longer than the reply buffer is such a failure |
 | FW-4 | The main MCU forwards commands for MCUs 1 and up over the internal channel in 64-byte frames, and splits and joins larger reads |
 | FW-5 | When a secondary MCU doesn't answer, the main MCU sends no reply and queues `-240,"MCU not responding"` |
@@ -1126,7 +1140,7 @@ Error codes the simulator uses, as a reference:
 | `-113,"Undefined header"` | Unknown command |
 | `-222,"Data out of range"` | Address not mapped, write to read-only memory, or value too wide for its size |
 | `-223,"Too much data"` | Read longer than the maximum response |
-| `-224,"Illegal parameter value"` | Unknown MCU, bad length or write size |
+| `-224,"Illegal parameter value"` | Unknown MCU, bad length or write size, or an address, length or size that is not a multiple of `align` |
 | `-240,"MCU not responding"` | A secondary MCU is silent |
 | `-350,"Queue overflow"` | Too many errors queued |
 
@@ -1205,6 +1219,7 @@ The application is built against the simulator. As soon as the firmware has the 
 | 2026-10-12 | M5 built: ELF identity check by a constant variable or the GNU build ID, a mismatch refuses writes until allowed (SYM-8); the workspace's read-only default, which also refuses raw writes (WS-4); the GUI reopens the last workspace (WSP-3) |
 | 2026-10-12 | No size query: the maximum response size comes only from the SCPI configuration, never from the device (SCPI-7 and FW-8 removed, now RM-6), at rani's request |
 | 2026-10-12 | Addresses and values in SCPI commands, and read-reply data, are bare hex with no prefix (`11AABBCCDD`); the address, value and reply format settings are removed (SCPI-4), at rani's request |
+| 2026-10-12 | Every SCPI read and write covers whole 4-byte aligned words (`align`); reads are trimmed, and smaller or unaligned writes are read-modify-write, which rani chose over refusing them (SCPI-10) |
 
 ## 9. Appendix: binary protocol (planned)
 
