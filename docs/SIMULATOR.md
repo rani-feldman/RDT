@@ -1,6 +1,6 @@
 # Simulated device
 
-The simulator stands in for the firmware until the memory commands exist there (milestone M1). It is a separate Python program that runs on the same PC as RDT and answers SCPI over TCP, UDP and a serial port. It simulates several MCUs behind one main MCU, as in [Multiple MCUs](DESIGN.md#multiple-mcus).
+The simulator stands in for the firmware until the memory commands exist there (milestone M1). It is a separate Python program that runs on the same PC as RDT and answers SCPI over TCP, UDP and a serial port. It simulates several MCUs behind one main MCU, as in [Multiple MCUs](DESIGN_DOCUMENT.md#44-multiple-mcus).
 
 ## Run it
 
