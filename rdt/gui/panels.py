@@ -551,7 +551,16 @@ class Console(QWidget):
             self.input.setText(common)
         self.suggest_model.setStringList(found)
         self.output.suggestion = ""
-        self.completer.complete(self.output.cursorRect())
+        self.completer.complete(self._popup_rect())
+
+    def _popup_rect(self):
+        """Where the list opens: under the cursor, wide enough for its longest command (the
+        completer takes the popup's width from this rectangle, and the cursor is 1 pixel wide)."""
+        rect = self.output.cursorRect()
+        popup = self.completer.popup()
+        width = popup.sizeHintForColumn(0) + popup.verticalScrollBar().sizeHint().width() + 2 * popup.frameWidth() + 8
+        rect.setWidth(max(width, 200))
+        return rect
 
     def _typed(self, _text: str) -> None:
         """As you type, the best suggestion shows in grey after the cursor (CON-14): the newest
