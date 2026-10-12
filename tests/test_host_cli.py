@@ -274,3 +274,60 @@ def test_console_log(sim, monkeypatch, tmp_path):
     assert lines[4] == "> NOPE?"
     assert lines[5] == '! (no reply; error queue: -113,"Undefined header;NOPE?")'
     assert lines[6:] == ["> .quit", "# log stopped"]
+
+
+def test_send_expect(sim, capsys):
+    code, out = rdt(sim, "send", "*IDN?", "--expect", r"^RDT,Sim")
+    assert code == 0 and out.startswith("RDT,Simulator")
+    code, out = rdt(sim, "send", "*IDN?", "--expect", "Keysight")
+    assert code == 11 and "does not match 'Keysight'" in capsys.readouterr().err
+    code, out = rdt(sim, "send", "NOPE?", "--expect", ".")
+    assert code == 11 and out == "(no reply)\n"
+    assert rdt(sim, "send", "*IDN?", "--expect", "(")[0] == 1                 # bad regex
+    assert rdt(sim, "send", "*IDN?", "--expect", "x", "--no-reply")[0] == 1
+
+
+def test_console_info_reconnect_break(sim, monkeypatch):
+    monkeypatch.setattr("sys.stdin", io.StringIO(".info\n.reconnect\n*IDN?\n.break\n.quit\n"))
+    code, out = rdt(sim, "console")
+    lines = out.splitlines()
+    assert lines[1].startswith("Link:") and any(line.startswith("MCU 1 motorctl") for line in lines)
+    i = next(i for i, line in enumerate(lines) if line.startswith("reconnected to RDT,Simulator"))
+    assert lines[i + 1].startswith("RDT,Simulator")
+    assert lines[i + 2] == "error: tcp %s:%d: a break can only be sent on a COM port" % sim.tcp_address
+
+
+def test_commands(sim, tmp_path, monkeypatch):
+    ws = tmp_path / "bench.rdtw"
+    assert main(["-t", str(EXAMPLE_TARGET), "init", str(ws)], out=io.StringIO()) == 0
+    src = tmp_path / "fw.csv"
+    src.write_text("group,command,description\nMotor,MOTor:SPEed?,Speed in rpm\nMotor,MOTor:STOP,\n"
+                   ",*IDN?,Identify\n", encoding="utf-8")
+
+    def run(*argv):
+        out = io.StringIO()
+        return main(["-w", str(ws), *argv], out=out), out.getvalue()
+
+    assert run("commands", "import", str(src)) == (0, f"imported 3 commands in {ws}\n")
+    txt = tmp_path / "more.txt"
+    txt.write_text("# extra\n*idn?\nCONF:MODE 1\n\n", encoding="utf-8")
+    assert run("commands", "import", str(txt)) == (0, f"imported 1 commands, skipped 1 already listed in {ws}\n")
+    code, out = run("commands", "list")
+    assert out.splitlines() == ["[no group]", "  *IDN?    Identify", "  CONF:MODE 1",
+                                "[Motor]", "  MOTor:SPEed?    Speed in rpm", "  MOTor:STOP"]
+    assert run("commands", "list", "speed")[1].splitlines() == ["[Motor]", "  MOTor:SPEed?    Speed in rpm"]
+    exported = tmp_path / "out.csv"
+    assert run("commands", "export", str(exported))[0] == 0
+    assert exported.read_text(encoding="utf-8-sig").splitlines()[:2] == [
+        "command,name,group,description", "MOTor:SPEed?,,Motor,Speed in rpm"]
+    assert run("commands", "import", str(txt), "--replace")[1].startswith("imported 2 commands")
+    bad = tmp_path / "bad.csv"
+    bad.write_text("name,group\nx,y\n", encoding="utf-8")
+    assert run("commands", "import", str(bad))[0] == 1
+    # the console lists them too
+    monkeypatch.setattr("sys.stdin", io.StringIO(".commands conf\n.quit\n"))
+    address = "%s:%d" % sim.tcp_address
+    out = io.StringIO()
+    assert main(["-w", str(ws), "--tcp", address, "console"], out=out) == 0
+    assert out.getvalue().splitlines()[1:3] == ["[no group]", "  CONF:MODE 1"]
+    assert run("commands", "clear") == (0, f"removed 2 commands in {ws}\n")

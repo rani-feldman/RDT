@@ -227,6 +227,35 @@ def test_console_history_and_completion(qtbot, win):
     assert CommandHistory().items == ["MEMory:MAX?"]
 
 
+def test_console_commands_list(qtbot, win, tmp_path, monkeypatch):
+    con = win.console
+    panel = con.commands
+    src = tmp_path / "fw.csv"
+    src.write_text("command,name,group,description\nMOTor:SPEed?,Speed,Motor,rpm\n*IDN?,Identify,,\n",
+                   encoding="utf-8")
+    assert panel.import_file(src)                       # offline: the list doesn't need the link
+    assert [c.command for c in win.ws.commands] == ["MOTor:SPEed?", "*IDN?"] and win.dirty
+    assert con.entries[-1][2] == "imported 2 commands from fw.csv"
+    group = panel.tree.topLevelItem(0)
+    assert (group.text(0), group.child(0).text(0), group.child(0).toolTip(0)) == ("Motor", "MOTor:SPEed?", "rpm")
+    panel.filter.setText("ident")
+    assert panel.tree.topLevelItemCount() == 1 and panel.tree.topLevelItem(0).text(0) == "*IDN?"
+    panel.filter.clear()
+    panel._activated(panel.tree.topLevelItem(0).child(0), 0)
+    assert con.input.text() == "MOTor:SPEed?"
+    con.input.setText("mot")
+    assert con.suggestions()[0] == "MOTor:SPEed?"        # known commands feed Ctrl+Space
+    assert panel.import_file(src, replace=False) and con.entries[-1][2].endswith("skipped 2 already listed")
+    out = tmp_path / "out.csv"
+    assert panel.export_file(out) and out.read_text(encoding="utf-8-sig").count("\n") == 3
+    # kept in the workspace
+    win.save()
+    assert [c.command for c in Workspace.load(win.ws.path).commands] == ["MOTor:SPEed?", "*IDN?"]
+    monkeypatch.setattr(QMessageBox, "question", lambda *a: QMessageBox.Yes)
+    panel.clear()
+    assert win.ws.commands == [] and panel.tree.topLevelItemCount() == 0
+
+
 def test_console_transcript(qtbot, win, tmp_path, monkeypatch):
     from PySide6.QtWidgets import QPlainTextEdit
     from rdt.console import hex_to_text, text_to_hex
@@ -400,10 +429,11 @@ def test_elf_rebuild_remaps(qtbot, win, tmp_path):
 
 def test_link_down_greys_panels(qtbot, win, sim):
     connect(qtbot, win)
-    assert win.console.isEnabled()
+    assert win.console.input.isEnabled()
     win.disconnect()
     qtbot.waitUntil(lambda: win.bar.connect_button.text() == "Connect", timeout=3000)
-    assert not win.console.isEnabled()
+    assert not win.console.input.isEnabled() and not win.console.send_button.isEnabled()
+    assert win.console.commands_button.isEnabled()      # the list, search and log work offline
     assert win.bar.transport.isEnabled()
 
 

@@ -280,6 +280,10 @@ def test_serial(device):
             assert t.read_value("@motorctl:0x20000084:u32") == 500
             t.write_value("@motorctl:0x20000088:f32", 42.5)
             assert t.read_value("@motorctl:0x20000088:f32") == 42.5
+            t.send_break(50)                       # CON-10: the link still works after a break
+            assert t.read_value("@motorctl:0x20000084:u32") == 500
+            t.reconnect()                          # CON-9
+            assert t.idn.startswith("RDT,Simulator") and t.read_value("@motorctl:0x20000084:u32") == 500
 
 
 # --- sharing the link -------------------------------------------------------------------------

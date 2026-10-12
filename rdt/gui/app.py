@@ -269,6 +269,7 @@ class MainWindow(QMainWindow):
         self.chart.load(self.ws.chart)
         self.symbols.set_workspace(self.ws)
         self.memory.set_workspace(self.ws)
+        self.console.set_workspace(self.ws)
         self.set_dirty(False)
 
     @property
@@ -434,8 +435,8 @@ class MainWindow(QMainWindow):
         self.bar.state.setStyleSheet(f"color: {color}")
         self.bar.connect_button.setText(button)
         up = state == LinkState.UP
-        for w in (self.memory, self.console):
-            w.setEnabled(up)
+        self.memory.setEnabled(up)
+        self.console.set_link_up(up)
         for w in (self.bar.transport, self.bar.host, self.bar.port, self.bar.com, self.bar.baud):
             w.setEnabled(self.device.target is None and not self._connecting)
 
