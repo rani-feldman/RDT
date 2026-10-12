@@ -55,7 +55,7 @@ class Watch:
     expr: str
     display: Display = field(default_factory=Display)
     poll: str | int = "global"     # global | manual | a time in ms
-    read_only: bool = False
+    read_only: bool | None = None  # None follows the workspace's read_only default (WS-4)
     min: float | None = None       # write limits, in shown (scaled) units
     max: float | None = None
     confirm: bool = False          # ask before writing
@@ -82,8 +82,8 @@ class Watch:
         if self.poll != "global":
             d["poll"] = self.poll
         d.update(self.display.to_dict())
-        if self.read_only:
-            d["read_only"] = True
+        if self.read_only is not None:
+            d["read_only"] = self.read_only
         if self.min is not None:
             d["min"] = _num(self.min)
         if self.max is not None:
@@ -103,7 +103,7 @@ class Watch:
         poll = t.get("poll", "global")
         try:
             return cls(str(t["expr"]), Display.from_dict(t), poll if isinstance(poll, str) else int(poll),
-                       bool(t.get("read_only", False)), _opt_float(t.get("min")), _opt_float(t.get("max")),
+                       None if t.get("read_only") is None else bool(t["read_only"]), _opt_float(t.get("min")), _opt_float(t.get("max")),
                        bool(t.get("confirm", False)))
         except (TypeError, ValueError) as e:
             raise ConfigError(f"[[watch]] {t['expr']}: {e}") from None
@@ -160,6 +160,7 @@ class Workspace:
     poll_ms: int = DEFAULT_POLL_MS   # the global polling interval; 0 is off
     chart: dict = field(default_factory=dict)   # owned by the GUI's chart; kept as written
     commands: list[SavedCommand] = field(default_factory=list)   # the device's known commands (CON-7)
+    read_only: bool = False          # every item read-only unless it says otherwise (WS-4)
     path: Path | None = None
     warnings: list[str] = field(default_factory=list)   # about the file as it was loaded
 
@@ -190,7 +191,10 @@ class Workspace:
         chart = raw.get("chart", {})
         if not isinstance(chart, dict):
             raise ConfigError("[chart] must be a table")
-        ws = cls(TargetConfig.from_dict(raw, base), tabs, poll, chart, _commands_from(raw))
+        read_only = raw.get("read_only", False)
+        if not isinstance(read_only, bool):
+            raise ConfigError("read_only must be true or false")
+        ws = cls(TargetConfig.from_dict(raw, base), tabs, poll, chart, _commands_from(raw), read_only)
         if raw.get("button"):
             ws.warnings.append("command buttons are no longer supported: the [[button]] tables are ignored "
                                "and are left out when the workspace is saved")
@@ -202,6 +206,8 @@ class Workspace:
         if cfg.profile_path is not None:
             d["profile"] = _rel(cfg.profile_path, base)
         d["poll_ms"] = self.poll_ms
+        if self.read_only:
+            d["read_only"] = True
         c = cfg.connection
         conn: dict = {"transport": c.transport}
         if c.transport == "serial":
@@ -221,6 +227,8 @@ class Workspace:
                 md["elf"] = _rel(m.elf, base)
             if m.timeout_ms is not None:
                 md["timeout_ms"] = _num(m.timeout_ms)
+            if m.identity:
+                md["identity"] = m.identity
             if m.byte_order:
                 md["byte_order"] = m.byte_order
             if m.ranges:
@@ -337,6 +345,26 @@ class Workspace:
                     parent = w
         return exact, parent
 
+    def read_only_reason(self, expr: str) -> str | None:
+        """Why a write to this expression is refused by a read-only setting, or None when it may be
+        written. The item's own setting wins, then a watched struct or array it is inside, then
+        the workspace's default (WS-4)."""
+        exact, parent = self.guard_for(expr)
+        if exact is not None and exact.read_only:
+            return "read-only in the workspace"
+        if parent is not None and parent.read_only:
+            return f"read-only in the workspace (it is part of {parent.expr})"
+        if (exact is not None and exact.read_only is False) or (parent is not None and parent.read_only is False):
+            return None
+        if self.read_only:
+            return "read-only: the workspace makes every item read-only unless the item allows writes"
+        return None
+
+    def check_raw_write(self, mcu: str, addr: int) -> None:
+        """Refuse a raw memory write (no item to allow it) while the workspace is read-only."""
+        if self.read_only:
+            raise WriteRefused(f"{mcu}:0x{addr:08X}: raw writes are refused while the workspace is read-only")
+
     def add(self, w: Watch, tab: str | None = None) -> Watch:
         """Add an item to a tab (the first one by default). An item already in another tab is
         shared: the tab gets that item, with its settings."""
@@ -442,9 +470,9 @@ class Workspace:
         exact, parent = self.guard_for(expr)
         guard = exact or Watch(expr)
         name = canonical(expr)
-        if guard.read_only or (parent and parent.read_only):
-            raise WriteRefused(f"{name} is read-only in the workspace" +
-                               ("" if guard.read_only else f" (it is part of {parent.expr})"))
+        reason = self.read_only_reason(name)
+        if reason:
+            raise WriteRefused(f"{name} is {reason}")
         loc = t.resolve(name)
         if not is_scalar(loc.type):
             raise SymbolError(f"{loc.path} is a {loc.type.name}; write one field or cell at a time")

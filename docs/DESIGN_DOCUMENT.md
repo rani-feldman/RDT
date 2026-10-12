@@ -98,7 +98,7 @@ Each requirement links to its design section.
 | SYM-5 | An expression through a pointer follows the pointer when the firmware moves it | Done | [D-SYM-5](#d-sym-5-pointers) |
 | SYM-6 | Loading a large ELF is fast after the first time | Done | [D-SYM-6](#d-sym-6-symbol-cache) |
 | SYM-7 | When an ELF is rebuilt, RDT reloads it and finds every watched item again by name (2026-10-05) | Done | [D-SYM-7](#d-sym-7-elf-rebuild-detection) |
-| SYM-8 | Check on connect that each ELF matches the firmware running on its MCU | Planned | [D-SYM-8](#d-sym-8-build-identity-check) |
+| SYM-8 | Check on connect that each ELF matches the firmware running on its MCU (2026-10-12) | Done | [D-SYM-8](#d-sym-8-build-identity-check) |
 
 ### 2.6 Memory access
 
@@ -127,7 +127,7 @@ Each requirement links to its design section.
 | WS-1 | A per-item read-only flag (2026-10-05) | Done | [D-WS-1](#d-ws-1-read-only-items) |
 | WS-2 | Per-item minimum and maximum, checked before every write (2026-10-05) | Done | [D-WS-2](#d-ws-2-limits) |
 | WS-3 | An optional confirm before writing (2026-10-05) | Done | [D-WS-3](#d-ws-3-confirm-before-writing) |
-| WS-4 | A global setting that makes every item read-only by default | Planned | [D-WS-4](#d-ws-4-global-read-only-default) |
+| WS-4 | A global setting that makes every item read-only by default (2026-10-12) | Done | [D-WS-4](#d-ws-4-global-read-only-default) |
 
 ### 2.9 Polling
 
@@ -180,7 +180,7 @@ Each requirement links to its design section.
 | --- | --- | --- | --- |
 | WSP-1 | One workspace file holds the connection, the SCPI profile, the MCUs and their ELFs, the watch tabs with every item's settings, and the chart layout (2026-10-05) | Done | [D-WSP-1](#d-wsp-1-workspace-file) |
 | WSP-2 | Workspaces from older versions still open | Done | [D-WSP-2](#d-wsp-2-older-workspaces) |
-| WSP-3 | The last workspace reopens when the GUI starts | Planned | [D-WSP-3](#d-wsp-3-reopen-last-workspace) |
+| WSP-3 | The last workspace reopens when the GUI starts (2026-10-12) | Done | [D-WSP-3](#d-wsp-3-reopen-last-workspace) |
 
 ### 2.15 Command line and API
 
@@ -566,7 +566,14 @@ Reading DWARF takes a while for a large firmware, so the symbol table is cached 
 
 #### D-SYM-8 Build identity check
 
-Planned, not built. The plan is as follows. The ELF's GNU build ID (`.note.gnu.build-id`) is placed in a known firmware variable at compile time. On connect, RDT reads that variable on each MCU and compares it with its ELF. On a mismatch, RDT warns and refuses typed writes unless the user overrides. Without a build ID, it compares a CRC over a configured address range instead. This needs a firmware convention that does not exist yet.
+RDT compares a few bytes that differ between firmware builds, read from the device and from the ELF file. `Target.check_identity()` in `rdt/target.py` does it; helpers `elf_bytes` and `build_id_note` are in `rdt/memmap.py`.
+
+- **What is compared:** each MCU's `identity` setting names a constant variable, such as a version string or a build-ID array (`identity = "firmware_name"` in `[[mcu]]`). Its bytes are taken from the ELF file's section data at the variable's address and read from the device. Without the setting, RDT uses the GNU build ID (`.note.gnu.build-id`) when the linker placed it in the firmware's memory (an allocated section). Without either, the MCU is not checked. This replaces the earlier plan of a CRC over an address range: a constant variable needs no new firmware command (FW-10).
+- **When:** on connect, on `.reconnect` (the firmware may have been flashed), after an ELF is rebuilt and reloaded (D-SYM-7), and from Target > Check ELF identity.
+- **Results:** `match`, `mismatch`, `unchecked` (nothing to compare, an unknown variable, or a variable with no value in the file, such as one in `.bss`) and `unread` (the MCU did not answer). Only `mismatch` has an effect.
+- **On a mismatch:** every write to that MCU, typed or raw, is refused with `WriteRefused` naming both values (`device 'rdt-main', ELF 'rdt-mXin'`). Reads still work. The user can allow writes anyway: Target > Allow writes despite ELF mismatch in the GUI, `--allow-mismatch` on the CLI, `Target.allow_mismatch(mcu)` from Python. The permission lasts until the next check.
+- **Shown:** in the GUI, each result is a console line and a mismatch also goes to the status bar in red. On the CLI, a mismatch is a warning on stderr, `rdt info` prints each MCU's result, and `rdt watch` prints a `#` line when a rebuilt ELF does not match.
+- **Editing:** the GUI's MCU dialog has an Identity variable column. The example workspace and target file check `firmware_name` on MCU `main`.
 
 ### 4.6 Memory access
 
@@ -659,7 +666,11 @@ The write guard lives in `Workspace.write` (`rdt/workspace.py`). It is used by t
 
 #### D-WS-4 Global read-only default
 
-Planned, not built. A workspace setting would make every item read-only unless the item itself says otherwise.
+`read_only = true` at the top of the workspace makes every item read-only unless the item itself says `read_only = false`. `Workspace.read_only_reason()` in `rdt/workspace.py` decides, in this order: the item's own `read_only = true`, then a watched struct or array it is inside that is read-only (D-WS-1), then an item or parent with `read_only = false` (writable), then the workspace default. An item without the key follows the default, so `read_only` on an item has three states: true, false, or not set.
+
+- **Raw writes:** with the default on, writes with no item behind them are refused too: an expression that is not watched, the GUI's memory view, and `rdt poke`. SCPI commands typed in the console are not checked, since RDT cannot know what they do.
+- **GUI:** Watch > All items read-only turns it on and off, and greys the values on the next read. The item settings dialog offers Workspace default, Read-only or Writable.
+- **CLI:** `rdt read-only on|off` sets it and `rdt read-only` shows it; `rdt add EXPR --no-read-only` lets one item be written; `rdt list` mentions the default when it is on.
 
 ### 4.9 Polling
 
@@ -839,15 +850,17 @@ A workspace (`.rdtw`, TOML, `rdt/workspace.py`) is a target file plus everything
 ```toml
 profile = "fw_profile.toml"   # or an inline [scpi] table
 poll_ms = 500                 # global polling interval; 0 = off
+read_only = false             # true: every item read-only unless it says read_only = false (D-WS-4)
 
 [connection]
 transport = "tcp"             # tcp | udp | serial
 address   = "192.168.1.20:5025"
 
 [[mcu]]
-id   = 0
-name = "main"
-elf  = "build/main.elf"
+id       = 0
+name     = "main"
+elf      = "build/main.elf"
+identity = "firmware_version" # compared with the ELF on connect (D-SYM-8)
 
 [[tab]]
 name = "Motor"
@@ -860,7 +873,7 @@ name = "Motor"
   scale     = 0.5
   offset    = 0
   unit      = "rpm"
-  read_only = false
+  read_only = false           # true, false, or left out to follow the workspace
   min       = 0               # write limits, in shown units
   max       = 3000
   confirm   = true
@@ -883,7 +896,7 @@ Every key in a `[[tab.watch]]` except `expr` is optional. Saving rewrites the wh
 
 #### D-WSP-3 Reopen last workspace
 
-Planned, not built. The GUI would remember the last workspace in the user settings and open it when started with no file.
+The GUI remembers the last workspace file it opened or saved, in `gui.ini` next to the console history (`%LOCALAPPDATA%\rdt` on Windows), and opens it when `rdt-gui` starts with no file named. A file given on the command line wins. If the remembered file is gone, the GUI starts with a new workspace and says so in the status bar. A target file (`.toml`) opened as a new workspace is not remembered, since it is not a workspace. Code: `MainWindow.remember()` and `reopen_last()` in `rdt/gui/app.py`.
 
 ### 4.15 Command line and API
 
@@ -1048,6 +1061,7 @@ The firmware side is not written yet; rani adds it to the existing firmware late
 | FW-7 | Every address and length is checked against a region table built from the linker script; peripherals are excluded unless added on purpose; read and write permissions are separate. A bad request must never fault the MCU |
 | FW-8 | Optional: a size query (`MEMory:MAX?`) returning the largest read the firmware accepts |
 | FW-9 | The memory commands compile in only when `RDT_ENABLE` is defined, and the LAN listener is off unless the integrator enables it |
+| FW-10 | Recommended: a constant variable that changes with every build, such as a version string or a copy of the build ID, kept in flash, so RDT can check the ELF matches (D-SYM-8). Linking with `--build-id` and keeping `.note.gnu.build-id` in an allocated section also works |
 
 Recommended shape, which the simulator and the default profile use:
 
@@ -1092,6 +1106,7 @@ Budgets for the firmware part, to check once it exists:
 - **Scheduler and workspace tests** (`tests/test_scheduler.py`, `test_workspace.py`): block planning, peripheral ranges, fallback to item-by-item reads, tabs, shared items, older files, scaling and write safety.
 - **Console tests** (`tests/test_console.py`, console tests in `test_host_cli.py` and `test_gui.py`): the saved history shared by two consoles, its limit and an unwritable file, Up and Down with the draft, completion order, the session log format, hex and text conversion, reading, merging and saving known commands, `rdt console --timestamps`, `--log`, `.history`, `!N`, `.commands`, `.info`, `.reconnect` and `.break`, `rdt commands`, `send --expect`, a break and reconnect over a serial pseudo-terminal, and in the GUI Ctrl+Space, the history dialog, the commands panel, colours, timestamps, search, Ctrl+K, text size, wrap and the shortcuts list.
 - **GUI tests** (`tests/test_gui.py`): pytest-qt drives the window against the simulator, offscreen. They cover connect, watch tabs, editing, the chart, statistics, the CSV log and the console.
+- **M5 tests** (`tests/test_identity.py`, the read-only default tests in `test_workspace.py`, and in `test_gui.py`): a matching ELF, a copy of the ELF with another version string (writes refused, then allowed, then refused again after reconnect), an unknown or `.bss` identity variable, a silent MCU, `--allow-mismatch`; the read-only default's order of rules, saving it, `rdt read-only`, refused raw writes; reopening the last workspace, including a moved and a deleted file.
 
 Later, with the firmware: region-boundary tests on the target, and measuring the round trip against FW budgets on real hardware.
 
@@ -1105,7 +1120,7 @@ Later, with the firmware: region-boundary tests on the target, and measuring the
 | M3 | Symbols by name (PR #9), workspace (PR #10), GUI (PR #12) | Done 2026-10-11 |
 | M4 | Poll scheduler, live chart, statistics, CSV log (PR #14); watch tabs and removing command buttons (PR #16) | Done 2026-10-11 |
 | Console | Console features from ComPort-Zone, CON-1 to CON-12 | Done 2026-10-12 |
-| M5 | Build-ID check (SYM-8), global read-only default (WS-4), reopen last workspace (WSP-3) | Planned |
+| M5 | ELF identity check (SYM-8), global read-only default (WS-4), reopen last workspace (WSP-3) | Done 2026-10-12 |
 | M6 | Installer and packaged documentation | Planned |
 | Later | Firmware memory commands on real hardware; binary protocol (RM-4) | Waiting on firmware |
 
@@ -1138,6 +1153,7 @@ The application is built against the simulator. As soon as the firmware has the 
 | 2026-10-12 | The full design document lives in the repository as this file, organised by requirement; DESIGN.md removed |
 | 2026-10-12 | Console features from ComPort-Zone: saved history, autocomplete, timestamps and colours, search, session log, hex/text conversion (CON-1 to CON-6). Scripts and multi-line paste declined |
 | 2026-10-12 | Second round from ComPort-Zone: a list of known commands kept in the workspace and imported from CSV or text, `send --expect`, `.reconnect` and `.info`, serial break, text size and wrap, a shortcuts list (CON-7 to CON-12). Running a file and several console tabs declined |
+| 2026-10-12 | M5 built: ELF identity check by a constant variable or the GNU build ID, a mismatch refuses writes until allowed (SYM-8); the workspace's read-only default, which also refuses raw writes (WS-4); the GUI reopens the last workspace (WSP-3) |
 
 ## 9. Appendix: binary protocol (planned)
 

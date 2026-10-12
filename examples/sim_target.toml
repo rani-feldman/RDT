@@ -15,6 +15,7 @@ address   = "127.0.0.1:5025" # HOST:PORT for tcp and udp
 id   = 0                     # MCU 0 is the main MCU, which owns the link
 name = "main"
 elf  = "../sim/examples/firmware/main.elf"
+identity = "firmware_name"   # compared with the firmware on connect (SYM-8)
 
   [[mcu.ranges]]             # memory with no ELF section behind it; never merged into other reads
   name  = "GPIOA"

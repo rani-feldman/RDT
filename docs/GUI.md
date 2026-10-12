@@ -8,6 +8,8 @@ python -m sim &                          # the simulated device
 rdt-gui examples/sim_bench.rdtw          # or: python -m rdt.gui examples/sim_bench.rdtw
 ```
 
+Started with no file, `rdt-gui` reopens the workspace you last opened or saved. If that file is gone, it starts with a new workspace.
+
 ![RDT main window connected to the simulator](images/gui-main.png)
 
 ## Connection bar
@@ -18,7 +20,9 @@ rdt-gui examples/sim_bench.rdtw          # or: python -m rdt.gui examples/sim_be
 - **Poll**: the global polling interval. `Off` (0) stops polling; items set to their own interval still poll.
 - **Log CSV** (Ctrl+L): log every watched value to a CSV file. See [CSV log](#csv-log).
 
-**Target > MCUs and ELF files** sets each MCU's id, name, ELF file and timeout. MCU 0 is the main MCU and is required.
+**Target > MCUs and ELF files** sets each MCU's id, name, ELF file, timeout and identity variable. MCU 0 is the main MCU and is required.
+
+**ELF identity.** On connect, RDT compares each MCU's identity variable (a constant that changes with every build, such as a version string; or the GNU build ID when the linker put it in memory) on the device with its ELF file, and notes the result in the console. When they differ, the status bar says so in red and every write to that MCU is refused, so a stale ELF can't write to the wrong address. **Target > Allow writes despite ELF mismatch** lets writes through until the next check. **Target > Check ELF identity** checks again, such as after flashing; it also runs after an ELF is rebuilt.
 
 ## Variable view
 
@@ -55,11 +59,11 @@ Polling: each item is read at the global interval, at its own interval, or only 
 
 Double-click a value (or right-click > **Write...**), type the new value, and press Enter. Type it in the item's units: with `scale = 0.001` and unit `A`, typing `1.25` writes 1250. Enums take their names (`MODE_RUN`), and `char` arrays take a string. Every write is confirmed by reading the value back.
 
-The workspace's write safety applies: read-only items can't be edited, values outside `min`..`max` are refused with a message in the status bar, and items with `confirm` ask first. A struct marked read-only or confirm makes its fields read-only or confirm-first too.
+The workspace's write safety applies: read-only items can't be edited, values outside `min`..`max` are refused with a message in the status bar, and items with `confirm` ask first. A struct marked read-only or confirm makes its fields read-only or confirm-first too. **Watch > All items read-only** makes every item read-only unless its settings say Writable, and also refuses edits in the memory view.
 
 ### Item settings
 
-Right-click a top-level item for **Format** (dec, hex, bin, char) and **Settings...**, which sets the fixed-point format (`Q15`, `Q31`, `Q3.12`), scale, offset and unit (shown = raw / 2^q × scale + offset), polling (global, manual or a time in ms), and the write safety (read-only, minimum, maximum, ask before writing).
+Right-click a top-level item for **Format** (dec, hex, bin, char) and **Settings...**, which sets the fixed-point format (`Q15`, `Q31`, `Q3.12`), scale, offset and unit (shown = raw / 2^q × scale + offset), polling (global, manual or a time in ms), and the write safety (read-only: Workspace default, Read-only or Writable; minimum, maximum, ask before writing).
 
 ### ELF rebuilds
 

@@ -19,7 +19,7 @@ from PySide6.QtWidgets import (
 
 from ..console import (CommandHistory, SessionLog, completions, hex_to_text, history_path, merge_commands, read_commands,
                        text_to_hex, write_commands)
-from ..errors import CommandTimeout, ConfigError, LinkDown, RdtError
+from ..errors import CommandTimeout, ConfigError, LinkDown, RdtError, WriteRefused
 from ..profile import DATA_FORMATS, Profile, parse_int
 from ..target import McuConfig, Target
 from ..workspace import Workspace
@@ -766,6 +766,12 @@ class MemoryView(QWidget):
             self.read()
             return
         mcu = self._shown_mcu
+        try:
+            self.main.ws.check_raw_write(mcu, addr)
+        except WriteRefused as e:
+            self.main.status(str(e), error=True)
+            self.read()
+            return
 
         def done(_):
             self.main.status(f"{mcu}:0x{addr:08X} = 0x{value:02X}")
@@ -927,14 +933,14 @@ class ProfileDialog(QDialog):
 
 
 class McuDialog(QDialog):
-    """The target's MCUs: id, name, ELF file and timeout. MCU 0 is the main MCU."""
+    """The target's MCUs: id, name, ELF file, timeout and identity variable. MCU 0 is the main MCU."""
 
-    COLS = ("Id", "Name", "ELF file", "Timeout ms")
+    COLS = ("Id", "Name", "ELF file", "Timeout ms", "Identity variable")
 
     def __init__(self, mcus: list[McuConfig], parent=None):
         super().__init__(parent)
         self.setWindowTitle("MCUs and ELF files")
-        self.resize(640, 260)
+        self.resize(760, 260)
         self.originals = {m.id: m for m in mcus}
         layout = QVBoxLayout(self)
         self.table = QTableWidget(0, len(self.COLS))
@@ -942,7 +948,10 @@ class McuDialog(QDialog):
         self.table.horizontalHeader().setSectionResizeMode(2, QHeaderView.Stretch)
         layout.addWidget(self.table)
         for m in mcus:
-            self._add_row(m.id, m.name, str(m.elf or ""), "" if m.timeout_ms is None else f"{m.timeout_ms:g}")
+            self._add_row(m.id, m.name, str(m.elf or ""), "" if m.timeout_ms is None else f"{m.timeout_ms:g}",
+                          m.identity or "")
+        self.table.horizontalHeaderItem(4).setToolTip(
+            "A constant variable, such as a version string or build ID, compared with the ELF on connect")
         row = QHBoxLayout()
         for text, slot in (("Add MCU", self._add), ("Remove", self._remove), ("Browse ELF...", self._browse)):
             b = QPushButton(text)
@@ -955,10 +964,10 @@ class McuDialog(QDialog):
         buttons.rejected.connect(self.reject)
         layout.addWidget(buttons)
 
-    def _add_row(self, mcu_id: int, name: str, elf: str, timeout: str) -> None:
+    def _add_row(self, mcu_id: int, name: str, elf: str, timeout: str, identity: str = "") -> None:
         r = self.table.rowCount()
         self.table.insertRow(r)
-        for c, text in enumerate((str(mcu_id), name, elf, timeout)):
+        for c, text in enumerate((str(mcu_id), name, elf, timeout, identity)):
             self.table.setItem(r, c, QTableWidgetItem(text))
 
     def _add(self) -> None:
@@ -990,7 +999,7 @@ class McuDialog(QDialog):
     def result_mcus(self) -> list[McuConfig]:
         out = []
         for r in range(self.table.rowCount()):
-            text = [self.table.item(r, c).text().strip() if self.table.item(r, c) else "" for c in range(4)]
+            text = [self.table.item(r, c).text().strip() if self.table.item(r, c) else "" for c in range(5)]
             try:
                 mcu_id = int(text[0])
             except ValueError:
@@ -1001,7 +1010,8 @@ class McuDialog(QDialog):
             timeout = float(text[3]) if text[3] else None
             old = self.originals.get(mcu_id)
             base = old if old is not None else McuConfig(mcu_id, text[1])
-            out.append(replace(base, id=mcu_id, name=text[1], elf=elf, timeout_ms=timeout))
+            out.append(replace(base, id=mcu_id, name=text[1], elf=elf, timeout_ms=timeout,
+                               identity=text[4] or None))
         ids = [m.id for m in out]
         if 0 not in ids:
             raise ConfigError("MCU 0, the main MCU, is required")
