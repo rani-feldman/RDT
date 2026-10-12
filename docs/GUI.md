@@ -111,9 +111,14 @@ Type any SCPI command and press Enter. Because the firmware sends nothing back w
 - **Autocomplete.** Ctrl+Space suggests commands that start with (then contain) what you typed: your history first, newest first, then the known commands, the profile's own commands (read, write, error, size and probe queries) and the common IEEE 488.2 commands (`*IDN?`, `*RST`, `*CLS`, `*OPC?` ...). A single match is filled in at once.
 - **Transcript.** Each line starts with its time to the millisecond (**Timestamps** hides it). Commands sent are green, replies in the normal text colour, errors (no reply, link down) red, and RDT's notes (connected, link down, reconnecting, sent with no reply expected) grey.
 - **Search.** Ctrl+F opens a find bar under the transcript. Every match is highlighted, the counter shows which one you are on (`3 of 12`), Enter and Shift+Enter go to the next and previous match, and Esc closes it. Ctrl+K clears the transcript, like **Clear**.
+- **Text size and wrap.** Ctrl+= and Ctrl+- (or Ctrl+mouse wheel over the transcript) make the console text larger or smaller, and Ctrl+0 resets it. **Wrap** wraps long lines; off (the default), they scroll sideways. Both are remembered for next time.
 - **Send break.** On a COM port link, the transcript's right-click menu has **Send break (250 ms)**, for firmware that resets its parser on a break.
 - **Hex and text.** Select part of the transcript and right-click: **Selection as hex** shows its bytes (`Hi` is `48 69`), and **Hex selection as text** turns hex such as `48656C6C6F`, `48 65 6C` or `0x48,0x65` back into text (`Hello`), with any non-printable byte as `\xNN`. The result opens in a small window with **Copy**.
 - **Log to file.** Asks for a text file and appends every console line to it, with its date and time and a mark: `>` sent, `<` reply, `!` error, `#` note. Click again to stop. The file is appended to, never overwritten. This is separate from the CSV value log.
+
+## Keyboard shortcuts
+
+**Help > Keyboard shortcuts** (F1) lists every shortcut in the menus and the console in one table.
 
 ## SCPI profile editor
 

@@ -9,7 +9,7 @@ from dataclasses import fields, replace
 from datetime import datetime
 from pathlib import Path
 
-from PySide6.QtCore import QEvent, QObject, QStringListModel, Qt, QTimer
+from PySide6.QtCore import QEvent, QObject, QSettings, QStringListModel, Qt, QTimer
 from PySide6.QtGui import QColor, QFont, QFontDatabase, QKeySequence, QShortcut, QTextCharFormat, QTextCursor
 from PySide6.QtWidgets import (
     QAbstractItemView, QApplication, QCheckBox, QComboBox, QCompleter, QDialog, QDialogButtonBox, QFileDialog, QFormLayout, QHBoxLayout,
@@ -17,7 +17,7 @@ from PySide6.QtWidgets import (
     QSplitter, QTableWidgetItem, QTextEdit, QToolButton, QTreeWidget, QTreeWidgetItem, QVBoxLayout, QWidget,
 )
 
-from ..console import (CommandHistory, SessionLog, completions, hex_to_text, merge_commands, read_commands,
+from ..console import (CommandHistory, SessionLog, completions, hex_to_text, history_path, merge_commands, read_commands,
                        text_to_hex, write_commands)
 from ..errors import CommandTimeout, ConfigError, LinkDown, RdtError
 from ..profile import DATA_FORMATS, Profile, parse_int
@@ -28,6 +28,19 @@ from .device import describe_error
 BYTES_PER_ROW = 16
 TRANSCRIPT_LINES = 5000
 MAX_MATCHES = 1000
+FONT_MIN, FONT_MAX = 6, 32   # console font size, in points
+# Console keys for Help > Keyboard shortcuts (CON-12); keep in step with the bindings in Console.
+CONSOLE_KEYS = [
+    ("Enter", "Send the command"),
+    ("Up / Down", "Walk the command history"),
+    ("Ctrl+Space", "Complete the command"),
+    ("Ctrl+F", "Find in the transcript"),
+    ("Enter / Shift+Enter", "Next / previous match, in the find bar"),
+    ("Esc", "Close the find bar"),
+    ("Ctrl+K", "Clear the transcript"),
+    ("Ctrl+= / Ctrl+- / Ctrl+wheel", "Larger / smaller console text"),
+    ("Ctrl+0", "Default console text size"),
+]
 # Console line colours; a reply keeps the theme's text colour so it reads on light and dark themes.
 LINE_COLORS = {"tx": "#2e9d4f", "rx": None, "error": "#d64545", "note": "#888888"}
 
@@ -246,6 +259,9 @@ class Console(QWidget):
         self.output = QPlainTextEdit(readOnly=True)
         self.output.setFont(mono())
         self.output.setMaximumBlockCount(TRANSCRIPT_LINES)
+        # per-user view settings (CON-11), next to the console history
+        self.settings = QSettings(str(history_path().parent / "console.ini"), QSettings.IniFormat)
+        self.output.viewport().installEventFilter(self)
         self.output.setContextMenuPolicy(Qt.CustomContextMenu)
         self.output.customContextMenuRequested.connect(self._context_menu)
         self.commands = CommandsPanel(self)
@@ -289,17 +305,52 @@ class Console(QWidget):
         self.timestamps.setToolTip("Show the time of every line, to the millisecond")
         self.timestamps.setChecked(True)
         self.timestamps.toggled.connect(self.rerender)
+        self.wrap = QCheckBox("Wrap")
+        self.wrap.setToolTip("Wrap long lines; off, they scroll sideways")
+        self.wrap.setChecked(self.settings.value("wrap", False, type=bool))
+        self.wrap.toggled.connect(self.set_wrap)
         self.log_button = QPushButton("Log to file")
         self.log_button.setCheckable(True)
         self.log_button.setToolTip("Append every console line, with date and time, to a text file")
         self.log_button.clicked.connect(self._toggle_log)
         self.session_log: SessionLog | None = None
         row.addWidget(self.input, 1)
-        for b in (send, self.commands_button, history, errors, clear, self.timestamps, self.log_button):
+        for b in (send, self.commands_button, history, errors, clear, self.timestamps, self.wrap, self.log_button):
             row.addWidget(b)
         layout.addLayout(row)
-        for keys, slot in (("Ctrl+F", self.show_find), ("Ctrl+K", self.clear)):
+        for keys, slot in (("Ctrl+F", self.show_find), ("Ctrl+K", self.clear), ("Ctrl+=", lambda: self.zoom(1)),
+                           ("Ctrl++", lambda: self.zoom(1)), ("Ctrl+-", lambda: self.zoom(-1)),
+                           ("Ctrl+0", lambda: self.set_font_size(mono().pointSize()))):
             QShortcut(QKeySequence(keys), self, slot, context=Qt.WidgetWithChildrenShortcut)
+        self.set_font_size(self.settings.value("font_size", mono().pointSize(), type=int))
+        self.set_wrap(self.wrap.isChecked())
+
+    # --- font size and wrap ------------------------------------------------------------------
+
+    def eventFilter(self, obj, event) -> bool:
+        if (event.type() == QEvent.Wheel and obj is self.output.viewport()
+                and event.modifiers() & Qt.ControlModifier):
+            self.zoom(1 if event.angleDelta().y() > 0 else -1)
+            return True
+        return super().eventFilter(obj, event)
+
+    def font_size(self) -> int:
+        return self.output.font().pointSize()
+
+    def zoom(self, step: int) -> None:
+        self.set_font_size(self.font_size() + step)
+
+    def set_font_size(self, size: int) -> None:
+        size = max(FONT_MIN, min(FONT_MAX, size))
+        for w in (self.output, self.input):
+            f = w.font()
+            f.setPointSize(size)
+            w.setFont(f)
+        self.settings.setValue("font_size", size)
+
+    def set_wrap(self, on: bool) -> None:
+        self.output.setLineWrapMode(QPlainTextEdit.WidgetWidth if on else QPlainTextEdit.NoWrap)
+        self.settings.setValue("wrap", on)
 
     # --- hex and text ------------------------------------------------------------------------
 

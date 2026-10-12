@@ -256,6 +256,42 @@ def test_console_commands_list(qtbot, win, tmp_path, monkeypatch):
     assert win.ws.commands == [] and panel.tree.topLevelItemCount() == 0
 
 
+def test_console_font_and_wrap(qtbot, win, tmp_path):
+    from PySide6.QtCore import QPoint, QPointF
+    from PySide6.QtGui import QWheelEvent
+    from PySide6.QtWidgets import QPlainTextEdit
+    from rdt.gui.panels import Console, FONT_MAX
+    con = win.console
+    assert con.output.lineWrapMode() == QPlainTextEdit.NoWrap     # off by default
+    size = con.font_size()
+    con.zoom(2)
+    assert con.font_size() == size + 2 and con.input.font().pointSize() == size + 2
+    wheel = QWheelEvent(QPointF(5, 5), QPointF(5, 5), QPoint(0, 0), QPoint(0, -120), Qt.NoButton,
+                        Qt.ControlModifier, Qt.NoScrollPhase, False)
+    assert con.eventFilter(con.output.viewport(), wheel)
+    assert con.font_size() == size + 1
+    con.set_font_size(100)
+    assert con.font_size() == FONT_MAX
+    con.wrap.setChecked(True)
+    assert con.output.lineWrapMode() == QPlainTextEdit.WidgetWidth
+    # remembered for the next console, per user
+    con.set_font_size(11)
+    other = Console(win)
+    assert other.font_size() == 11 and other.wrap.isChecked()
+    assert (tmp_path / "console.ini").exists()
+
+
+def test_keyboard_shortcuts(qtbot, win):
+    rows = win.shortcut_rows()
+    assert ("Target", "Connect or disconnect", "F5") in rows
+    assert ("Watch", "Add selected to chart", "Ctrl+G") in rows
+    assert ("Console", "Complete the command", "Ctrl+Space") in rows
+    dlg = win.show_shortcuts()
+    from PySide6.QtWidgets import QTableWidget
+    assert dlg.findChild(QTableWidget).rowCount() == len(rows)
+    dlg.close()
+
+
 def test_console_transcript(qtbot, win, tmp_path, monkeypatch):
     from PySide6.QtWidgets import QPlainTextEdit
     from rdt.console import hex_to_text, text_to_hex
