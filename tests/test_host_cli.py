@@ -77,7 +77,7 @@ def test_dump_and_poke(sim):
 
 def test_send_and_errors(sim):
     assert rdt(sim, "send", "*IDN?")[1].startswith("RDT,Simulator")
-    code, out = rdt(sim, "send", "MEM:READ?", "0,0x30000000,4")
+    code, out = rdt(sim, "send", "MEM:READ?", "0,30000000,4")
     assert code == 1 and out.startswith('(no reply; error queue: -222,"Data out of range')
     rdt(sim, "send", "FOO", "1")
     rdt(sim, "send", "BAR", "2")

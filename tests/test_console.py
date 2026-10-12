@@ -61,14 +61,14 @@ def test_profile_commands():
 
 
 def test_completions():
-    history = ["MEMory:READ? 0,0x20000000,4", "*IDN?", "CONF:MODE 2"]
+    history = ["MEMory:READ? 0,20000000,4", "*IDN?", "CONF:MODE 2"]
     found = completions("", history, Profile())
     # history newest first, then the profile, then common commands; no duplicates
-    assert found[:3] == ["CONF:MODE 2", "*IDN?", "MEMory:READ? 0,0x20000000,4"]
+    assert found[:3] == ["CONF:MODE 2", "*IDN?", "MEMory:READ? 0,20000000,4"]
     assert found.count("*IDN?") == 1 and len(found) <= 20
     assert "SYSTem:ERRor?" in found and "*RST" in found
     # case-insensitive; prefix matches before matches inside the command
-    assert completions("mem", history, Profile()) == ["MEMory:READ? 0,0x20000000,4", "MEMory:READ? ",
+    assert completions("mem", history, Profile()) == ["MEMory:READ? 0,20000000,4", "MEMory:READ? ",
                                                       "MEMory:WRITE "]
     assert completions("err", [], Profile()) == ["SYSTem:ERRor?"]
     assert completions("*", [], None) == list(COMMON_COMMANDS[:-1])

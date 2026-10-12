@@ -251,6 +251,8 @@ time,seconds,main:motor.speed [rpm],main:motor.mode,main:tick_count,event
 
 ## SCPI profile
 
+In every command, `{addr}` and `{value}` are written in bare upper-case hex with no prefix: address `0x11AABBCCDD` is sent as `11AABBCCDD`, and a float 1.5 as its bit pattern `3FC00000`. A template may pad them, as in `{addr:08X}`, but not change the base. A read reply must be the bytes in bare hex, lowest address first (`0000C03F`); a reply with a prefix such as `0x` is refused. Older profiles may still have `addr_format`, `value_format`, `data_format` or `size_query`; they are ignored.
+
 The profile is the same `[scpi]` table the simulator reads ([`default_profile.toml`](../sim/examples/default_profile.toml)); see [D-SCPI-1](DESIGN_DOCUMENT.md#d-scpi-1-scpi-profile) in the design. The host also reads these keys, which the simulator ignores:
 
 | Key | Default | Meaning |
@@ -258,7 +260,7 @@ The profile is the same `[scpi]` table the simulator reads ([`default_profile.to
 | `timeout_ms` | 500 | How long to wait for a reply |
 | `retries` | 2 | Extra attempts after a read times out, with a growing delay |
 | `probe` | `"*IDN?"` | Sent on connect and reconnect to check that the device answers. Empty to skip |
-| `reply_regex` | none | For a read reply the fixed formats can't describe; the group named `data` (or group 1) is decoded with `data_format` |
+| `reply_regex` | none | For a read reply with text around the data; the group named `data` (or group 1) holds the bare hex bytes |
 | `byte_order` | `little` | Used for an MCU without an ELF |
 
 A profile may also list `[[ranges]]` that apply to every MCU, or to one MCU with `mcu = "name"`.

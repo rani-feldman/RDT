@@ -126,20 +126,25 @@ def test_max_response_comes_from_the_profile_only(two_mcus):
             assert len(t.read("main", 0x20000000, 236)) == 236   # 8 reads, none over 32 bytes
 
 
-@pytest.mark.parametrize("fmt", ["hex", "bytes_csv", "decimal", "ieee_block"])
-def test_every_reply_format(two_mcus, fmt):
-    dev = Device(two_mcus, SimProfile(data_format=fmt))
+def test_addresses_values_and_replies_are_bare_hex(two_mcus):
+    dev = Device(two_mcus)
     with Simulator(dev, TransportConfig(tcp="127.0.0.1:0", udp=None)) as s:
-        with make_target("tcp", s.tcp_address, Profile(data_format=fmt, timeout_ms=300)) as t:
+        t = make_target("tcp", s.tcp_address)
+        sent = []
+        send = t.session.protocol.send
+        t.session.protocol.send = lambda command: (sent.append(command), send(command))[1]
+        with t:
             data = bytes([0x0A, 0x0D, 0x23, 0x00, 0x0A, 0x31])   # newline, CR and '#' inside the data
             t.write("main", 0x20000024, data)
             assert t.read("main", 0x20000024, 6) == data
             assert t.read_value("@main:0x20000000:f32") == 1.5
+        assert "MEMory:WRITE 0,20000024,230D0A,4" in sent      # bytes 0A 0D 23 00, little endian
+        assert "MEMory:READ? 0,20000024,6" in sent
+        assert not any("0x" in c for c in sent)
 
 
 def test_user_defined_commands(two_mcus):
-    p = dict(read="RD? {mcu},{addr},{len}", write="WR {mcu},{addr},{value},{size}",
-             addr_format="{addr:X}", value_format="{value:X}")
+    p = dict(read="RD? {mcu},{addr},{len}", write="WR {mcu},{addr},{value},{size}")
     dev = Device(two_mcus, SimProfile(**p))
     with Simulator(dev, TransportConfig(tcp="127.0.0.1:0", udp=None)) as s:
         with make_target("tcp", s.tcp_address, Profile(**p, timeout_ms=300)) as t:
@@ -303,9 +308,9 @@ def test_another_scpi_client_on_the_same_device(sim):
         with socket.create_connection(sim.tcp_address, timeout=2) as sock:
             f = sock.makefile("rwb")
             while not stop.is_set():
-                f.write(b"MEM:READ? 1,0x20000084,4\n")
+                f.write(b"MEM:READ? 1,20000084,4\n")
                 f.write(b"BOGUS:CMD 1\n")                      # fails: no reply, error queued
-                f.write(b"MEM:READ? 0,0x7FFFFFF0,4\n")          # fails: no reply, error queued
+                f.write(b"MEM:READ? 0,7FFFFFF0,4\n")          # fails: no reply, error queued
                 f.write(b"SYST:ERR?\n")                         # may pop RDT's error, or its own
                 f.flush()
                 for expect in (b"F4010000", None):

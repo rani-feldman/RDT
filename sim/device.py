@@ -13,7 +13,7 @@ from collections import deque
 
 from .mcu import Mcu
 from .memory import MemoryFault
-from .profile import CommandPattern, Profile, int_base_for, parse_int
+from .profile import CommandPattern, Profile, parse_hex, parse_int
 
 log = logging.getLogger("sim")
 
@@ -66,8 +66,6 @@ class Device:
         self.lock = threading.Lock()
 
         p = self.profile
-        self._addr_base = int_base_for(p.addr_format, "addr")
-        self._value_base = int_base_for(p.value_format, "value")
         # (template, handler, replies). Profile templates come first, so a user command wins over
         # a built-in with the same header. The read always replies, even if its header has no "?".
         commands = [
@@ -137,6 +135,13 @@ class Device:
         except (ValueError, KeyError):
             raise _data_type(f"{name}={args.get(name)!r}") from None
 
+    def _hex(self, args: dict, name: str) -> int:
+        """An address or value: bare hex with no prefix, as the firmware takes it."""
+        try:
+            return parse_hex(args[name])
+        except (ValueError, KeyError):
+            raise _data_type(f"{name}={args.get(name)!r} is not bare hex") from None
+
     def _mcu(self, args: dict) -> Mcu:
         mcu = self.mcus.get(self._int(args, "mcu"))
         if mcu is None:
@@ -153,7 +158,7 @@ class Device:
 
     def _read(self, args: dict) -> bytes:
         mcu = self._mcu(args)
-        addr = self._int(args, "addr", self._addr_base)
+        addr = self._hex(args, "addr")
         size = self._int(args, "len")
         if size < 1:
             raise _illegal_value(f"len={size}")
@@ -164,19 +169,19 @@ class Device:
             data = mcu.read(addr, size)
         except MemoryFault as e:
             raise _out_of_range(str(e)) from None
-        return encode_data(data, self.profile.data_format)
+        return encode_data(data)
 
     def _write(self, args: dict) -> None:
         mcu = self._mcu(args)
-        addr = self._int(args, "addr", self._addr_base)
-        value = self._int(args, "value", self._value_base)
+        addr = self._hex(args, "addr")
+        value = self._hex(args, "value")
         size = self._int(args, "size") if "size" in args else self.profile.max_write
         if size not in WRITE_SIZES or size > self.profile.max_write:
             raise _illegal_value(f"size={size}")
         bits = 8 * size
-        if not -(1 << (bits - 1)) <= value < (1 << bits):
+        if value >= 1 << bits:
             raise _out_of_range(f"value does not fit in {size} bytes")
-        data = (value & ((1 << bits) - 1)).to_bytes(size, mcu.byte_order)
+        data = value.to_bytes(size, mcu.byte_order)
         self._reach(mcu)
         try:
             mcu.write(addr, data)
@@ -201,21 +206,6 @@ class Device:
         return ",".join(f'{m.id},"{m.name}"' for m in sorted(self.mcus.values(), key=lambda m: m.id))
 
 
-def encode_data(data: bytes, fmt: str) -> bytes:
-    """Encode a read reply, lowest address first.
-
-    hex:        0000A041
-    bytes_csv:  00,00,A0,41
-    decimal:    0,0,160,65
-    ieee_block: #14 followed by the 4 raw bytes (IEEE 488.2 definite-length block)
-    """
-    if fmt == "hex":
-        return data.hex().upper().encode()
-    if fmt == "bytes_csv":
-        return ",".join(f"{b:02X}" for b in data).encode()
-    if fmt == "decimal":
-        return ",".join(str(b) for b in data).encode()
-    if fmt == "ieee_block":
-        n = str(len(data)).encode()
-        return b"#" + str(len(n)).encode() + n + data
-    raise ValueError(f"unknown data format {fmt!r}")
+def encode_data(data: bytes) -> bytes:
+    """A read reply: the bytes in bare hex, lowest address first, such as ``0000A041``."""
+    return data.hex().upper().encode()

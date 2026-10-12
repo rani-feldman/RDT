@@ -1,7 +1,8 @@
 """SCPI profile: the user-defined command templates, and matching incoming lines against them.
 
 The simulator reads the same ``[scpi]`` table the host uses, so whatever templates the user
-defines are exactly the commands the simulated device answers.
+defines are exactly the commands the simulated device answers. As in the firmware, addresses
+and values are bare hex with no prefix (``20000000``), and read replies are bare hex bytes.
 """
 
 from __future__ import annotations
@@ -11,8 +12,6 @@ import tomllib
 from dataclasses import dataclass, fields
 from pathlib import Path
 
-DATA_FORMATS = ("hex", "bytes_csv", "decimal", "ieee_block")
-
 _PLACEHOLDER = re.compile(r"\{(\w+)(?::[^}]*)?\}")
 
 
@@ -21,17 +20,12 @@ class Profile:
     name: str = "Default"
     read: str = "MEMory:READ? {mcu},{addr},{len}"
     write: str = "MEMory:WRITE {mcu},{addr},{value},{size}"
-    value_format: str = "0x{value:X}"
-    addr_format: str = "0x{addr:08X}"
     max_write: int = 4
-    data_format: str = "hex"
     max_response: int = 1024
     error_query: str = "SYSTem:ERRor?"
     terminator: str = "\n"
 
     def __post_init__(self) -> None:
-        if self.data_format not in DATA_FORMATS:
-            raise ValueError(f"data_format must be one of {', '.join(DATA_FORMATS)}, not {self.data_format!r}")
         if self.max_response < 1:
             raise ValueError("max_response must be at least 1")
         if not self.terminator:
@@ -119,15 +113,15 @@ class CommandPattern:
         return m.groupdict() if m else None
 
 
-def int_base_for(fmt: str, field: str) -> int:
-    """Base the device must use to parse ``field``, given the host's format string for it.
+_BARE_HEX = re.compile(r"^[0-9A-Fa-f]+$")
 
-    ``0x{value:X}`` carries its own prefix, so any base is accepted; ``{value:X}`` is bare hex.
-    """
-    m = re.search(r"\{" + field + r":[^}]*([xX])\}", fmt)
-    if m and "0x" not in fmt.lower():
-        return 16
-    return 0
+
+def parse_hex(text: str) -> int:
+    """Parse an address or value: bare hex only, such as ``20000000``. ``0x`` prefixes are refused."""
+    t = text.strip()
+    if not _BARE_HEX.match(t):
+        raise ValueError(f"{text!r} is not bare hex")
+    return int(t, 16)
 
 
 def parse_int(text: str, base: int = 0) -> int:
