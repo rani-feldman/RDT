@@ -120,7 +120,7 @@ A bit field is written by reading the word that holds it, changing the field and
 
 `watch` and `console` keep running when the link drops, show `link-down`, and reconnect on their own. The other commands are one-shot and fail at once.
 
-`watch` reads everything that is due in one poll, through the poll scheduler: items close to each other on the same MCU (at most 32 bytes apart) are merged into one read of up to `max_response` bytes, so they come from the same moment and cost one command. Items in a listed range (a peripheral) are always read on their own, at their exact size. If a merged read fails, its items are read again one by one, so one bad item fails alone. When the link is slower than the interval, `watch` falls behind rather than queueing reads.
+`watch` reads everything that is due in one poll, through the poll scheduler: items close to each other on the same MCU (at most 32 bytes apart) are merged into one read of up to `max_response` bytes, so they come from the same moment and cost one command. Items in a peripheral range are always read on their own, at their exact size. If a merged read fails, its items are read again one by one, so one bad item fails alone. When the link is slower than the interval, `watch` falls behind rather than queueing reads.
 
 `watch` also notices when an MCU's ELF is rebuilt. It loads the new ELF and finds each watched item again by name, and prints a `#` line for each item that moved, changed type or no longer exists (its column then shows `gone`). An ELF the linker is still writing is left until it has been still for half a second, and one that can't be read keeps the old symbols.
 
@@ -149,6 +149,12 @@ identity = "firmware_version"     # optional: a constant that changes with every
   start    = 0x48000000
   size     = 0x400
   writable = true
+
+  [[mcu.ranges]]                  # a whole RAM bank: may overlap the ELF's .data and .bss
+  name  = "DTCM"
+  kind  = "memory"
+  start = 0x20000000
+  end   = 0x2001FFFF              # the last address in it; or give size
 
 [[mcu]]
 id         = 1
@@ -257,12 +263,24 @@ The profile is the same `[scpi]` table the simulator reads ([`default_profile.to
 
 A profile may also list `[[ranges]]` that apply to every MCU, or to one MCU with `mcu = "name"`.
 
+A range is a `peripheral` (the default) or `memory`:
+
+| | `kind = "peripheral"` | `kind = "memory"` |
+| --- | --- | --- |
+| For | Register blocks | RAM and flash banks, such as the firmware's own table of readable regions |
+| Overlapping the ELF's sections or other ranges | Refused when the file is loaded | Allowed |
+| Reads | Each item on its own, at its exact size, never merged | Merged with nearby items like the ELF's sections |
+| An access that runs past its end | Refused | Refused, unless another section or memory range continues it |
+| `writable = false` | Writes refused | Writes refused; a read-only ELF section inside a writable memory range stays read-only |
+
+Give a range's extent as `size`, or as `end`, the last address in it, the way firmware tables often write it.
+
 ## What the host does with the firmware's habits
 
 - **No reply on failure.** A failed command sends no reply. After a read times out, RDT sends the error query once and reports its answer as a hint, then re-sends the read with a growing delay. The error queue is shared with other tools on the link, so the hint may be someone else's error.
 - **Writes are confirmed.** A write gets no reply either way, so RDT reads the value back after every write. A mismatch is an error that shows both values. Over UDP a write that didn't land is re-sent, but only after the read-back showed it missing.
 - **ELF identity.** On connect and `.reconnect`, RDT compares each MCU's `identity` variable (or the GNU build ID, when the linker put it in memory) on the device with the ELF file. On a mismatch it warns on stderr and refuses writes to that MCU; `--allow-mismatch` writes anyway. `rdt info` shows each MCU's result, and `watch` prints a `#` line when a rebuilt ELF does not match.
-- **Known memory only.** RDT refuses an access outside the MCU's ELF sections and listed ranges before sending anything. Writes to read-only sections (`.text`, `.rodata`) are refused. An access that touches a listed range must stay inside it.
+- **Known memory only.** RDT refuses an access outside the MCU's ELF sections and listed ranges before sending anything, so a read that starts inside a region and runs past its end is never sent. Writes to read-only sections (`.text`, `.rodata`) are refused. An access that touches a peripheral range must stay inside it.
 - **Large reads** are split into pieces of at most `max_response` bytes. If the profile has a `size_query`, its reply on connect sets `max_response`.
 - **Values wider than `max_write`** are written in aligned pieces, one write command each. These are not atomic.
 - **Silent MCU.** When a secondary MCU stops answering (the `-240` error, or three timeouts in a row while MCU 0 answers the error query), only that MCU is marked silent. Its reads fail at once and its writes are refused; it is tried again every 2 s. The other MCUs keep working.
