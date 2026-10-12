@@ -807,7 +807,7 @@ def _setup_line_editing(history: CommandHistory, profile: Profile, saved: list[s
     def complete(text: str, state: int) -> str | None:
         if state == 0:
             line = readline.get_line_buffer()
-            matches[:] = completions(line, history.items, profile, [*saved, *CONSOLE_DOT_COMMANDS])
+            matches[:] = completions(line, history.items, None, [*saved, *CONSOLE_DOT_COMMANDS], common=False)
         return matches[state] if state < len(matches) else None
 
     readline.set_completer_delims("")      # complete the whole line: SCPI headers hold : ? *
