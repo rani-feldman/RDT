@@ -3,7 +3,8 @@
 Nothing about the firmware's commands is hard-coded. The profile says how to spell a read, a
 write and the error query. Addresses and values in commands, and the data in read replies, are
 always bare hex with no prefix: address 0x11AABBCCDD is sent as ``11AABBCCDD`` (rani,
-2026-10-12). The simulator reads the same ``[scpi]`` table, so one file describes both sides.
+2026-10-12). Every read and write covers whole 4-byte aligned words (``align``, rani, 2026-10-12):
+a 2-byte variable is read as its 4-byte word and trimmed. The simulator reads the same ``[scpi]`` table, so one file describes both sides.
 """
 
 from __future__ import annotations
@@ -72,6 +73,14 @@ class Range:
         return r
 
 
+def align_span(addr: int, size: int, align: int) -> tuple[int, int]:
+    """The aligned span that holds ``size`` bytes at ``addr``: start rounded down and end rounded
+    up to a multiple of ``align``. Returned as ``(start, end)``."""
+    start = addr - addr % align
+    end = -(-(addr + size) // align) * align
+    return start, end
+
+
 def fill_template(template: str, **values) -> str:
     """Fill a command template. ``{addr}`` and ``{value}`` are written as bare upper-case hex with
     no prefix; a template may pad them, as in ``{addr:08X}``, but not change the base."""
@@ -101,6 +110,7 @@ class Profile:
     read: str = "MEMory:READ? {mcu},{addr},{len}"
     write: str = "MEMory:WRITE {mcu},{addr},{value},{size}"
     max_write: int = 4                     # largest value one write accepts, in bytes
+    align: int = 4                         # every read and write covers whole aligned words of this size
     reply_regex: str | None = None         # optional; group "data" (or group 1) holds the hex data
     byte_order: str = "little"             # used for an MCU without an ELF
     max_response: int = 1024               # bytes of data one read reply can carry; set here only
@@ -118,6 +128,12 @@ class Profile:
             raise ConfigError("max_response must be at least 1")
         if self.max_write not in (1, 2, 4, 8):
             raise ConfigError("max_write must be 1, 2, 4 or 8")
+        if self.align not in (1, 2, 4, 8):
+            raise ConfigError("align must be 1, 2, 4 or 8")
+        if self.max_write < self.align:
+            raise ConfigError(f"max_write ({self.max_write}) must be at least align ({self.align})")
+        if self.max_response < self.align:
+            raise ConfigError(f"max_response ({self.max_response}) must be at least align ({self.align})")
         if not self.terminator:
             raise ConfigError("terminator must not be empty")
         if self.timeout_ms <= 0:
