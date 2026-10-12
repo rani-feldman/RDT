@@ -433,7 +433,7 @@ If the profile has a `size_query` (default `MEMory:MAX?`), the session sends it 
 
 #### D-SCPI-8 SCPI console
 
-- **GUI:** a console panel (`rdt/gui/panels.py`) sends any typed command and shows the raw reply, with Up and Down for history. A command whose header ends in `?` waits for a reply. **Error queue** reads the error query until the queue is empty.
+- **GUI:** a console panel (`rdt/gui/panels.py`) sends any typed command and shows the raw reply, with Up and Down for history. A command whose header ends in `?` waits for a reply. There is no error-queue button (removed 2026-10-12 at rani's request); typing `SYST:ERR?` reads one entry.
 - **CLI:** `rdt console` offers the same, plus `.read EXPR`, `.write EXPR VALUE`, `.err` and `.quit`. `rdt send COMMAND` sends one command, and `rdt errors` empties the error queue.
 - **Logging:** `-vv` on the CLI logs every command and reply, so the commands the scheduler actually sends can be checked.
 - **More:** saved history, autocomplete, timestamps and colours, search, a session log and hex/text conversion are in [4.17 Console](#417-console).
@@ -1044,7 +1044,7 @@ The console panel (`Console` in `rdt/gui/panels.py`) is a dark terminal whatever
 
 - **Lines:** `HH:MM:SS.mmm` in grey (when **Timestamps** is on), a four-character tag, then the text. `TX` (sent) is green with light green text, `RX` (reply) blue with the normal light text, `ERR` red with red text, `SYS` (RDT's notes) grey with grey italic text. The lines of a multi-line reply are indented to line up under the first line's text. A command is shown as typed, without the old `> `; the session log file (D-CON-5) keeps its own `>`, `<`, `!`, `#` marks.
 - **Prompt:** the last line of the transcript is the link's address (`COM3`, `192.168.1.20:5025`), green while the link is up and grey when it is not, then `>`, then what you type (D-CON-14). Enter sends; there is no **Send** button or separate input row.
-- **Buttons:** Commands, History, Error queue, Clear and Log to file, with the Timestamps and Wrap check boxes, sit in one row above the terminal.
+- **Buttons:** Commands, History, Clear and Log to file, with the Timestamps and Wrap check boxes, sit in one row above the terminal.
 
 #### D-CON-14 Typing in the transcript
 
@@ -1176,6 +1176,7 @@ The application is built against the simulator. As soon as the firmware has the 
 | 2026-10-12 | Typing on the transcript's next free line and a grey suggestion while typing (CON-14), at rani's request after CON-13 |
 | 2026-10-12 | Tab lists every match when several commands match, even while a grey suggestion shows (CON-2), at rani's request; → alone takes the grey suggestion |
 | 2026-10-12 | The console history opens beside the transcript like the commands list, side by side with it when both are open (CON-1), at rani's request |
+| 2026-10-12 | The GUI console's Error queue button removed, at rani's request (the CLI keeps `rdt errors` and `.err`) |
 | 2026-10-12 | M5 built: ELF identity check by a constant variable or the GNU build ID, a mismatch refuses writes until allowed (SYM-8); the workspace's read-only default, which also refuses raw writes (WS-4); the GUI reopens the last workspace (WSP-3) |
 
 ## 9. Appendix: binary protocol (planned)
