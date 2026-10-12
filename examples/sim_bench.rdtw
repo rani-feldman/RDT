@@ -12,6 +12,7 @@ address   = "127.0.0.1:5025"
 id   = 0
 name = "main"
 elf  = "../sim/examples/firmware/main.elf"
+identity = "firmware_name"   # compared with the firmware on connect (SYM-8)
 
   [[mcu.ranges]]
   name  = "GPIOA"

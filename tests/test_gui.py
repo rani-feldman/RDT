@@ -17,7 +17,8 @@ from PySide6.QtWidgets import QInputDialog, QMessageBox  # noqa: E402
 
 from rdt.gui.app import MainWindow  # noqa: E402
 from rdt.gui.panels import McuDialog, ProfileDialog  # noqa: E402
-from rdt.gui.variables import COL_VALUE  # noqa: E402
+from rdt.gui.variables import COL_VALUE, WatchDialog  # noqa: E402
+from rdt.symbols import load_symbols  # noqa: E402
 from rdt.workspace import Workspace  # noqa: E402
 from sim import Simulator, TransportConfig, load_config  # noqa: E402
 
@@ -442,6 +443,7 @@ def test_mcu_dialog(qtbot, win):
     qtbot.addWidget(dlg)
     assert [m.name for m in dlg.result_mcus()] == ["main", "motorctl"]
     assert dlg.result_mcus()[0].ranges   # GPIOA kept
+    assert dlg.table.item(0, 4).text() == "firmware_name" and dlg.result_mcus()[0].identity == "firmware_name"
     dlg.table.item(0, 1).setText("motorctl")
     with pytest.raises(Exception, match="unique"):
         dlg.result_mcus()
@@ -458,6 +460,7 @@ def test_elf_rebuild_remaps(qtbot, win, tmp_path):
     if not rebuilt.exists():
         pytest.skip("no rebuild variant ELF")
     shutil.copy(rebuilt, elf)
+    load_symbols(elf)   # cached, so the reload on the device thread is quick
     os.utime(elf, (time.time() - 5,) * 2)   # settled: the linker is done with it
     win._check_elfs()
     qtbot.waitUntil(lambda: st.gone or st.note is not None, timeout=5000)
@@ -606,3 +609,62 @@ def test_csv_log_marks_link_loss(qtbot, win, tmp_path):
     win.stop_log()
     events = [r[-1] for r in __import__("csv").reader(path.read_text(encoding="utf-8-sig").splitlines())]
     assert "link down" in events and "link up" in events
+
+
+# --- M5: read-only default (WS-4), reopen last workspace (WSP-3), ELF identity (SYM-8) -------
+
+def test_read_only_default(qtbot, win):
+    connect(qtbot, win)
+    tree = win.watch_tree
+    assert not win.read_only_action.isChecked()
+    win.read_only_action.trigger()
+    assert win.ws.read_only and win.dirty
+    tree.write("main:motor.target", "1500")
+    assert "every item read-only" in win.message.text()
+    st = tree.states["main:motor.target"]
+    dlg = WatchDialog(st.watch, win)
+    qtbot.addWidget(dlg)
+    assert dlg.read_only.currentText() == "Workspace default"
+    dlg.read_only.setCurrentText("Writable")
+    assert dlg.result_watch().read_only is False
+    dlg.read_only.setCurrentText("Read-only")
+    assert dlg.result_watch().read_only is True
+    win.read_only_action.trigger()
+    assert not win.ws.read_only
+
+
+def test_reopen_last_workspace(qtbot, win, bench, tmp_path):
+    other = MainWindow()
+    qtbot.addWidget(other, before_close_func=lambda w: setattr(w, "dirty", False))
+    assert other.reopen_last() and other.ws.path == bench      # win opened it last
+    moved = tmp_path / "moved.rdtw"
+    assert other._save_to(moved)
+    third = MainWindow()
+    qtbot.addWidget(third, before_close_func=lambda w: setattr(w, "dirty", False))
+    assert third.reopen_last() and third.ws.path == moved      # the last one saved
+    moved.unlink()
+    fourth = MainWindow()
+    qtbot.addWidget(fourth, before_close_func=lambda w: setattr(w, "dirty", False))
+    assert not fourth.reopen_last() and fourth.ws.path is None
+    assert "is gone" in fourth.message.text()
+
+
+def test_elf_identity(qtbot, win, tmp_path, monkeypatch):
+    connect(qtbot, win)
+    qtbot.waitUntil(lambda: "firmware_name matches" in win.console.output.toPlainText(), timeout=3000)
+    assert not win.allow_action.isEnabled()
+    elf = tmp_path / "main.elf"
+    elf.write_bytes(win.ws.config.mcus[0].elf.read_bytes().replace(b"rdt-main\0", b"rdt-mXin\0"))
+    win.ws.config.mcus[0].elf = elf
+    load_symbols(elf)   # parse its DWARF here: a long parse on the device thread can starve under the Qt loop
+    win.disconnect()
+    qtbot.waitUntil(lambda: win.device.target is None, timeout=3000)
+    connect(qtbot, win)
+    qtbot.waitUntil(lambda: win.allow_action.isEnabled(), timeout=3000)
+    assert "does not match the firmware on main" in win.message.text()
+    monkeypatch.setattr(QMessageBox, "question", lambda *a, **k: QMessageBox.Yes)
+    win.watch_tree.write("main:motor.target", "1500")
+    qtbot.waitUntil(lambda: "does not match" in win.message.text(), timeout=3000)
+    win.allow_action.trigger()
+    qtbot.waitUntil(lambda: not win.allow_action.isEnabled(), timeout=3000)
+    assert "Writes allowed to main" in win.message.text()

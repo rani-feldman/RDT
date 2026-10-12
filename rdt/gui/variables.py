@@ -24,6 +24,7 @@ COL_NAME, COL_VALUE, COL_TYPE, COL_ADDR, COL_RATE, COL_MIN, COL_MAX, COL_MEAN, C
 STATS_COLUMNS = (COL_MIN, COL_MAX, COL_MEAN, COL_COUNT)
 POLL_KEY = "poll"
 GREY = QBrush(QColor("#888888"))
+READ_ONLY_CHOICES = ("Workspace default", "Read-only", "Writable")
 WARN = QBrush(QColor("#c87800"))
 ERROR = QBrush(QColor("#c03030"))
 PATH_ROLE = Qt.UserRole
@@ -143,7 +144,7 @@ class WatchTree(QTreeWidget):
     def _decorate(self, st: _ItemState) -> None:
         w = st.watch
         tips = []
-        if w.read_only:
+        if self.ws.read_only_reason(w.expr):
             tips.append("read-only")
         if w.min is not None or w.max is not None:
             tips.append(f"limits {'' if w.min is None else f'{w.min:g}'}..{'' if w.max is None else f'{w.max:g}'}")
@@ -339,8 +340,7 @@ class WatchTree(QTreeWidget):
     # --- writing -----------------------------------------------------------------------------
 
     def _read_only(self, path: str) -> bool:
-        exact, parent = self.ws.guard_for(path)
-        return bool((exact and exact.read_only) or (parent and parent.read_only))
+        return self.ws.read_only_reason(path) is not None
 
     def _owner(self, item: QTreeWidgetItem) -> _ItemState | None:
         top = item
@@ -356,8 +356,9 @@ class WatchTree(QTreeWidget):
         row = st.shown.get(path)
         if row is None or not row.scalar:
             return
-        if self._read_only(path):
-            self.main.status(f"{path} is read-only in the workspace")
+        reason = self.ws.read_only_reason(path)
+        if reason:
+            self.main.status(f"{path} is {reason}")
             return
         self._editing = (st.watch.expr, path)
         self.blockSignals(True)
@@ -392,8 +393,9 @@ class WatchTree(QTreeWidget):
     def write(self, path: str, text: str, owner: str | None = None) -> None:
         """Write ``text`` (in shown units) to ``path`` through the workspace's write safety."""
         exact, parent = self.ws.guard_for(path)
-        if (exact and exact.read_only) or (parent and parent.read_only):
-            self.main.status(f"{path} is read-only in the workspace")
+        reason = self.ws.read_only_reason(path)
+        if reason:
+            self.main.status(f"{path} is {reason}")
             return
         if (exact and exact.confirm) or (parent and parent.confirm):
             unit = exact.display.unit if exact else ""
@@ -749,8 +751,10 @@ class WatchDialog(QDialog):
         self.poll.currentTextChanged.connect(lambda t: self.poll_ms.setEnabled(t == "ms"))
         poll_row.addWidget(self.poll)
         poll_row.addWidget(self.poll_ms)
-        self.read_only = QCheckBox("Refuse writes")
-        self.read_only.setChecked(w.read_only)
+        self.read_only = QComboBox()
+        self.read_only.addItems(READ_ONLY_CHOICES)
+        self.read_only.setCurrentIndex({None: 0, True: 1, False: 2}[w.read_only])
+        self.read_only.setToolTip("Workspace default follows Watch > All items read-only")
         self.min = QLineEdit("" if w.min is None else f"{w.min:g}")
         self.max = QLineEdit("" if w.max is None else f"{w.max:g}")
         for e in (self.min, self.max):
@@ -785,7 +789,7 @@ class WatchDialog(QDialog):
         poll = self.poll_ms.value() if self.poll.currentText() == "ms" else self.poll.currentText()
         display = Display(self.format.currentText(), self.q.text().strip() or None, float(self.scale.text() or 1),
                           float(self.offset.text() or 0), self.unit.text().strip())
-        return Watch(self.expr, display, poll, self.read_only.isChecked(),
+        return Watch(self.expr, display, poll, (None, True, False)[self.read_only.currentIndex()],
                      float(self.min.text()) if self.min.text().strip() else None,
                      float(self.max.text()) if self.max.text().strip() else None, self.confirm.isChecked())
 

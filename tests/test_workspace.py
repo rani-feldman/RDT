@@ -384,3 +384,72 @@ def test_saved_commands_round_trip(tmp_path):
     path.write_text(path.read_text(encoding="utf-8") + '\n[[command]]\nname = "no command"\n', encoding="utf-8")
     with pytest.raises(ConfigError, match=r"\[\[command\]\]"):
         Workspace.load(path)
+
+
+# --- WS-4: the workspace's read-only default -------------------------------------------------
+
+def test_read_only_default_rules():
+    ws = Workspace(tabs=one_tab(Watch("main:motor"), Watch("main:motor.speed", read_only=False),
+                                Watch("main:gains", read_only=False), Watch("main:gains[1]", read_only=True),
+                                Watch("main:tick_count")))
+    assert ws.read_only_reason("main:motor.target") is None   # off by default
+    ws.read_only = True
+    assert "every item read-only" in ws.read_only_reason("main:motor.target")
+    assert "every item read-only" in ws.read_only_reason("main:tick_count")
+    assert "every item read-only" in ws.read_only_reason("@main:0x20000000:u32")   # not watched
+    assert ws.read_only_reason("main:motor.speed") is None    # the item allows writes
+    assert ws.read_only_reason("main:gains[0]") is None       # its watched array allows writes
+    assert ws.read_only_reason("main:gains[1]") == "read-only in the workspace"
+    with pytest.raises(WriteRefused, match="raw writes are refused"):
+        ws.check_raw_write("main", 0x20000000)
+    ws.read_only = False
+    ws.check_raw_write("main", 0x20000000)
+    ws.tab("Watch").watches[0].read_only = True
+    assert "part of main:motor" in ws.read_only_reason("main:motor.speed")   # a read-only struct wins
+
+
+def test_read_only_default_save_and_load(tmp_path):
+    ws = Workspace(TargetConfig(mcus=[McuConfig(0, "main")]),
+                   one_tab(Watch("main:a", read_only=False), Watch("main:b"), Watch("main:c", read_only=True)))
+    ws.read_only = True
+    ws.save(tmp_path / "ro.rdtw")
+    text = (tmp_path / "ro.rdtw").read_text()
+    assert "read_only = true" in text.split("[connection]")[0]
+    back = Workspace.load(tmp_path / "ro.rdtw")
+    assert back.read_only and [w.read_only for w in back.watches] == [False, None, True]
+    with pytest.raises(ConfigError, match="read_only must be true or false"):
+        Workspace.from_dict({"read_only": "yes"})
+    assert not Workspace.load(EXAMPLE_WORKSPACE).read_only
+
+
+def test_read_only_default_on_the_device(target):
+    ws = Workspace(tabs=one_tab(Watch("main:gains[0]", read_only=False), Watch("main:tick_count")))
+    ws.read_only = True
+    with pytest.raises(WriteRefused, match="every item read-only"):
+        ws.write(target, "main:tick_count", "1")
+    with pytest.raises(WriteRefused, match="every item read-only"):
+        ws.write(target, "main:motor.target", "1")
+    ws.write(target, "main:gains[0]", "77")
+    assert target.read_value("main:gains[0]") == 77
+
+
+def test_cli_read_only(sim, tmp_path, capsys):
+    path = tmp_path / "bench.rdtw"
+    Workspace.load(EXAMPLE_WORKSPACE).save(path)
+    off = ["--tcp", "127.0.0.1:1"]
+    out = io.StringIO()
+    assert main(["-w", str(path), *off, "read-only"], out=out) == 0
+    assert "items are writable unless they are read-only" in out.getvalue()
+    assert main(["-w", str(path), *off, "read-only", "on"], out=out) == 0
+    assert Workspace.load(path).read_only
+    assert main(["-w", str(path), *off, "add", "main:gains[2]", "--no-read-only"], out=out) == 0
+    assert main(["-w", str(path), *off, "list"], out=out) == 0
+    assert "every item read-only unless it allows writes" in out.getvalue()
+    assert rdt(sim, path, "write", "main:tick_count", "5")[0] == 1
+    assert "every item read-only" in capsys.readouterr().err
+    assert rdt(sim, path, "poke", "main", "0x20000010", "00")[0] == 1
+    assert "raw writes are refused" in capsys.readouterr().err
+    code, text = rdt(sim, path, "write", "main:gains[2]", "9")
+    assert code == 0 and "confirmed by read-back" in text
+    assert main(["-w", str(path), *off, "read-only", "off"], out=out) == 0
+    assert rdt(sim, path, "poke", "main", "0x20000010", "00")[0] == 0

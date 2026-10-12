@@ -85,7 +85,7 @@ A bit field is written by reading the word that holds it, changing the field and
 
 | Command | What it does |
 | --- | --- |
-| `info` | Device identity, max response size, and each MCU's memory map |
+| `info` | Device identity, max response size, and each MCU's memory map and ELF identity check |
 | `symbols MCU [PATTERN]` | List an MCU's variables with address, size and type. `PATTERN` is a glob such as `motor*`, or any part of the name. Needs no device |
 | `ptype EXPR` | Where a variable is, and its type's layout: member offsets, bit positions, enum values. Also takes a type, such as `main:motor_t`. Needs no device |
 | `read [EXPR...] [--tab NAME] [--max-cells N]` | Read values; structs and arrays open to every field and cell. With no names, every item in the workspace's watch tabs, or with `--tab` the items of one tab |
@@ -101,6 +101,7 @@ A bit field is written by reading the word that holds it, changing the field and
 | `init FILE` | Save the current target (file and command-line options) as a new workspace. Needs no device |
 | `list` | Show the workspace's watch tabs and their items. Needs no device |
 | `add EXPR [--tab NAME] [options]` | Add an item to a watch tab, or change one: `--format`, `--q`, `--scale`, `--offset`, `--unit`, `--poll`, `--read-only`, `--min`, `--max`, `--confirm`. `--tab` names the tab and makes it if it is new; without it, a new item goes to the first tab and an item already watched is changed where it is. Needs no device |
+| `read-only [on\|off]` | Show or set the workspace's read-only default: with it on, every item refuses writes unless it was added with `--no-read-only`, and raw writes (`poke`, expressions not watched) are refused. Needs no device |
 | `remove EXPR [--tab NAME]` | Remove an item from one watch tab, or without `--tab` from every tab. Needs no device |
 | `tab add NAME`, `tab rename NAME NEW`, `tab remove NAME` | Add an empty watch tab, rename one, or remove one with its items. Needs no device |
 
@@ -141,6 +142,7 @@ address   = "192.168.1.20:5025"
 id   = 0                          # MCU 0 is the main MCU, which owns the link
 name = "main"
 elf  = "build/main.elf"
+identity = "firmware_version"     # optional: a constant that changes with every build, checked on connect
 
   [[mcu.ranges]]                  # memory with no ELF section behind it, such as peripherals
   name     = "GPIOA"
@@ -155,7 +157,7 @@ elf        = "build/motorctl.elf"
 timeout_ms = 1000                 # overrides the profile's timeout for this MCU
 ```
 
-The command line can override or replace it: `--tcp HOST:PORT`, `--udp HOST:PORT`, `--serial PORT --baud N`, `--profile FILE`, `--timeout MS`, and `--mcu NAME=ID[:ELF]` (repeat for each MCU; replaces the file's MCUs). Without a target file, `--mcu` is required:
+The command line can override or replace it: `--tcp HOST:PORT`, `--udp HOST:PORT`, `--serial PORT --baud N`, `--profile FILE`, `--timeout MS`, `--allow-mismatch` (see [ELF identity](#what-the-host-does-with-the-firmwares-habits)), and `--mcu NAME=ID[:ELF]` (repeat for each MCU; replaces the file's MCUs). Without a target file, `--mcu` is required:
 
 ```
 rdt --serial COM5 --profile fw_profile.toml --mcu main=0:build/main.elf read main:motor
@@ -221,7 +223,7 @@ Every key in a `[[tab.watch]]` but `expr` is optional.
 - **Older workspaces.** A file from before tabs has a plain `[[watch]]` list; it loads as one tab named `Watch` and is saved with tabs. Its `[[button]]` tables (command buttons, which RDT no longer has) are ignored with a warning and left out when the file is saved; send such commands with `rdt send` or the console.
 
 - **Scaling** applies to a single value, not to a struct or array. A write takes the value in shown units and writes the nearest raw value. A value whose raw form doesn't fit the type is refused, and a float variable keeps the fraction.
-- **Write safety.** A `read_only` item refuses writes, `min` and `max` are checked in shown units, and `confirm` asks before writing. Without a terminal to ask, or `-y`, the write is refused. A read-only or confirm-first struct or array covers its fields and cells too.
+- **Write safety.** A `read_only` item refuses writes. `read_only = true` at the top of the workspace makes every item read-only unless the item says `read_only = false`, and also refuses raw writes (`rdt read-only on|off` sets it). `min` and `max` are checked in shown units, and `confirm` asks before writing. Without a terminal to ask, or `-y`, the write is refused. A read-only or confirm-first struct or array covers its fields and cells too.
 - **Polling.** `poll_ms` is the global interval, and each item can have its own interval or be `manual`. In `watch`, `-i` replaces the global interval, and a manual item is read once at the start.
 
 ### CSV log
@@ -259,6 +261,7 @@ A profile may also list `[[ranges]]` that apply to every MCU, or to one MCU with
 
 - **No reply on failure.** A failed command sends no reply. After a read times out, RDT sends the error query once and reports its answer as a hint, then re-sends the read with a growing delay. The error queue is shared with other tools on the link, so the hint may be someone else's error.
 - **Writes are confirmed.** A write gets no reply either way, so RDT reads the value back after every write. A mismatch is an error that shows both values. Over UDP a write that didn't land is re-sent, but only after the read-back showed it missing.
+- **ELF identity.** On connect and `.reconnect`, RDT compares each MCU's `identity` variable (or the GNU build ID, when the linker put it in memory) on the device with the ELF file. On a mismatch it warns on stderr and refuses writes to that MCU; `--allow-mismatch` writes anyway. `rdt info` shows each MCU's result, and `watch` prints a `#` line when a rebuilt ELF does not match.
 - **Known memory only.** RDT refuses an access outside the MCU's ELF sections and listed ranges before sending anything. Writes to read-only sections (`.text`, `.rodata`) are refused. An access that touches a listed range must stay inside it.
 - **Large reads** are split into pieces of at most `max_response` bytes. If the profile has a `size_query`, its reply on connect sets `max_response`.
 - **Values wider than `max_write`** are written in aligned pieces, one write command each. These are not atomic.

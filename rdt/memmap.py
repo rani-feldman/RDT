@@ -105,3 +105,41 @@ class MemoryMap:
             if a.start <= addr < a.end:
                 return a
         return None
+
+
+BUILD_ID_SECTION = ".note.gnu.build-id"
+
+
+def elf_bytes(path: str | Path, addr: int, size: int) -> bytes | None:
+    """The bytes the ELF file itself holds at a run address, or None when they are not in the
+    file (``.bss``, or outside every loaded section)."""
+    from elftools.common.exceptions import ELFError
+    from elftools.elf.constants import SH_FLAGS
+    from elftools.elf.elffile import ELFFile
+
+    try:
+        with open(path, "rb") as f:
+            for sec in ELFFile(f).iter_sections():
+                if not sec["sh_flags"] & SH_FLAGS.SHF_ALLOC or sec["sh_type"] == "SHT_NOBITS":
+                    continue
+                start = sec["sh_addr"]
+                if start <= addr and addr + size <= start + sec["sh_size"]:
+                    return bytes(sec.data()[addr - start: addr - start + size])
+    except OSError as e:
+        raise ConfigError(f"cannot read ELF {path}: {e.strerror}") from None
+    except ELFError as e:
+        raise ConfigError(f"{path} is not a valid ELF file: {e}") from None
+    return None
+
+
+def build_id_note(path: str | Path) -> tuple[int, int] | None:
+    """Address and size of the GNU build-ID note, when the linker placed it in the firmware's
+    memory (an allocated section); None otherwise."""
+    from elftools.elf.constants import SH_FLAGS
+    from elftools.elf.elffile import ELFFile
+
+    with open(path, "rb") as f:
+        sec = ELFFile(f).get_section_by_name(BUILD_ID_SECTION)
+        if sec is None or not sec["sh_flags"] & SH_FLAGS.SHF_ALLOC or not sec["sh_size"]:
+            return None
+        return sec["sh_addr"], sec["sh_size"]
