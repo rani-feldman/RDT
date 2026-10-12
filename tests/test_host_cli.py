@@ -1,6 +1,7 @@
 """The rdt command line against the simulated device."""
 
 import io
+import re
 from pathlib import Path
 
 import pytest
@@ -233,3 +234,43 @@ def test_console_by_name(sim, monkeypatch):
     code, out = rdt(sim, "console")
     assert out.splitlines()[1:] == ["main:motor.enabled = 0 (0x00) (confirmed by read-back)",
                                     "main:motor.enabled = 0 (0x00)"]
+
+
+def test_console_history(sim, monkeypatch):
+    monkeypatch.setattr("sys.stdin", io.StringIO("*IDN?\nMEM:MAX?\n.read @main:0x20000000:f32\n.history\n!1\n"
+                                                 ".history 1\n!9\n.quit\n"))
+    code, out = rdt(sim, "console")
+    lines = out.splitlines()
+    assert lines[4:6] == ["   1  *IDN?", "   2  MEM:MAX?"]      # only SCPI commands are kept
+    assert lines[6] == "> *IDN?" and lines[7].startswith("RDT,Simulator")
+    assert lines[8] == "   2  *IDN?"                           # sent again: now the newest
+    assert lines[9] == "error: no history entry '9'; .history lists them"
+    # kept for the next session, and for `rdt history`
+    code, out = rdt(sim, "history")
+    assert (code, out.splitlines()) == (0, ["   1  MEM:MAX?", "   2  *IDN?"])
+    assert main(["history", "--clear"], out=io.StringIO()) == 0
+    out = io.StringIO()
+    assert main(["history"], out=out) == 0 and out.getvalue() == "(the console history is empty)\n"
+
+
+def test_console_timestamps(sim, monkeypatch):
+    monkeypatch.setattr("sys.stdin", io.StringIO("*IDN?\n.quit\n"))
+    code, out = rdt(sim, "console", "--timestamps")
+    lines = out.splitlines()
+    assert re.fullmatch(r"\d\d:\d\d:\d\d\.\d{3}  > \*IDN\?", lines[1])
+    assert re.fullmatch(r"\d\d:\d\d:\d\d\.\d{3}  RDT,Simulator.*", lines[2])
+
+
+def test_console_log(sim, monkeypatch, tmp_path):
+    log = tmp_path / "console.txt"
+    monkeypatch.setattr("sys.stdin", io.StringIO("*IDN?\nNOPE?\n.quit\n"))
+    code, out = rdt(sim, "console", "--log", str(log))
+    assert code == 0
+    lines = [re.sub(r"^\d{4}-\d\d-\d\d \d\d:\d\d:\d\d\.\d{3} ", "", line)
+             for line in log.read_text(encoding="utf-8").splitlines()]
+    assert lines[0] == "# log started"
+    assert lines[1].startswith("# Connected to RDT,Simulator")
+    assert lines[2] == "> *IDN?" and lines[3].startswith("< RDT,Simulator")
+    assert lines[4] == "> NOPE?"
+    assert lines[5] == '! (no reply; error queue: -113,"Undefined header;NOPE?")'
+    assert lines[6:] == ["> .quit", "# log stopped"]

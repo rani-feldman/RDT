@@ -95,7 +95,8 @@ A bit field is written by reading the word that holds it, changing the field and
 | `send COMMAND` | Send one SCPI command. A query (header ending in `?`) waits for its reply; `--reply` and `--no-reply` override that |
 | `errors` | Read the SCPI error queue until it is empty |
 | `watch [EXPR...] [--tab NAME] [-i MS] [-n N] [--csv FILE]` | Poll values and print one line per sample. A struct or array becomes one column per field and cell. With no names, every item in the workspace's watch tabs (or with `--tab`, one tab's), each at its own interval. `--csv` also logs every value read to a CSV file (see [CSV log](#csv-log)) |
-| `console` | Interactive SCPI console. `.read EXPR` reads, `.write EXPR VALUE` writes, `.err` reads the error queue, `.quit` leaves |
+| `console [--timestamps] [--log FILE]` | Interactive SCPI console. `.read EXPR` reads, `.write EXPR VALUE` writes, `.err` reads the error queue, `.history [N]` lists the saved history, `!N` sends entry N again, `.quit` leaves. See [Console](#console) |
+| `history [-n N] [--clear]` | List the last N (default 20, 0 for all) commands of the saved console history, or delete it. Needs no device |
 | `init FILE` | Save the current target (file and command-line options) as a new workspace. Needs no device |
 | `list` | Show the workspace's watch tabs and their items. Needs no device |
 | `add EXPR [--tab NAME] [options]` | Add an item to a watch tab, or change one: `--format`, `--q`, `--scale`, `--offset`, `--unit`, `--poll`, `--read-only`, `--min`, `--max`, `--confirm`. `--tab` names the tab and makes it if it is new; without it, a new item goes to the first tab and an item already watched is changed where it is. Needs no device |
@@ -103,6 +104,15 @@ A bit field is written by reading the word that holds it, changing the field and
 | `tab add NAME`, `tab rename NAME NEW`, `tab remove NAME` | Add an empty watch tab, rename one, or remove one with its items. Needs no device |
 
 `-v` logs link events and `-vv` logs every command and reply, which is the first thing to turn on when trying a new firmware. The exit code is 0 on success and 1 if anything failed.
+
+### Console
+
+`rdt console` sends each line you type as an SCPI command; a query (header ending in `?`) waits for its reply. Lines starting with `.` are RDT's own commands (`.help` lists them).
+
+- **History.** Every SCPI command sent is saved, per user, in `%LOCALAPPDATA%\rdt\console_history.txt` (the last 500; set `RDT_HISTORY_FILE` to use another file). The GUI console shares it. In a terminal, Up and Down walk through it. `.history` lists the last 20 numbered (`.history 50` the last 50), `!N` sends entry N again, and `.history clear` empties it. `rdt history` does the same without a device.
+- **Tab completion.** Tab completes the line from the history, the profile's commands, the common IEEE 488.2 commands and the console's own `.` commands; pressed twice it lists the choices. This needs line editing: on Windows RDT installs `pyreadline3` for it.
+- **`--timestamps`** starts every line with the time to the millisecond, and echoes each command as `> COMMAND` so it has a time too.
+- **`--log FILE`** appends every line sent and received to a text file, each with its date and time and a mark: `>` sent, `<` reply, `!` error, `#` note.
 
 `watch` and `console` keep running when the link drops, show `link-down`, and reconnect on their own. The other commands are one-shot and fail at once.
 
@@ -303,6 +313,7 @@ rdt/
   scheduler.py                                      poll scheduler: block merging, one poll for many items
   stats.py, csvlog.py                               min/max/mean per value, the CSV log
   workspace.py, scaling.py, tomlw.py                workspace files, display formats and scaling, write safety
+  console.py                                        console history, autocomplete, session log
   cli.py                                            command line
   gui/         app.py, device.py, variables.py, panels.py, chart.py   the GUI (PySide6): main window, device worker thread,
                                                     watch tabs and symbol browser, memory view, console, dialogs,
