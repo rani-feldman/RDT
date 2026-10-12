@@ -50,10 +50,7 @@ class ScpiProtocol:
     def read_mem(self, mcu: int, addr: int, length: int, timeout: float) -> bytes | None:
         """One read command. None on timeout; ``BadReply`` if a reply came but doesn't fit."""
         self.send(self.profile.format_read(mcu, addr, length))
-        if self.profile.data_format == "ieee_block":
-            reply = self._read_block(timeout)
-        else:
-            reply = self.read_line(timeout)
+        reply = self.read_line(timeout)
         if reply is None:
             return None
         if reply[:1] == b"-":
@@ -66,33 +63,6 @@ class ScpiProtocol:
             if error is not None:
                 raise CommandRejected(error)
         return self.profile.decode_data(reply, length)
-
-    def _read_block(self, timeout: float) -> bytes | None:
-        """An IEEE 488.2 block can contain the terminator byte, so it is framed by its header."""
-        t = self.transport
-        deadline = time.monotonic() + timeout
-        while (b := t.peek_byte(deadline)) is not None and b in b" \r\n":
-            t.read_exact(1, deadline)
-        if b is None:
-            return None
-        if b != ord("#"):
-            return self.read_line(max(deadline - time.monotonic(), 0))  # not a block; decode will say so
-        head = t.read_exact(2, deadline)
-        if head is None:
-            return None
-        if not head[1:2].isdigit() or head[1:2] == b"0":
-            raise BadReply(f"bad IEEE 488.2 block header {head!r}")
-        digits = t.read_exact(int(head[1:2]), deadline)
-        if digits is None or not digits.isdigit():
-            raise BadReply("IEEE 488.2 block header is truncated")
-        data = t.read_exact(int(digits), deadline)
-        if data is None:
-            return None
-        # Swallow the terminator that follows the block, if it is already there.
-        if t.peek_byte(time.monotonic() + 0.01) in (ord("\r"), self.sep[0]):
-            t.read_until(self.sep, time.monotonic() + 0.01)
-        traffic.debug("<- block of %d bytes", len(data))
-        return head + digits + data
 
     def write_mem(self, mcu: int, addr: int, value: int, size: int) -> None:
         """One write command. The firmware sends no reply to a write, success or failure."""

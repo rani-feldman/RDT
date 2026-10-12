@@ -40,7 +40,7 @@ def test_tcp(sim):
     sock, f = tcp_client(sim)
     with sock:
         assert ask(f, "*IDN?").startswith("RDT,Simulator")
-        assert ask(f, "MEM:READ? 1,0x20000084,4") == "F4010000"
+        assert ask(f, "MEM:READ? 1,20000084,4") == "F4010000"
 
 
 def test_tcp_clients_get_their_own_replies(sim):
@@ -52,8 +52,8 @@ def test_tcp_clients_get_their_own_replies(sim):
         with sock:
             results[name] = all(ask(f, f"MEM:READ? {mcu},{addr},4") == expected for _ in range(50))
 
-    threads = [threading.Thread(target=client, args=("a", 0, "0x20000000", "0000C03F")),
-               threading.Thread(target=client, args=("b", 1, "0x20000084", "F4010000"))]
+    threads = [threading.Thread(target=client, args=("a", 0, "20000000", "0000C03F")),
+               threading.Thread(target=client, args=("b", 1, "20000084", "F4010000"))]
     for t in threads:
         t.start()
     for t in threads:
@@ -64,7 +64,7 @@ def test_tcp_clients_get_their_own_replies(sim):
 def test_tcp_commands_split_across_packets(sim):
     sock, f = tcp_client(sim)
     with sock:
-        sock.sendall(b"MEM:READ? 0,0x2000")
+        sock.sendall(b"MEM:READ? 0,2000")
         time.sleep(0.05)
         sock.sendall(b"0000,4\n*OPC?\n")
         assert f.readline() == b"0000C03F\n"
@@ -74,7 +74,7 @@ def test_tcp_commands_split_across_packets(sim):
 def test_udp_replies_to_the_sender(sim):
     with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as u:
         u.settimeout(2)
-        u.sendto(b"MEM:READ? 0,0x20000000,4\n", sim.udp_address)
+        u.sendto(b"MEM:READ? 0,20000000,4\n", sim.udp_address)
         assert u.recvfrom(2048)[0] == b"0000C03F\n"
         u.sendto(b"*IDN?", sim.udp_address)  # no terminator needed in a datagram
         assert u.recvfrom(2048)[0].startswith(b"RDT,Simulator")
@@ -101,7 +101,7 @@ def test_serial_pty(device):
 
     with Simulator(device, TransportConfig(tcp=None, udp=None, serial="pty")) as s:
         with serial.Serial(s.serial_port, 115200, timeout=2) as port:
-            port.write(b"MEM:READ? 1,0x20000084,4\n")
+            port.write(b"MEM:READ? 1,20000084,4\n")
             assert port.readline() == b"F4010000\n"
 
 
@@ -113,8 +113,8 @@ def test_example_config_runs():
     with Simulator(cfg.device, cfg.transport) as s:
         sock, f = tcp_client(s)
         with sock:
-            first = int.from_bytes(bytes.fromhex(ask(f, "MEM:READ? 0,0x20000010,4")), "little")
+            first = int.from_bytes(bytes.fromhex(ask(f, "MEM:READ? 0,20000010,4")), "little")
             time.sleep(0.02)
-            second = int.from_bytes(bytes.fromhex(ask(f, "MEM:READ? 0,0x20000010,4")), "little")
+            second = int.from_bytes(bytes.fromhex(ask(f, "MEM:READ? 0,20000010,4")), "little")
             assert second > first  # tick_count is a live counter
-            assert ask(f, "MEM:READ? 0,0x48000000,4") == "00000000"  # GPIOA range
+            assert ask(f, "MEM:READ? 0,48000000,4") == "00000000"  # GPIOA range
