@@ -109,7 +109,7 @@ Each requirement links to its design section.
 | MEM-2 | Refuse any access outside the ELF's memory and the ranges the user listed (2026-10-05) | Done | [D-MEM-2](#d-mem-2-known-memory-only) |
 | MEM-3 | Refuse writes to read-only ELF sections | Done | [D-MEM-3](#d-mem-3-read-only-sections) |
 | MEM-4 | Never merge a peripheral range into a larger read; read each item there alone at its exact size (2026-10-05) | Done | [D-MEM-4](#d-mem-4-peripheral-ranges) |
-| MEM-5 | List RAM and flash banks as memory ranges, matching the firmware's own table of readable regions (ITCM, Flash, DTCM, AXI SRAM, SRAM1-4, Backup SRAM); reads in them merge like reads in ELF sections (2026-10-12) | In review (PR #27) | [D-MEM-5](#d-mem-5-memory-ranges) |
+| MEM-5 | List RAM and flash banks as memory ranges, matching the firmware's own table of readable regions (ITCM, Flash, DTCM, AXI SRAM, SRAM1-4, Backup SRAM); reads in them merge like reads in ELF sections (2026-10-12) | Done | [D-MEM-5](#d-mem-5-memory-ranges) |
 
 ### 2.7 Values and display
 
