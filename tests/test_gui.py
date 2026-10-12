@@ -167,7 +167,7 @@ def test_console_and_memory(qtbot, win):
     con.input.returnPressed.emit()
     qtbot.waitUntil(lambda: "SIM" in con.output.toPlainText().upper(), timeout=3000)
     assert con.history.items == ["*IDN?"]
-    assert ("tx", "> *IDN?") in [e[1:] for e in con.entries]
+    assert ("tx", "*IDN?") in [e[1:] for e in con.entries]
     con.send("BOGUS:COMMAND?")
     qtbot.waitUntil(lambda: "(no reply" in con.output.toPlainText(), timeout=3000)
 
@@ -206,23 +206,32 @@ def test_console_history_and_completion(qtbot, win):
     key(Qt.Key_Down)
     assert con.input.text() == "draft"
 
-    # Ctrl+Space: one match is filled in, several open a list
+    # Tab: suggestions come from the history and the imported commands only
+    from rdt.console import SavedCommand
+    win.ws.commands = [SavedCommand("SYSTem:ERRor?"), SavedCommand("MEMory:READ? 0,0x20000000,4")]
     con.input.setText("syst")
-    key(Qt.Key_Space, Qt.ControlModifier)
+    key(Qt.Key_Tab)
     assert con.input.text() == "SYSTem:ERRor?"
     con.input.setText("mem")
-    key(Qt.Key_Space, Qt.ControlModifier)
-    assert con.completer.model().stringList() == ["MEMory:MAX?", "MEMory:READ? ", "MEMory:WRITE "]
+    key(Qt.Key_Tab)                                   # several: their shared start, and a list
+    assert con.input.text() == "MEMory:"
+    assert con.completer.model().stringList() == ["MEMory:MAX?", "MEMory:READ? 0,0x20000000,4"]
     assert con.completer.popup().isVisible()
-    con.completer.activated.emit("MEMory:READ? ")
-    assert con.input.text() == "MEMory:READ? " and not con.completer.popup().isVisible()
+    con.completer.activated.emit("MEMory:READ? 0,0x20000000,4")
+    assert con.input.text() == "MEMory:READ? 0,0x20000000,4" and not con.completer.popup().isVisible()
+    con.input.setText("*rs")
+    key(Qt.Key_Tab)                                   # *RST is neither in the history nor imported
+    assert con.input.text() == "*rs" and not con.completer.popup().isVisible()
+    con.input.setText("*i")
+    key(Qt.Key_Space, Qt.ControlModifier)             # Ctrl+Space does the same
+    assert con.input.text() == "*IDN?"
 
     # the history dialog sends again and deletes
     dlg = HistoryDialog(con)
     assert [dlg.list.item(i).text() for i in range(dlg.list.count())] == ["MEMory:MAX?", "*IDN?"]
     dlg.list.setCurrentRow(1)
     dlg.send()
-    assert con.history.items == ["MEMory:MAX?", "*IDN?"] and con.entries[-1][2] == "> *IDN?"
+    assert con.history.items == ["MEMory:MAX?", "*IDN?"] and con.entries[-1][2] == "*IDN?"
     dlg.list.setCurrentRow(0)
     dlg.delete()
     assert CommandHistory().items == ["MEMory:MAX?"]
@@ -286,7 +295,7 @@ def test_keyboard_shortcuts(qtbot, win):
     rows = win.shortcut_rows()
     assert ("Target", "Connect or disconnect", "F5") in rows
     assert ("Watch", "Add selected to chart", "Ctrl+G") in rows
-    assert ("Console", "Complete the command", "Ctrl+Space") in rows
+    assert ("Console", "Complete the command from the history and the known commands", "Tab / Ctrl+Space") in rows
     dlg = win.show_shortcuts()
     from PySide6.QtWidgets import QTableWidget
     assert dlg.findChild(QTableWidget).rowCount() == len(rows)
@@ -305,12 +314,27 @@ def test_console_transcript(qtbot, win, tmp_path, monkeypatch):
     con.send("BOGUS?")
     qtbot.waitUntil(lambda: con.entries[-1][1] == "error", timeout=3000)
     text = con.output.toPlainText().splitlines()
-    assert re.fullmatch(r"\d\d:\d\d:\d\d\.\d{3}  > BOGUS\?", text[-2])
+    assert re.fullmatch(r"\d\d:\d\d:\d\d\.\d{3} TX  BOGUS\?", text[-2])
+    assert re.fullmatch(r"\d\d:\d\d:\d\d\.\d{3} ERR \(no reply.*", text[-1])
     con.timestamps.setChecked(False)
-    assert con.output.toPlainText().splitlines()[-2] == "> BOGUS?"
-    colors = {kind: con.output.document().findBlockByNumber(i).begin().fragment().charFormat().foreground().color().name()
+    assert con.output.toPlainText().splitlines()[-2] == "TX  BOGUS?"
+    con.log("line one\nline two")                    # a multi-line reply lines up under its text
+    assert con.output.toPlainText().splitlines()[-2:] == ["RX  line one", "    line two"]
+
+    def fragments(block):
+        it, out = block.begin(), []
+        while not it.atEnd():
+            f = it.fragment()
+            out.append((f.text(), f.charFormat().foreground().color().name()))
+            it += 1
+        return out
+
+    blocks = {kind: fragments(con.output.document().findBlockByNumber(i))
               for i, (_, kind, _) in enumerate(con.entries) if kind in ("tx", "error", "note")}
-    assert colors == {"tx": "#2e9d4f", "error": "#d64545", "note": "#888888"}
+    assert blocks["tx"][0] == ("TX  ", "#3fb950") and blocks["tx"][1][1] == "#7ee787"
+    assert blocks["error"][0] == ("ERR ", "#f85149") and blocks["error"][1][1] == "#ff7b72"
+    assert blocks["note"][0] == ("SYS ", "#8b949e")
+    assert con.prompt_label.text() == win.ws.config.connection.address and "Tab completes" in con.input.placeholderText()
 
     # search: every match highlighted, Enter and Shift+Enter step, newest first
     con.show_find()
@@ -344,7 +368,7 @@ def test_console_transcript(qtbot, win, tmp_path, monkeypatch):
     qtbot.waitUntil(lambda: con.entries[-1][1] == "rx", timeout=3000)
     con.stop_log()
     lines = [line[24:] for line in log.read_text(encoding="utf-8").splitlines()]
-    assert lines[:3] == ["# log started", f"# logging to {log}", "> *IDN?"]
+    assert lines[:3] == ["# log started", f"# logging to {log}", "> *IDN?"]   # the file keeps its marks
     assert lines[3].startswith("< RDT,Simulator") and lines[-1] == "# log stopped"
 
     # Ctrl+K clears
@@ -353,6 +377,11 @@ def test_console_transcript(qtbot, win, tmp_path, monkeypatch):
     qtbot.waitExposed(win)
     con.input.setFocus()
     qtbot.waitUntil(con.input.hasFocus, timeout=3000)
+    from rdt.console import SavedCommand
+    win.ws.commands = [SavedCommand("*IDN?")]
+    con.input.setText("*i")
+    qtbot.keyClick(con.input, Qt.Key_Tab)             # a real Tab completes and keeps the focus
+    assert con.input.text() == "*IDN?" and con.input.hasFocus()
     qtbot.keyClick(con.input, Qt.Key_K, Qt.ControlModifier)
     assert con.output.toPlainText() == "" and not con.entries
 
@@ -471,7 +500,7 @@ def test_link_down_greys_panels(qtbot, win, sim):
     assert win.console.input.isEnabled()
     win.disconnect()
     qtbot.waitUntil(lambda: win.bar.connect_button.text() == "Connect", timeout=3000)
-    assert not win.console.input.isEnabled() and not win.console.send_button.isEnabled()
+    assert not win.console.input.isEnabled() and win.console.input.placeholderText() == "not connected"
     assert win.console.commands_button.isEnabled()      # the list, search and log work offline
     assert win.bar.transport.isEnabled()
 
