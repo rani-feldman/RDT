@@ -34,8 +34,8 @@ FONT_MIN, FONT_MAX = 6, 32   # console font size, in points
 CONSOLE_KEYS = [
     ("Enter", "Send the command"),
     ("Up / Down", "Walk the command history"),
-    ("\u2192 / Tab", "Take the grey suggestion shown while typing"),
-    ("Tab / Ctrl+Space", "Complete the command from the history and the known commands"),
+    ("\u2192", "Take the grey suggestion shown while typing"),
+    ("Tab / Ctrl+Space", "Complete the command; with several matches, list them all"),
     ("Ctrl+F", "Find in the transcript"),
     ("Enter / Shift+Enter", "Next / previous match, in the find bar"),
     ("Esc", "Close the find bar"),
@@ -510,7 +510,7 @@ class Console(QWidget):
         self.link_up = up
         self.errors_button.setEnabled(up)
         self.output.input_enabled = up
-        self.output.hint = "type a command \u2014 \u2191 recalls history, Tab or \u2192 takes a suggestion" if up \
+        self.output.hint = "type a command \u2014 \u2191 recalls history, \u2192 takes the suggestion, Tab lists matches" if up \
             else "not connected"
         self._show_prompt()
 
