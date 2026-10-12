@@ -335,9 +335,6 @@ class Console(QWidget):
         history.setCheckable(True)
         history.setToolTip("The saved console history, beside the transcript: send an entry again or delete it")
         history.toggled.connect(self.history_panel.set_open)
-        self.errors_button = errors = QPushButton("Error queue")
-        errors.setToolTip("Read SYST:ERR? until the queue is empty")
-        errors.clicked.connect(lambda: self.drain_errors())
         clear = QPushButton("Clear")
         clear.setToolTip("Clear the transcript (Ctrl+K)")
         clear.clicked.connect(lambda: self.clear())
@@ -353,7 +350,7 @@ class Console(QWidget):
         self.log_button.setCheckable(True)
         self.log_button.setToolTip("Append every console line, with date and time, to a text file")
         self.log_button.clicked.connect(self._toggle_log)
-        for w in (self.commands_button, history, errors, clear, self.log_button):
+        for w in (self.commands_button, history, clear, self.log_button):
             row.addWidget(w)
         row.addStretch(1)
         row.addWidget(self.timestamps)
@@ -519,7 +516,6 @@ class Console(QWidget):
     def set_link_up(self, up: bool) -> None:
         """Sending needs the link; the transcript, search, log and the command list don't."""
         self.link_up = up
-        self.errors_button.setEnabled(up)
         self.output.input_enabled = up
         self.output.hint = "type a command \u2014 \u2191 recalls history, \u2192 takes the suggestion, Tab lists matches" if up \
             else "not connected"
@@ -713,20 +709,6 @@ class Console(QWidget):
     def send_break(self) -> None:
         self.log("break (250 ms)", "tx")
         self.main.device.submit(lambda t: t.send_break(250), lambda _r: self.note("break sent"),
-                                lambda e: self.log(f"error: {describe_error(e)}", "error"))
-
-    def drain_errors(self) -> None:
-        def job(t: Target):
-            out = []
-            for _ in range(64):
-                err = t.error_query()
-                if err is None:
-                    break
-                out.append(str(err))
-            return out or ['0,"No error"']
-
-        self.log("error queue (SYST:ERR? until empty)", "tx")
-        self.main.device.submit(job, lambda lines: self.log("\n".join(lines)),
                                 lambda e: self.log(f"error: {describe_error(e)}", "error"))
 
 
