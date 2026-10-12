@@ -3,17 +3,20 @@ profile and the MCU list."""
 
 from __future__ import annotations
 
+from collections import deque
 from dataclasses import fields, replace
+from datetime import datetime
 from pathlib import Path
 
-from PySide6.QtCore import QEvent, QObject, Qt, QTimer
-from PySide6.QtGui import QFont, QFontDatabase, QTextCursor
+from PySide6.QtCore import QEvent, QObject, QStringListModel, Qt, QTimer
+from PySide6.QtGui import QColor, QFont, QFontDatabase, QKeySequence, QShortcut, QTextCharFormat, QTextCursor
 from PySide6.QtWidgets import (
-    QAbstractItemView, QCheckBox, QComboBox, QDialog, QDialogButtonBox, QFileDialog, QFormLayout, QHBoxLayout,
-    QHeaderView, QLabel, QLineEdit, QMessageBox, QPlainTextEdit, QPushButton, QSpinBox, QTableWidget,
-    QTableWidgetItem, QVBoxLayout, QWidget,
+    QAbstractItemView, QApplication, QCheckBox, QComboBox, QCompleter, QDialog, QDialogButtonBox, QFileDialog, QFormLayout, QHBoxLayout,
+    QHeaderView, QLabel, QLineEdit, QListWidget, QMessageBox, QPlainTextEdit, QPushButton, QSpinBox, QTableWidget,
+    QTableWidgetItem, QTextEdit, QToolButton, QVBoxLayout, QWidget,
 )
 
+from ..console import CommandHistory, SessionLog, completions, hex_to_text, text_to_hex
 from ..errors import CommandTimeout, ConfigError, LinkDown, RdtError
 from ..profile import DATA_FORMATS, Profile, parse_int
 from ..target import McuConfig, Target
@@ -21,6 +24,10 @@ from ..workspace import Workspace
 from .device import describe_error
 
 BYTES_PER_ROW = 16
+TRANSCRIPT_LINES = 5000
+MAX_MATCHES = 1000
+# Console line colours; a reply keeps the theme's text colour so it reads on light and dark themes.
+LINE_COLORS = {"tx": "#2e9d4f", "rx": None, "error": "#d64545", "note": "#888888"}
 
 
 def mono() -> QFont:
@@ -45,30 +52,77 @@ def run_command(t: Target, text: str) -> str | None:
 # --- SCPI console ----------------------------------------------------------------------------
 
 
-class _History(QObject):
-    """Up and Down in the console's input line walk through the commands sent before."""
+class _InputKeys(QObject):
+    """Keys of the console's input line: Up and Down walk the saved history, Ctrl+Space completes."""
 
-    def __init__(self, line: QLineEdit):
-        super().__init__(line)
-        self.line = line
-        self.items: list[str] = []
-        self.pos = 0
-        line.installEventFilter(self)
-
-    def add(self, text: str) -> None:
-        if not self.items or self.items[-1] != text:
-            self.items.append(text)
-        self.pos = len(self.items)
+    def __init__(self, console: "Console"):
+        super().__init__(console.input)
+        self.console = console
+        console.input.installEventFilter(self)
 
     def eventFilter(self, obj, event) -> bool:
-        if event.type() == QEvent.KeyPress and event.key() in (Qt.Key_Up, Qt.Key_Down):
-            if not self.items:
-                return True
+        if event.type() != QEvent.KeyPress:
+            return False
+        con = self.console
+        if event.key() in (Qt.Key_Up, Qt.Key_Down) and not con.completer.popup().isVisible():
             step = -1 if event.key() == Qt.Key_Up else 1
-            self.pos = max(0, min(len(self.items), self.pos + step))
-            self.line.setText(self.items[self.pos] if self.pos < len(self.items) else "")
+            con.input.setText(con.history.navigate(step, con.input.text()))
+            return True
+        if event.key() == Qt.Key_Space and event.modifiers() & Qt.ControlModifier:
+            con.complete()
             return True
         return False
+
+
+class HistoryDialog(QDialog):
+    """The saved console history, newest first: send an entry again, delete it, or clear them all."""
+
+    def __init__(self, console: "Console"):
+        super().__init__(console)
+        self.console = console
+        self.setWindowTitle("Console history")
+        self.resize(480, 400)
+        layout = QVBoxLayout(self)
+        self.list = QListWidget()
+        self.list.setFont(mono())
+        self.list.itemDoubleClicked.connect(lambda _item: self.send())
+        layout.addWidget(self.list, 1)
+        row = QHBoxLayout()
+        for text, slot in (("Send", self.send), ("Delete", self.delete), ("Clear all", self.clear_all),
+                           ("Close", self.accept)):
+            b = QPushButton(text)
+            b.clicked.connect(slot)
+            row.addWidget(b)
+        layout.addLayout(row)
+        self.refresh()
+
+    def refresh(self) -> None:
+        self.list.clear()
+        self.list.addItems(list(reversed(self.console.history.items)))
+        self.list.setCurrentRow(0)
+
+    def _current(self) -> str | None:
+        item = self.list.currentItem()
+        return item.text() if item else None
+
+    def send(self) -> None:
+        text = self._current()
+        if text:
+            self.console.send_command(text)
+            self.refresh()
+
+    def delete(self) -> None:
+        text = self._current()
+        if text:
+            row = self.list.currentRow()
+            self.console.history.remove(text)
+            self.refresh()
+            self.list.setCurrentRow(min(row, self.list.count() - 1))
+
+    def clear_all(self) -> None:
+        if QMessageBox.question(self, "Console history", "Delete the whole console history?") == QMessageBox.Yes:
+            self.console.history.clear()
+            self.refresh()
 
 
 class Console(QWidget):
@@ -81,43 +135,305 @@ class Console(QWidget):
         layout.setContentsMargins(4, 4, 4, 4)
         self.output = QPlainTextEdit(readOnly=True)
         self.output.setFont(mono())
-        self.output.setMaximumBlockCount(5000)
+        self.output.setMaximumBlockCount(TRANSCRIPT_LINES)
+        self.output.setContextMenuPolicy(Qt.CustomContextMenu)
+        self.output.customContextMenuRequested.connect(self._context_menu)
         layout.addWidget(self.output, 1)
+        self._find_bar(layout)
+        self.entries: deque[tuple[datetime, str, str]] = deque(maxlen=TRANSCRIPT_LINES)
         row = QHBoxLayout()
         self.input = QLineEdit()
         self.input.setFont(mono())
-        self.input.setPlaceholderText("SCPI command, such as *IDN?  (Up and Down for history)")
+        self.input.setPlaceholderText("SCPI command, such as *IDN?  (Up and Down for history, Ctrl+Space to complete)")
         self.input.returnPressed.connect(self._send_typed)
-        self.history = _History(self.input)
+        self.input.textEdited.connect(self._typed)
+        self.history = CommandHistory()
+        self.suggest_model = QStringListModel(self)
+        self.completer = QCompleter(self.suggest_model, self)
+        self.completer.setWidget(self.input)
+        self.completer.setCompletionMode(QCompleter.UnfilteredPopupCompletion)
+        self.completer.activated.connect(self._apply_completion)
+        self.keys = _InputKeys(self)
         send = QPushButton("Send")
         send.clicked.connect(self._send_typed)
+        history = QPushButton("History")
+        history.setToolTip("The saved console history: send an entry again or delete it")
+        history.clicked.connect(lambda: HistoryDialog(self).exec())
         errors = QPushButton("Error queue")
         errors.setToolTip("Read SYST:ERR? until the queue is empty")
         errors.clicked.connect(self.drain_errors)
         clear = QPushButton("Clear")
-        clear.clicked.connect(self.output.clear)
+        clear.clicked.connect(self.clear)
+        self.timestamps = QCheckBox("Timestamps")
+        self.timestamps.setToolTip("Show the time of every line, to the millisecond")
+        self.timestamps.setChecked(True)
+        self.timestamps.toggled.connect(self.rerender)
+        self.log_button = QPushButton("Log to file")
+        self.log_button.setCheckable(True)
+        self.log_button.setToolTip("Append every console line, with date and time, to a text file")
+        self.log_button.clicked.connect(self._toggle_log)
+        self.session_log: SessionLog | None = None
         row.addWidget(self.input, 1)
-        for b in (send, errors, clear):
+        for b in (send, history, errors, clear, self.timestamps, self.log_button):
             row.addWidget(b)
         layout.addLayout(row)
+        for keys, slot in (("Ctrl+F", self.show_find), ("Ctrl+K", self.clear)):
+            QShortcut(QKeySequence(keys), self, slot, context=Qt.WidgetWithChildrenShortcut)
 
-    def log(self, text: str) -> None:
-        self.output.appendPlainText(text)
+    # --- hex and text ------------------------------------------------------------------------
+
+    def _context_menu(self, pos) -> None:
+        menu = self.output.createStandardContextMenu(pos)
+        selected = self.output.textCursor().selectedText().replace("\u2029", "\n")
+        menu.addSeparator()
+        for text, convert in (("Selection as hex", text_to_hex), ("Hex selection as text", hex_to_text)):
+            act = menu.addAction(text, lambda c=convert, t=text: self.show_converted(t, c, selected))
+            act.setEnabled(bool(selected))
+        menu.exec(self.output.mapToGlobal(pos))
+
+    def show_converted(self, title: str, convert, selected: str) -> QDialog | None:
+        try:
+            result = convert(selected)
+        except ValueError as e:
+            QMessageBox.warning(self, title, str(e))
+            return None
+        dlg = QDialog(self)
+        dlg.setWindowTitle(title)
+        dlg.resize(480, 200)
+        layout = QVBoxLayout(dlg)
+        view = QPlainTextEdit(result, readOnly=True)
+        view.setFont(mono())
+        layout.addWidget(view, 1)
+        buttons = QDialogButtonBox(QDialogButtonBox.Close)
+        copy = buttons.addButton("Copy", QDialogButtonBox.ActionRole)
+        copy.clicked.connect(lambda: QApplication.clipboard().setText(result))
+        buttons.rejected.connect(dlg.reject)
+        layout.addWidget(buttons)
+        dlg.setAttribute(Qt.WA_DeleteOnClose)
+        dlg.show()
+        return dlg
+
+    # --- search ------------------------------------------------------------------------------
+
+    def _find_bar(self, layout: QVBoxLayout) -> None:
+        self.find_bar = QWidget()
+        row = QHBoxLayout(self.find_bar)
+        row.setContentsMargins(0, 0, 0, 0)
+        self.find_text = QLineEdit()
+        self.find_text.setPlaceholderText("Find in transcript  (Enter next, Shift+Enter previous, Esc close)")
+        self.find_text.textChanged.connect(lambda _t: self._search(jump=True))
+        self.find_text.returnPressed.connect(self.find_next)
+        QShortcut(QKeySequence("Shift+Return"), self.find_text, self.find_previous, context=Qt.WidgetShortcut)
+        QShortcut(QKeySequence("Escape"), self.find_bar, self.hide_find, context=Qt.WidgetWithChildrenShortcut)
+        self.find_count = QLabel("")
+        row.addWidget(self.find_text, 1)
+        row.addWidget(self.find_count)
+        for text, tip, slot in (("▲", "Previous match (Shift+Enter)", self.find_previous),
+                                ("▼", "Next match (Enter)", self.find_next),
+                                ("✕", "Close (Esc)", self.hide_find)):
+            b = QToolButton(text=text, toolTip=tip)
+            b.clicked.connect(slot)
+            row.addWidget(b)
+        self.find_bar.hide()
+        layout.addWidget(self.find_bar)
+        self.matches: list[QTextCursor] = []
+        self.match = -1
+
+    def show_find(self) -> None:
+        self.find_bar.show()
+        selected = self.output.textCursor().selectedText()
+        if selected and "\u2029" not in selected:
+            self.find_text.setText(selected)
+        self.find_text.setFocus()
+        self.find_text.selectAll()
+        self._search()
+
+    def hide_find(self) -> None:
+        self.find_bar.hide()
+        self.matches, self.match = [], -1
+        self.output.setExtraSelections([])
+        self.input.setFocus()
+
+    def find_next(self) -> None:
+        self._step(1)
+
+    def find_previous(self) -> None:
+        self._step(-1)
+
+    def _search(self, jump: bool = False) -> None:
+        """Find every match (case-insensitive), highlight them all and the current one more strongly."""
+        text = self.find_text.text()
+        doc = self.output.document()
+        self.matches = []
+        if text and not self.find_bar.isHidden():
+            cursor = doc.find(text, 0)
+            while not cursor.isNull() and len(self.matches) < MAX_MATCHES:
+                self.matches.append(cursor)
+                cursor = doc.find(text, cursor)
+        if not self.matches:
+            self.match = -1
+        elif jump or self.match < 0:
+            self.match = len(self.matches) - 1     # the newest match, at the bottom
+        else:
+            self.match = min(self.match, len(self.matches) - 1)
+        self._highlight()
+
+    def _step(self, step: int) -> None:
+        if not self.matches:
+            self._search()
+        if self.matches:
+            self.match = (self.match + step) % len(self.matches)
+        self._highlight()
+
+    def _highlight(self) -> None:
+        sels = []
+        for i, cursor in enumerate(self.matches):
+            sel = QTextEdit.ExtraSelection()
+            sel.cursor = cursor
+            sel.format.setBackground(QColor("#ff9632" if i == self.match else "#ffe46b"))
+            sel.format.setForeground(QColor("#000000"))
+            sels.append(sel)
+        self.output.setExtraSelections(sels)
+        if self.match >= 0:
+            self.output.setTextCursor(QTextCursor(self.matches[self.match]))
+            self.output.ensureCursorVisible()
+            self.find_count.setText(f"{self.match + 1} of {len(self.matches)}"
+                                    + ("+" if len(self.matches) >= MAX_MATCHES else ""))
+        else:
+            self.find_count.setText("no match" if self.find_text.text() else "")
+
+    # --- autocomplete ------------------------------------------------------------------------
+
+    def suggestions(self) -> list[str]:
+        profile = self.main.ws.config.profile if getattr(self.main, "ws", None) else None
+        return completions(self.input.text(), self.history.items, profile)
+
+    def complete(self) -> None:
+        """Ctrl+Space: one suggestion is filled in at once; several open a list to pick from."""
+        found = self.suggestions()
+        if len(found) == 1:
+            self._apply_completion(found[0])
+            return
+        self.suggest_model.setStringList(found)
+        if found:
+            self.completer.complete()
+
+    def _typed(self, _text: str) -> None:
+        self.history.reset_navigation()
+        if self.completer.popup().isVisible():
+            found = self.suggestions()
+            self.suggest_model.setStringList(found)
+            if not found:
+                self.completer.popup().hide()
+
+    def _apply_completion(self, text: str) -> None:
+        self.completer.popup().hide()
+        self.input.setText(text)
+        self.input.setFocus()
+
+    # --- transcript --------------------------------------------------------------------------
+
+    def log(self, text: str, kind: str = "rx") -> None:
+        """Add a line: ``tx`` a command sent, ``rx`` a reply, ``error`` or ``note`` (link events)."""
+        entry = (datetime.now(), kind, text)
+        self.entries.append(entry)
+        if self.session_log is not None:
+            # the log's own mark says "sent", so drop the transcript's "> "
+            self.session_log.write(kind, text[2:] if kind == "tx" and text.startswith("> ") else text, entry[0])
+        self._render(entry)
+        if not self.find_bar.isHidden():
+            self._search()
+        else:
+            self.output.moveCursor(QTextCursor.End)
+
+    def start_log(self, path: str | Path) -> bool:
+        self.stop_log()
+        try:
+            self.session_log = SessionLog(path)
+        except OSError as e:
+            QMessageBox.warning(self, "Console log", f"Cannot write {path}: {e}")
+            self.log_button.setChecked(False)
+            return False
+        self.log_button.setChecked(True)
+        self.log_button.setToolTip(f"Logging to {path}. Click to stop.")
+        self.note(f"logging to {path}")
+        return True
+
+    def stop_log(self) -> None:
+        if self.session_log is not None:
+            path = self.session_log.path
+            self.session_log.close()
+            self.session_log = None
+            self.note(f"log saved to {path}")
+        self.log_button.setChecked(False)
+        self.log_button.setToolTip("Append every console line, with date and time, to a text file")
+
+    def _toggle_log(self, on: bool) -> None:
+        if not on:
+            self.stop_log()
+            return
+        default = datetime.now().strftime("console_%Y%m%d_%H%M%S.txt")
+        path, _ = QFileDialog.getSaveFileName(self, "Log console to", default, "Text files (*.txt);;All files (*)",
+                                              options=QFileDialog.DontConfirmOverwrite)
+        if not path:
+            self.log_button.setChecked(False)
+            return
+        self.start_log(path)
+
+    def note(self, text: str) -> None:
+        self.log(text, "note")
+
+    def clear(self) -> None:
+        self.entries.clear()
+        self.output.clear()
+        self._search()
+
+    def rerender(self) -> None:
+        self.output.clear()
+        for entry in self.entries:
+            self._render(entry)
         self.output.moveCursor(QTextCursor.End)
+        self._search()
+
+    def _render(self, entry: tuple[datetime, str, str]) -> None:
+        when, kind, text = entry
+        fmt = QTextCharFormat()
+        if LINE_COLORS.get(kind):
+            fmt.setForeground(QColor(LINE_COLORS[kind]))
+        stamp_fmt = QTextCharFormat()
+        stamp_fmt.setForeground(QColor(LINE_COLORS["note"]))
+        stamp = when.strftime("%H:%M:%S.%f")[:-3] + "  " if self.timestamps.isChecked() else ""
+        cursor = QTextCursor(self.output.document())
+        cursor.movePosition(QTextCursor.End)
+        for i, line in enumerate(text.split("\n")):
+            if not self.output.document().isEmpty():
+                cursor.insertBlock()
+            if stamp:
+                cursor.insertText(stamp if i == 0 else " " * len(stamp), stamp_fmt)
+            cursor.insertText(line, fmt)
 
     def _send_typed(self) -> None:
         text = self.input.text().strip()
         if not text:
             return
-        self.history.add(text)
         self.input.clear()
+        self.send_command(text)
+
+    def send_command(self, text: str) -> None:
+        """Send a command typed (or picked from the history) by hand and keep it in the history."""
+        self.history.add(text)
         self.send(text)
 
     def send(self, text: str) -> None:
-        self.log(f"> {text}")
-        self.main.device.submit(lambda t: run_command(t, text),
-                                lambda reply: self.log(reply if reply is not None else "(sent)"),
-                                lambda e: self.log(f"error: {describe_error(e)}"))
+        self.log(f"> {text}", "tx")
+        self.main.device.submit(lambda t: run_command(t, text), self._reply,
+                                lambda e: self.log(f"error: {describe_error(e)}", "error"))
+
+    def _reply(self, reply: str | None) -> None:
+        if reply is None:
+            self.log("(sent)", "note")
+        else:
+            self.log(reply, "error" if reply.startswith("(no reply") else "rx")
 
     def drain_errors(self) -> None:
         def job(t: Target):
@@ -129,9 +445,9 @@ class Console(QWidget):
                 out.append(str(err))
             return out or ['0,"No error"']
 
-        self.log("> error queue")
+        self.log("> error queue", "tx")
         self.main.device.submit(job, lambda lines: self.log("\n".join(lines)),
-                                lambda e: self.log(f"error: {describe_error(e)}"))
+                                lambda e: self.log(f"error: {describe_error(e)}", "error"))
 
 
 # --- memory view -----------------------------------------------------------------------------

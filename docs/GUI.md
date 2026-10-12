@@ -104,7 +104,14 @@ Choose the MCU, type an address (`0x20000000`) or a variable name (`motor`), a l
 
 ## SCPI console
 
-Type any SCPI command and press Enter. Up and Down walk through earlier commands. Because the firmware sends nothing back when a command fails, a query with no reply shows `(no reply; error queue: ...)` with what `SYST:ERR?` said. **Error queue** reads `SYST:ERR?` until the queue is empty.
+Type any SCPI command and press Enter. Because the firmware sends nothing back when a command fails, a query with no reply shows `(no reply; error queue: ...)` with what `SYST:ERR?` said. **Error queue** reads `SYST:ERR?` until the queue is empty.
+
+- **History.** Every command you send is saved, per user, in `%LOCALAPPDATA%\rdt\console_history.txt` (the last 500, a repeated command moved to the end). The GUI and `rdt console` share it, and it is kept across launches. Up and Down walk through it; going past the newest gives back what you were typing. **History** lists it newest first: double-click or **Send** sends an entry again, **Delete** removes one, **Clear all** empties it.
+- **Autocomplete.** Ctrl+Space suggests commands that start with (then contain) what you typed: your history first, newest first, then the profile's own commands (read, write, error, size and probe queries) and the common IEEE 488.2 commands (`*IDN?`, `*RST`, `*CLS`, `*OPC?` ...). A single match is filled in at once.
+- **Transcript.** Each line starts with its time to the millisecond (**Timestamps** hides it). Commands sent are green, replies in the normal text colour, errors (no reply, link down) red, and RDT's notes (connected, link down, reconnecting, sent with no reply expected) grey.
+- **Search.** Ctrl+F opens a find bar under the transcript. Every match is highlighted, the counter shows which one you are on (`3 of 12`), Enter and Shift+Enter go to the next and previous match, and Esc closes it. Ctrl+K clears the transcript, like **Clear**.
+- **Hex and text.** Select part of the transcript and right-click: **Selection as hex** shows its bytes (`Hi` is `48 69`), and **Hex selection as text** turns hex such as `48656C6C6F`, `48 65 6C` or `0x48,0x65` back into text (`Hello`), with any non-printable byte as `\xNN`. The result opens in a small window with **Copy**.
+- **Log to file.** Asks for a text file and appends every console line to it, with its date and time and a mark: `>` sent, `<` reply, `!` error, `#` note. Click again to stop. The file is appended to, never overwritten. This is separate from the CSV value log.
 
 ## SCPI profile editor
 
