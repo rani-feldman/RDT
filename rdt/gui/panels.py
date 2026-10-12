@@ -3,20 +3,22 @@ profile and the MCU list."""
 
 from __future__ import annotations
 
+import csv
 from collections import deque
 from dataclasses import fields, replace
 from datetime import datetime
 from pathlib import Path
 
-from PySide6.QtCore import QEvent, QObject, QStringListModel, Qt, QTimer
+from PySide6.QtCore import QEvent, QObject, QSettings, QStringListModel, Qt, QTimer
 from PySide6.QtGui import QColor, QFont, QFontDatabase, QKeySequence, QShortcut, QTextCharFormat, QTextCursor
 from PySide6.QtWidgets import (
     QAbstractItemView, QApplication, QCheckBox, QComboBox, QCompleter, QDialog, QDialogButtonBox, QFileDialog, QFormLayout, QHBoxLayout,
     QHeaderView, QLabel, QLineEdit, QListWidget, QMessageBox, QPlainTextEdit, QPushButton, QSpinBox, QTableWidget,
-    QTableWidgetItem, QTextEdit, QToolButton, QVBoxLayout, QWidget,
+    QSplitter, QTableWidgetItem, QTextEdit, QToolButton, QTreeWidget, QTreeWidgetItem, QVBoxLayout, QWidget,
 )
 
-from ..console import CommandHistory, SessionLog, completions, hex_to_text, text_to_hex
+from ..console import (CommandHistory, SessionLog, completions, hex_to_text, history_path, merge_commands, read_commands,
+                       text_to_hex, write_commands)
 from ..errors import CommandTimeout, ConfigError, LinkDown, RdtError
 from ..profile import DATA_FORMATS, Profile, parse_int
 from ..target import McuConfig, Target
@@ -26,6 +28,19 @@ from .device import describe_error
 BYTES_PER_ROW = 16
 TRANSCRIPT_LINES = 5000
 MAX_MATCHES = 1000
+FONT_MIN, FONT_MAX = 6, 32   # console font size, in points
+# Console keys for Help > Keyboard shortcuts (CON-12); keep in step with the bindings in Console.
+CONSOLE_KEYS = [
+    ("Enter", "Send the command"),
+    ("Up / Down", "Walk the command history"),
+    ("Ctrl+Space", "Complete the command"),
+    ("Ctrl+F", "Find in the transcript"),
+    ("Enter / Shift+Enter", "Next / previous match, in the find bar"),
+    ("Esc", "Close the find bar"),
+    ("Ctrl+K", "Clear the transcript"),
+    ("Ctrl+= / Ctrl+- / Ctrl+wheel", "Larger / smaller console text"),
+    ("Ctrl+0", "Default console text size"),
+]
 # Console line colours; a reply keeps the theme's text colour so it reads on light and dark themes.
 LINE_COLORS = {"tx": "#2e9d4f", "rx": None, "error": "#d64545", "note": "#888888"}
 
@@ -125,6 +140,114 @@ class HistoryDialog(QDialog):
             self.refresh()
 
 
+class CommandsPanel(QWidget):
+    """The workspace's known commands (CON-7), by group. Double-click puts one in the input line."""
+
+    def __init__(self, console: "Console"):
+        super().__init__()
+        self.console = console
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        self.filter = QLineEdit(placeholderText="Filter commands")
+        self.filter.textChanged.connect(lambda _t: self.refresh())
+        layout.addWidget(self.filter)
+        self.tree = QTreeWidget()
+        self.tree.setHeaderLabels(["Command", "Name"])
+        self.tree.setFont(mono())
+        self.tree.setRootIsDecorated(True)
+        self.tree.itemActivated.connect(self._activated)
+        layout.addWidget(self.tree, 1)
+        row = QHBoxLayout()
+        for text, tip, slot in (("Import...", "Add commands from a CSV or text file", self.import_file),
+                                ("Export...", "Write the list to a CSV file", self.export_file),
+                                ("Clear", "Empty the list", self.clear)):
+            b = QPushButton(text, toolTip=tip)
+            b.clicked.connect(slot)
+            row.addWidget(b)
+        layout.addLayout(row)
+
+    @property
+    def ws(self) -> Workspace:
+        return self.console.main.ws
+
+    def refresh(self) -> None:
+        self.tree.clear()
+        needle = self.filter.text().casefold()
+        groups: dict[str, QTreeWidgetItem] = {}
+        for c in self.ws.commands:
+            if needle and needle not in f"{c.command} {c.name} {c.group} {c.description}".casefold():
+                continue
+            parent = self.tree.invisibleRootItem()
+            if c.group:
+                if c.group not in groups:
+                    groups[c.group] = QTreeWidgetItem(self.tree, [c.group])
+                    groups[c.group].setFirstColumnSpanned(True)
+                parent = groups[c.group]
+            item = QTreeWidgetItem(parent, [c.command, c.name])
+            item.setData(0, Qt.UserRole, c.command)
+            if c.description:
+                item.setToolTip(0, c.description)
+                item.setToolTip(1, c.description)
+        self.tree.expandAll()
+        self.tree.resizeColumnToContents(0)
+
+    def _activated(self, item: QTreeWidgetItem, _col: int) -> None:
+        command = item.data(0, Qt.UserRole)
+        if command:
+            self.console.pick(command)
+
+    def import_file(self, path: str | Path | None = None, replace: bool | None = None) -> bool:
+        if path is None:
+            path, _ = QFileDialog.getOpenFileName(self, "Import commands", "",
+                                                  "Command lists (*.csv *.txt);;All files (*)")
+            if not path:
+                return False
+        if replace is None:
+            replace = False
+            if self.ws.commands:
+                box = QMessageBox(QMessageBox.Question, "Import commands",
+                                  f"The list has {len(self.ws.commands)} commands. Add the new ones to it, "
+                                  f"or replace it?", parent=self)
+                add = box.addButton("Add", QMessageBox.AcceptRole)
+                rep = box.addButton("Replace", QMessageBox.DestructiveRole)
+                box.addButton(QMessageBox.Cancel)
+                box.exec()
+                if box.clickedButton() not in (add, rep):
+                    return False
+                replace = box.clickedButton() is rep
+        try:
+            new = read_commands(path)
+        except (OSError, ValueError, csv.Error) as e:
+            QMessageBox.warning(self, "Import commands", f"Cannot import {path}: {e}")
+            return False
+        self.ws.commands, added, skipped = merge_commands(self.ws.commands, new, replace)
+        self.refresh()
+        self.console.main.set_dirty()
+        self.console.note(f"imported {added} commands from {Path(path).name}"
+                          + (f", skipped {skipped} already listed" if skipped else ""))
+        return True
+
+    def export_file(self, path: str | Path | None = None) -> bool:
+        if path is None:
+            path, _ = QFileDialog.getSaveFileName(self, "Export commands", "commands.csv", "CSV files (*.csv)")
+            if not path:
+                return False
+        try:
+            write_commands(path, self.ws.commands)
+        except OSError as e:
+            QMessageBox.warning(self, "Export commands", f"Cannot write {path}: {e}")
+            return False
+        self.console.note(f"exported {len(self.ws.commands)} commands to {Path(path).name}")
+        return True
+
+    def clear(self) -> None:
+        if self.ws.commands and QMessageBox.question(
+                self, "Commands", f"Remove all {len(self.ws.commands)} commands from the list?") == QMessageBox.Yes:
+            self.ws.commands = []
+            self.refresh()
+            self.console.main.set_dirty()
+
+
 class Console(QWidget):
     """Send any SCPI command by hand and see the reply."""
 
@@ -136,9 +259,19 @@ class Console(QWidget):
         self.output = QPlainTextEdit(readOnly=True)
         self.output.setFont(mono())
         self.output.setMaximumBlockCount(TRANSCRIPT_LINES)
+        # per-user view settings (CON-11), next to the console history
+        self.settings = QSettings(str(history_path().parent / "console.ini"), QSettings.IniFormat)
+        self.output.viewport().installEventFilter(self)
         self.output.setContextMenuPolicy(Qt.CustomContextMenu)
         self.output.customContextMenuRequested.connect(self._context_menu)
-        layout.addWidget(self.output, 1)
+        self.commands = CommandsPanel(self)
+        self.commands.hide()
+        split = QSplitter(Qt.Horizontal)
+        split.addWidget(self.output)
+        split.addWidget(self.commands)
+        split.setStretchFactor(0, 3)
+        split.setStretchFactor(1, 1)
+        layout.addWidget(split, 1)
         self._find_bar(layout)
         self.entries: deque[tuple[datetime, str, str]] = deque(maxlen=TRANSCRIPT_LINES)
         row = QHBoxLayout()
@@ -154,12 +287,16 @@ class Console(QWidget):
         self.completer.setCompletionMode(QCompleter.UnfilteredPopupCompletion)
         self.completer.activated.connect(self._apply_completion)
         self.keys = _InputKeys(self)
-        send = QPushButton("Send")
+        self.send_button = send = QPushButton("Send")
         send.clicked.connect(self._send_typed)
+        self.commands_button = QPushButton("Commands")
+        self.commands_button.setCheckable(True)
+        self.commands_button.setToolTip("The workspace's list of known commands: import, pick, export")
+        self.commands_button.toggled.connect(self.commands.setVisible)
         history = QPushButton("History")
         history.setToolTip("The saved console history: send an entry again or delete it")
         history.clicked.connect(lambda: HistoryDialog(self).exec())
-        errors = QPushButton("Error queue")
+        self.errors_button = errors = QPushButton("Error queue")
         errors.setToolTip("Read SYST:ERR? until the queue is empty")
         errors.clicked.connect(self.drain_errors)
         clear = QPushButton("Clear")
@@ -168,17 +305,52 @@ class Console(QWidget):
         self.timestamps.setToolTip("Show the time of every line, to the millisecond")
         self.timestamps.setChecked(True)
         self.timestamps.toggled.connect(self.rerender)
+        self.wrap = QCheckBox("Wrap")
+        self.wrap.setToolTip("Wrap long lines; off, they scroll sideways")
+        self.wrap.setChecked(self.settings.value("wrap", False, type=bool))
+        self.wrap.toggled.connect(self.set_wrap)
         self.log_button = QPushButton("Log to file")
         self.log_button.setCheckable(True)
         self.log_button.setToolTip("Append every console line, with date and time, to a text file")
         self.log_button.clicked.connect(self._toggle_log)
         self.session_log: SessionLog | None = None
         row.addWidget(self.input, 1)
-        for b in (send, history, errors, clear, self.timestamps, self.log_button):
+        for b in (send, self.commands_button, history, errors, clear, self.timestamps, self.wrap, self.log_button):
             row.addWidget(b)
         layout.addLayout(row)
-        for keys, slot in (("Ctrl+F", self.show_find), ("Ctrl+K", self.clear)):
+        for keys, slot in (("Ctrl+F", self.show_find), ("Ctrl+K", self.clear), ("Ctrl+=", lambda: self.zoom(1)),
+                           ("Ctrl++", lambda: self.zoom(1)), ("Ctrl+-", lambda: self.zoom(-1)),
+                           ("Ctrl+0", lambda: self.set_font_size(mono().pointSize()))):
             QShortcut(QKeySequence(keys), self, slot, context=Qt.WidgetWithChildrenShortcut)
+        self.set_font_size(self.settings.value("font_size", mono().pointSize(), type=int))
+        self.set_wrap(self.wrap.isChecked())
+
+    # --- font size and wrap ------------------------------------------------------------------
+
+    def eventFilter(self, obj, event) -> bool:
+        if (event.type() == QEvent.Wheel and obj is self.output.viewport()
+                and event.modifiers() & Qt.ControlModifier):
+            self.zoom(1 if event.angleDelta().y() > 0 else -1)
+            return True
+        return super().eventFilter(obj, event)
+
+    def font_size(self) -> int:
+        return self.output.font().pointSize()
+
+    def zoom(self, step: int) -> None:
+        self.set_font_size(self.font_size() + step)
+
+    def set_font_size(self, size: int) -> None:
+        size = max(FONT_MIN, min(FONT_MAX, size))
+        for w in (self.output, self.input):
+            f = w.font()
+            f.setPointSize(size)
+            w.setFont(f)
+        self.settings.setValue("font_size", size)
+
+    def set_wrap(self, on: bool) -> None:
+        self.output.setLineWrapMode(QPlainTextEdit.WidgetWidth if on else QPlainTextEdit.NoWrap)
+        self.settings.setValue("wrap", on)
 
     # --- hex and text ------------------------------------------------------------------------
 
@@ -189,6 +361,10 @@ class Console(QWidget):
         for text, convert in (("Selection as hex", text_to_hex), ("Hex selection as text", hex_to_text)):
             act = menu.addAction(text, lambda c=convert, t=text: self.show_converted(t, c, selected))
             act.setEnabled(bool(selected))
+        menu.addSeparator()
+        act = menu.addAction("Send break (250 ms)", self.send_break)
+        act.setEnabled(self.input.isEnabled() and self.main.ws.config.connection.transport == "serial")
+        act.setToolTip("Hold the COM port line in the break state; only on a COM port link")
         menu.exec(self.output.mapToGlobal(pos))
 
     def show_converted(self, title: str, convert, selected: str) -> QDialog | None:
@@ -304,9 +480,24 @@ class Console(QWidget):
 
     # --- autocomplete ------------------------------------------------------------------------
 
+    def set_link_up(self, up: bool) -> None:
+        """Sending needs the link; the transcript, search, log and the command list don't."""
+        for w in (self.input, self.send_button, self.errors_button):
+            w.setEnabled(up)
+
+    def set_workspace(self, ws: Workspace) -> None:
+        self.commands.refresh()
+
     def suggestions(self) -> list[str]:
-        profile = self.main.ws.config.profile if getattr(self.main, "ws", None) else None
-        return completions(self.input.text(), self.history.items, profile)
+        ws = getattr(self.main, "ws", None)
+        profile = ws.config.profile if ws else None
+        saved = [c.command for c in ws.commands] if ws else []
+        return completions(self.input.text(), self.history.items, profile, saved)
+
+    def pick(self, command: str) -> None:
+        """A command picked from the list goes to the input line, to be completed and sent."""
+        self.input.setText(command)
+        self.input.setFocus()
 
     def complete(self) -> None:
         """Ctrl+Space: one suggestion is filled in at once; several open a list to pick from."""
@@ -434,6 +625,11 @@ class Console(QWidget):
             self.log("(sent)", "note")
         else:
             self.log(reply, "error" if reply.startswith("(no reply") else "rx")
+
+    def send_break(self) -> None:
+        self.log("> break (250 ms)", "tx")
+        self.main.device.submit(lambda t: t.send_break(250), lambda _r: self.note("break sent"),
+                                lambda e: self.log(f"error: {describe_error(e)}", "error"))
 
     def drain_errors(self) -> None:
         def job(t: Target):

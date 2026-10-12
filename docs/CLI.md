@@ -92,10 +92,11 @@ A bit field is written by reading the word that holds it, changing the field and
 | `write EXPR VALUE [-y]` | Write one value, then read it back to confirm it. Goes through the workspace's scaling and write safety; `-y` answers yes when it asks |
 | `dump EXPR [LEN]` or `dump MCU ADDR LEN` | Hex and ASCII dump of a variable or of a memory range |
 | `poke MCU ADDR HEX` | Write raw bytes, lowest address first, and confirm them |
-| `send COMMAND` | Send one SCPI command. A query (header ending in `?`) waits for its reply; `--reply` and `--no-reply` override that |
+| `send COMMAND [--expect REGEX]` | Send one SCPI command. A query (header ending in `?`) waits for its reply; `--reply` and `--no-reply` override that. `--expect` checks the reply: exit code 11 if no part of it matches the regular expression or no reply came, such as `rdt send "*IDN?" --expect "^RDT,"` |
 | `errors` | Read the SCPI error queue until it is empty |
 | `watch [EXPR...] [--tab NAME] [-i MS] [-n N] [--csv FILE]` | Poll values and print one line per sample. A struct or array becomes one column per field and cell. With no names, every item in the workspace's watch tabs (or with `--tab`, one tab's), each at its own interval. `--csv` also logs every value read to a CSV file (see [CSV log](#csv-log)) |
 | `console [--timestamps] [--log FILE]` | Interactive SCPI console. `.read EXPR` reads, `.write EXPR VALUE` writes, `.err` reads the error queue, `.history [N]` lists the saved history, `!N` sends entry N again, `.quit` leaves. See [Console](#console) |
+| `commands list [TEXT]`, `commands import FILE [--replace]`, `commands export FILE`, `commands clear` | The workspace's list of known commands. See [Console](#console). Needs no device |
 | `history [-n N] [--clear]` | List the last N (default 20, 0 for all) commands of the saved console history, or delete it. Needs no device |
 | `init FILE` | Save the current target (file and command-line options) as a new workspace. Needs no device |
 | `list` | Show the workspace's watch tabs and their items. Needs no device |
@@ -103,14 +104,16 @@ A bit field is written by reading the word that holds it, changing the field and
 | `remove EXPR [--tab NAME]` | Remove an item from one watch tab, or without `--tab` from every tab. Needs no device |
 | `tab add NAME`, `tab rename NAME NEW`, `tab remove NAME` | Add an empty watch tab, rename one, or remove one with its items. Needs no device |
 
-`-v` logs link events and `-vv` logs every command and reply, which is the first thing to turn on when trying a new firmware. The exit code is 0 on success and 1 if anything failed.
+`-v` logs link events and `-vv` logs every command and reply, which is the first thing to turn on when trying a new firmware. The exit code is 0 on success, 1 if anything failed, and 11 when `send --expect` gets no matching reply.
 
 ### Console
 
 `rdt console` sends each line you type as an SCPI command; a query (header ending in `?`) waits for its reply. Lines starting with `.` are RDT's own commands (`.help` lists them).
 
 - **History.** Every SCPI command sent is saved, per user, in `%LOCALAPPDATA%\rdt\console_history.txt` (the last 500; set `RDT_HISTORY_FILE` to use another file). The GUI console shares it. In a terminal, Up and Down walk through it. `.history` lists the last 20 numbered (`.history 50` the last 50), `!N` sends entry N again, and `.history clear` empties it. `rdt history` does the same without a device.
-- **Tab completion.** Tab completes the line from the history, the profile's commands, the common IEEE 488.2 commands and the console's own `.` commands; pressed twice it lists the choices. This needs line editing: on Windows RDT installs `pyreadline3` for it.
+- **Known commands.** A workspace can hold a list of the device's commands (`[[command]]` tables). `rdt commands import FILE` fills it from a CSV file with the columns `command`, `name`, `group` and `description` (a header row names them in any order; without one they are taken in that order), or from a text file with one command per line; lines starting with `#` are skipped. Commands already listed (ignoring case) are skipped, and `--replace` replaces the list. `rdt commands export FILE` writes it as CSV, `rdt commands list [TEXT]` shows it by group, and in the console `.commands [TEXT]` does the same.
+- **`.info`** shows what `rdt info` shows, **`.reconnect`** closes the link and opens it again (after a board reset, for example), and **`.break`** sends a 250 ms break on a COM port link.
+- **Tab completion.** Tab completes the line from the history, the known commands, the profile's commands, the common IEEE 488.2 commands and the console's own `.` commands; pressed twice it lists the choices. This needs line editing: on Windows RDT installs `pyreadline3` for it.
 - **`--timestamps`** starts every line with the time to the millisecond, and echoes each command as `> COMMAND` so it has a time too.
 - **`--log FILE`** appends every line sent and received to a text file, each with its date and time and a mark: `>` sent, `<` reply, `!` error, `#` note.
 
@@ -204,6 +207,12 @@ name = "Overview"
   expr = "main:motor.speed"   # also in this tab, with the settings given above
 
 [chart]                       # the GUI's chart layout; kept as written
+
+[[command]]                   # the device's known commands, for the console's list
+command     = "MOTor:SPEed?"
+name        = "Speed"         # name, group and description are optional
+group       = "Motor"
+description = "Motor speed in rpm"
 ```
 
 Every key in a `[[tab.watch]]` but `expr` is optional.
@@ -313,7 +322,7 @@ rdt/
   scheduler.py                                      poll scheduler: block merging, one poll for many items
   stats.py, csvlog.py                               min/max/mean per value, the CSV log
   workspace.py, scaling.py, tomlw.py                workspace files, display formats and scaling, write safety
-  console.py                                        console history, autocomplete, session log
+  console.py                                        console history, autocomplete, session log, known commands
   cli.py                                            command line
   gui/         app.py, device.py, variables.py, panels.py, chart.py   the GUI (PySide6): main window, device worker thread,
                                                     watch tabs and symbol browser, memory view, console, dialogs,

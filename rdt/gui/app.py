@@ -16,8 +16,9 @@ from pathlib import Path
 from PySide6.QtCore import Qt, QTimer
 from PySide6.QtGui import QAction, QKeySequence
 from PySide6.QtWidgets import (
-    QApplication, QComboBox, QDialog, QDockWidget, QFileDialog, QLabel, QLineEdit, QMainWindow, QMessageBox,
-    QPushButton, QSpinBox, QToolBar,
+    QAbstractItemView, QApplication, QComboBox, QDialog, QDialogButtonBox, QDockWidget, QFileDialog, QLabel,
+    QLineEdit, QMainWindow, QMessageBox, QPushButton, QSpinBox, QTableWidget, QTableWidgetItem, QToolBar,
+    QVBoxLayout,
 )
 
 from ..csvlog import CsvLog
@@ -28,7 +29,7 @@ from ..target import ConnectionConfig, McuConfig, TargetConfig
 from ..workspace import Workspace
 from .chart import ChartPanel
 from .device import Device, describe_error
-from .panels import Console, McuDialog, MemoryView, ProfileDialog
+from .panels import CONSOLE_KEYS, Console, McuDialog, MemoryView, ProfileDialog
 from .variables import SymbolBrowser, WatchTabs, WatchTree
 
 FILTER = "RDT workspace (*.rdtw);;Target file (*.toml);;All files (*)"
@@ -260,6 +261,44 @@ class MainWindow(QMainWindow):
         m.addSeparator()
         stats = action(m, "&Statistics columns", self.watch_tabs.show_stats, "Ctrl+T")
         stats.setCheckable(True)
+        m = self.menuBar().addMenu("&Help")
+        action(m, "&Keyboard shortcuts", self.show_shortcuts, "F1")
+
+    def shortcut_rows(self) -> list[tuple[str, str, str]]:
+        """(where, what, keys) for every menu shortcut, read from the menus themselves, then the
+        console's keys."""
+        rows = []
+        for top in self.menuBar().actions():
+            menu = top.menu()
+            for a in menu.actions() if menu else []:
+                if not a.shortcut().isEmpty():
+                    rows.append((top.text().replace("&", ""), a.text().replace("&", "").rstrip("."),
+                                 a.shortcut().toString(QKeySequence.NativeText)))
+        rows += [("Console", what, keys) for keys, what in CONSOLE_KEYS]
+        return rows
+
+    def show_shortcuts(self) -> QDialog:
+        dlg = QDialog(self)
+        dlg.setWindowTitle("Keyboard shortcuts")
+        dlg.resize(560, 520)
+        layout = QVBoxLayout(dlg)
+        rows = self.shortcut_rows()
+        table = QTableWidget(len(rows), 3)
+        table.setHorizontalHeaderLabels(["Where", "Action", "Keys"])
+        table.verticalHeader().hide()
+        table.setEditTriggers(QAbstractItemView.NoEditTriggers)
+        for r, row in enumerate(rows):
+            for c, text in enumerate(row):
+                table.setItem(r, c, QTableWidgetItem(text))
+        table.resizeColumnsToContents()
+        table.horizontalHeader().setStretchLastSection(True)
+        layout.addWidget(table)
+        buttons = QDialogButtonBox(QDialogButtonBox.Close)
+        buttons.rejected.connect(dlg.reject)
+        layout.addWidget(buttons)
+        dlg.setAttribute(Qt.WA_DeleteOnClose)
+        dlg.show()
+        return dlg
 
     # --- workspace ---------------------------------------------------------------------------
 
@@ -269,6 +308,7 @@ class MainWindow(QMainWindow):
         self.chart.load(self.ws.chart)
         self.symbols.set_workspace(self.ws)
         self.memory.set_workspace(self.ws)
+        self.console.set_workspace(self.ws)
         self.set_dirty(False)
 
     @property
@@ -434,8 +474,8 @@ class MainWindow(QMainWindow):
         self.bar.state.setStyleSheet(f"color: {color}")
         self.bar.connect_button.setText(button)
         up = state == LinkState.UP
-        for w in (self.memory, self.console):
-            w.setEnabled(up)
+        self.memory.setEnabled(up)
+        self.console.set_link_up(up)
         for w in (self.bar.transport, self.bar.host, self.bar.port, self.bar.com, self.bar.baud):
             w.setEnabled(self.device.target is None and not self._connecting)
 

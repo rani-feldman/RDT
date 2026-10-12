@@ -51,6 +51,16 @@ class SerialTransport(Transport):
             self.close()
             raise LinkError(f"{self.description}: {e}") from None
 
+    def send_break(self, duration: float) -> None:
+        import serial
+
+        if self._serial is None:
+            raise LinkError(f"{self.description}: not open")
+        try:
+            self._serial.send_break(duration)
+        except (serial.SerialException, OSError) as e:
+            raise LinkError(f"{self.description}: break failed: {e}") from None
+
     def _recv(self, timeout: float) -> bytes:
         import serial
 
