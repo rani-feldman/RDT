@@ -266,7 +266,7 @@ User guides: [CLI.md](CLI.md), [GUI.md](GUI.md), [SIMULATOR.md](SIMULATOR.md).
 
 #### D-PLT-1 Windows application, portable code
 
-RDT is a Python package installed with `python -m pip install -e .[dev]`. It uses no Windows-only API: serial ports go through pyserial, sockets through the standard library, and paths through `pathlib`. Windows-specific defaults are limited to the symbol cache folder (`%LOCALAPPDATA%\rdt\cache`) and COM port names. CI runs the whole test suite on Linux, which keeps the code portable.
+RDT is a Python package installed with `python -m pip install -e .[dev]`. It uses no Windows-only API: serial ports go through pyserial, sockets through the standard library, and paths through `pathlib`. Windows-specific defaults are limited to the symbol cache folder (`%LOCALAPPDATA%\rdt\cache`) and COM port names. CI runs the whole test suite on both Windows and Linux, with Python 3.11 and 3.13, which keeps the code portable.
 
 #### D-PLT-2 Python and PySide6
 
@@ -987,7 +987,7 @@ Budgets for the firmware part, to check once it exists:
 
 ## 6. Testing
 
-`python -m pytest` runs the whole suite, and CI runs it on every pull request (`.github/workflows/tests.yml`).
+`python -m pytest` runs the whole suite. CI runs it on every pull request and on main, on Windows and Linux with Python 3.11 and 3.13 (`.github/workflows/tests.yml`).
 
 - **Simulator tests** (`tests/test_device.py`, `test_memory.py`, `test_profile.py`, `test_transports.py`): every command, reply format and error, the shared error queue, a silent MCU, and 64-byte splitting.
 - **Host tests** (`tests/test_host_*.py`): run against the simulator over TCP, UDP with dropped datagrams, and a serial pseudo-terminal. They cover user-defined commands, split reads and writes, write confirmation, a silent MCU, a cut link and reconnect, and a second SCPI client sharing the device and its error queue.
