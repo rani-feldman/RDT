@@ -161,6 +161,7 @@ class MainWindow(QMainWindow):
         self.device.opened.connect(self._opened)
         self.device.closed.connect(self._show_state)
         self._connecting = False
+        self._last_state: str | None = None
         self.log: CsvLog | None = None
         self._log_link_up = True
 
@@ -357,6 +358,7 @@ class MainWindow(QMainWindow):
         for t in (self.poll_timer, self.state_timer, self.elf_timer, self.memory.timer, self.chart.timer):
             t.stop()
         self.stop_log()
+        self.console.stop_log()
         self.device.shutdown()
         event.accept()
 
@@ -424,6 +426,10 @@ class MainWindow(QMainWindow):
             text, color, button = "● link down, reconnecting", "#c03030", "Disconnect"
         else:
             text, color, button = "○ not connected", "#888888", "Connect"
+        if text != self._last_state:
+            if self._last_state is not None:
+                self.console.log(text.lstrip("●○ "), "error" if state == LinkState.DOWN else "note")
+            self._last_state = text
         self.bar.state.setText(text)
         self.bar.state.setStyleSheet(f"color: {color}")
         self.bar.connect_button.setText(button)

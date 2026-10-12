@@ -24,7 +24,7 @@ The host application loads one ELF file per MCU and reads its DWARF debug inform
 - **Scope now:** the PC application only. The firmware side is a specification (section 5); a Python simulated device implements it, so the application is built and tested end to end before the firmware has its memory commands.
 - **Not in v1:** breakpoints, stepping, local (stack) variables, flashing, authentication, map files.
 
-**Status (2026-10-12):** milestones M0 to M4 are done. The simulator, host core, CLI, symbols, workspace, GUI, watch tabs, live chart, statistics and CSV log are all merged and tested. The firmware memory commands are not written yet.
+**Status (2026-10-12):** milestones M0 to M4 are done. The simulator, host core, CLI, symbols, workspace, GUI, watch tabs, live chart, statistics, CSV log and console features are all built and tested. The firmware memory commands are not written yet.
 
 ## 2. Requirements
 
@@ -196,7 +196,20 @@ Each requirement links to its design section.
 | --- | --- | --- | --- |
 | SIM-1 | A simulated device stands in for the firmware until it has its memory commands (2026-10-05) | Done | [D-SIM-1](#d-sim-1-simulated-device) |
 
-### 2.17 Removed and not in v1
+### 2.17 Console
+
+Console features taken from ComPort-Zone (an open serial terminal); rani approved each on 2026-10-12. Ideas only: ComPort-Zone has no licence, so none of its code is used.
+
+| ID | Requirement | Status | Design |
+| --- | --- | --- | --- |
+| CON-1 | The console keeps its command history across launches, per user and shared by the GUI and CLI; it can be listed, re-sent and deleted (2026-10-12) | Done | [D-CON-1](#d-con-1-saved-history) |
+| CON-2 | Autocomplete in the console from the history, the profile's commands and common IEEE 488.2 commands (2026-10-12) | Done | [D-CON-2](#d-con-2-autocomplete) |
+| CON-3 | The console transcript shows each line's time to the millisecond (optional) and colours commands, replies, errors and notes differently (2026-10-12) | Done | [D-CON-3](#d-con-3-timestamps-and-colours) |
+| CON-4 | Search the console transcript (Ctrl+F) with highlighted matches and a counter; Ctrl+K clears it (2026-10-12) | Done | [D-CON-4](#d-con-4-transcript-search) |
+| CON-5 | Log the console session to a text file, every line with date, time and direction (2026-10-12) | Done | [D-CON-5](#d-con-5-session-log) |
+| CON-6 | Convert a transcript selection between hex and text (2026-10-12) | Done | [D-CON-6](#d-con-6-hex-and-text) |
+
+### 2.18 Removed and not in v1
 
 | ID | Item | Status | Design |
 | --- | --- | --- | --- |
@@ -204,6 +217,7 @@ Each requirement links to its design section.
 | RM-2 | Map file input (2026-10-05, ELF only) | Removed | [D-SYM-1](#d-sym-1-elf-and-dwarf-only) |
 | RM-3 | Not in v1 (2026-10-05): multi-address read command, on-target recorder, alarms, stimulus, computed values, log replay, dashboards | Removed | none |
 | RM-4 | Binary protocol, a faster alternative to SCPI | Planned | [Appendix](#9-appendix-binary-protocol-planned) |
+| RM-5 | Not taken from ComPort-Zone (2026-10-12): command files (scripts) and sending several pasted lines, both declined by rani; its saved-command library (same idea as RM-1) and control panel (covered by watch tabs) were not proposed | Removed | none |
 
 Requirements on the firmware itself (FW-1 to FW-9) are in [section 5](#5-firmware-specification).
 
@@ -248,6 +262,7 @@ rdt/
   scheduler.py                                      poll scheduler: block merging, one poll for many items
   stats.py, csvlog.py                               statistics, CSV log
   workspace.py, scaling.py, tomlw.py                workspace file, display formats and scaling, write safety
+  console.py                                        console history, autocomplete, session log, hex/text
   cli.py                                            command line
   gui/         app.py       main window, connection bar, menus, polling tick, ELF check
                device.py    device worker thread
@@ -413,6 +428,7 @@ If the profile has a `size_query` (default `MEMory:MAX?`), the session sends it 
 - **GUI:** a console panel (`rdt/gui/panels.py`) sends any typed command and shows the raw reply, with Up and Down for history. A command whose header ends in `?` waits for a reply. **Error queue** reads the error query until the queue is empty.
 - **CLI:** `rdt console` offers the same, plus `.read EXPR`, `.write EXPR VALUE`, `.err` and `.quit`. `rdt send COMMAND` sends one command, and `rdt errors` empties the error queue.
 - **Logging:** `-vv` on the CLI logs every command and reply, so the commands the scheduler actually sends can be checked.
+- **More:** saved history, autocomplete, timestamps and colours, search, a session log and hex/text conversion are in [4.17 Console](#417-console).
 
 #### D-SCPI-9 Profile editor
 
@@ -930,7 +946,46 @@ The CLI prints the message and exits with code 1. The GUI shows it in the status
 
 Usage is in [SIMULATOR.md](SIMULATOR.md).
 
-### 4.17 Removed
+### 4.17 Console
+
+The console code that is not Qt lives in `rdt/console.py`, so the GUI console (`Console` in `rdt/gui/panels.py`) and `rdt console` (`rdt/cli.py`) share it.
+
+#### D-CON-1 Saved history
+
+- **Store:** `CommandHistory` keeps the commands sent by hand, oldest first, at most 500. Sending a command again moves it to the end. The file is `%LOCALAPPDATA%\rdt\console_history.txt` on Windows (`$XDG_STATE_HOME/rdt` or `~/.local/state/rdt` elsewhere; `RDT_HISTORY_FILE` overrides it), one command per line, UTF-8. It is per user, not in the workspace, so sending a command never marks the workspace changed.
+- **Two consoles at once:** every change re-reads the file, applies the change and writes it back through a temporary file and a rename. A GUI and a CLI console open together therefore both keep their commands. A file that can't be written is logged as a warning and the history stays in memory.
+- **What is kept:** SCPI commands only. The CLI's `.` commands are not saved, since the GUI can't run them.
+- **GUI:** Up and Down walk the history; past the newest entry, the text being typed before comes back. **History** opens a list, newest first, with Send (or double-click), Delete and Clear all.
+- **CLI:** in a terminal, readline (pyreadline3 on Windows, a Windows-only dependency) is loaded with the history for Up and Down. `.history [N]` lists the last N numbered, `!N` sends entry N again, `.history clear` empties it. `rdt history [-n N] [--clear]` works without a workspace or device.
+
+#### D-CON-2 Autocomplete
+
+`completions(text, history, profile)` returns up to 20 suggestions, without duplicates (case-insensitive): those starting with `text` first, then those containing it. Within each group the order is: history, newest first; the profile's commands (the read and write templates up to their first field, such as `MEMory:READ? `, and the error, size and probe queries); then the IEEE 488.2 common commands `*IDN?`, `*RST`, `*CLS`, `*OPC?`, `*ESR?`, `*STB?`, `*TST?`, `*WAI` and `SYSTem:ERRor?`.
+
+- **GUI:** Ctrl+Space. One suggestion is filled in at once; several open a `QCompleter` popup that refreshes as you type.
+- **CLI:** Tab, through readline, completing the whole line (the completer delimiters are cleared, since SCPI headers hold `:`, `?` and `*`). The console's own `.` commands are offered as well.
+
+#### D-CON-3 Timestamps and colours
+
+- **GUI:** the console keeps its last 5000 lines as entries of (time, kind, text), the kind being `tx` (sent), `rx` (reply), `error` (no reply, the link going down, any failure) or `note` (RDT's own: the other link state changes from `MainWindow._show_state`, a command sent with no reply expected, log start and stop). Each line is drawn with its time as `HH:MM:SS.mmm` in grey, then its text: `tx` green `#2e9d4f`, `error` red `#d64545`, `note` grey `#888888`, `rx` in the theme's text colour so it reads on light and dark themes. The **Timestamps** check box redraws the transcript from the entries with or without times.
+- **CLI:** `rdt console --timestamps` wraps the output in a writer that starts every line with the time, and echoes each command as `> COMMAND` so the command has a time too. The CLI has no colours.
+
+#### D-CON-4 Transcript search
+
+Ctrl+F (a shortcut on the console panel) opens a find bar under the transcript, filled with the selection if one is selected. Every case-insensitive match (at most 1000) is highlighted with `QPlainTextEdit` extra selections, the current one in a stronger colour, and a label shows `3 of 12`. Typing jumps to the newest match; Enter and Shift+Enter step to the next and previous, wrapping; Esc closes the bar and removes the highlights. New lines while the bar is open are searched too. Ctrl+K clears the transcript and its entries, like **Clear**. The CLI relies on the terminal's own search.
+
+#### D-CON-5 Session log
+
+`SessionLog` appends to a text file (never overwrites), one line per transcript line: `2026-10-12 06:58:53.123 > *IDN?`. The mark is `>` sent, `<` reply, `!` error, `#` note; a reply of several lines gives one log line each. Every line is flushed at once, so the file is complete if RDT is killed. It starts with `# log started` and ends with `# log stopped`.
+
+- **GUI:** **Log to file** asks for a file (default `console_YYYYMMDD_HHMMSS.txt`) and logs until clicked again or the window closes. It is separate from the CSV value log (D-CSV-1).
+- **CLI:** `rdt console --log FILE`. A writer copies each finished output line to the log: a line starting with `error:` or `(no reply` as an error, the rest as replies; the typed line is logged as sent.
+
+#### D-CON-6 Hex and text
+
+`text_to_hex` gives a string's UTF-8 bytes as spaced hex (`Hi` is `48 69`). `hex_to_text` takes hex with or without spaces, commas, colons or `0x`, refuses anything else or an odd number of digits, and shows printable ASCII as is, tab and newline as themselves, and any other byte as `\xNN`. In the GUI, the transcript's right-click menu adds **Selection as hex** and **Hex selection as text**, shown in a small window with **Copy**; an invalid selection shows why.
+
+### 4.18 Removed
 
 #### D-RM-1 Command buttons
 
@@ -993,7 +1048,8 @@ Budgets for the firmware part, to check once it exists:
 - **Host tests** (`tests/test_host_*.py`): run against the simulator over TCP, UDP with dropped datagrams, and a serial pseudo-terminal. They cover user-defined commands, split reads and writes, write confirmation, a silent MCU, a cut link and reconnect, and a second SCPI client sharing the device and its error queue.
 - **Symbol tests** (`tests/test_symbols.py`): a corpus in `tests/elf` of one C program with structs, unions, anonymous members, bit fields, enums, 2-D arrays, pointer chains, function pointers and clashing file-statics. It is built by Clang for little-endian Cortex-M4 (DWARF 4), by Clang for big-endian ARM (DWARF 5), and by GCC for x86-64 (64-bit pointers), plus a "rebuilt" image for reload tests. `build.sh` rebuilds them; the ELFs are committed.
 - **Scheduler and workspace tests** (`tests/test_scheduler.py`, `test_workspace.py`): block planning, peripheral ranges, fallback to item-by-item reads, tabs, shared items, older files, scaling and write safety.
-- **GUI tests** (`tests/test_gui.py`): pytest-qt drives the window against the simulator, offscreen. They cover connect, watch tabs, editing, the chart, statistics and the CSV log.
+- **Console tests** (`tests/test_console.py`, console tests in `test_host_cli.py` and `test_gui.py`): the saved history shared by two consoles, its limit and an unwritable file, Up and Down with the draft, completion order, the session log format, hex and text conversion, `rdt console --timestamps`, `--log`, `.history` and `!N`, and in the GUI Ctrl+Space, the history dialog, colours, timestamps, search and Ctrl+K.
+- **GUI tests** (`tests/test_gui.py`): pytest-qt drives the window against the simulator, offscreen. They cover connect, watch tabs, editing, the chart, statistics, the CSV log and the console.
 
 Later, with the firmware: region-boundary tests on the target, and measuring the round trip against FW budgets on real hardware.
 
@@ -1006,6 +1062,7 @@ Later, with the firmware: region-boundary tests on the target, and measuring the
 | M2 | Host core and `rdt` CLI over SCPI, several MCUs, reconnect (PR #7) | Done 2026-10-11 |
 | M3 | Symbols by name (PR #9), workspace (PR #10), GUI (PR #12) | Done 2026-10-11 |
 | M4 | Poll scheduler, live chart, statistics, CSV log (PR #14); watch tabs and removing command buttons (PR #16) | Done 2026-10-11 |
+| Console | Console features from ComPort-Zone, CON-1 to CON-6 | Done 2026-10-12 |
 | M5 | Build-ID check (SYM-8), global read-only default (WS-4), reopen last workspace (WSP-3) | Planned |
 | M6 | Installer and packaged documentation | Planned |
 | Later | Firmware memory commands on real hardware; binary protocol (RM-4) | Waiting on firmware |
@@ -1037,6 +1094,7 @@ The application is built against the simulator. As soon as the firmware has the 
 | 2026-10-11 | M2 is the host core and CLI only, with no GUI |
 | 2026-10-11 | Several watch tabs; command buttons removed |
 | 2026-10-12 | The full design document lives in the repository as this file, organised by requirement; DESIGN.md removed |
+| 2026-10-12 | Console features from ComPort-Zone: saved history, autocomplete, timestamps and colours, search, session log, hex/text conversion (CON-1 to CON-6). Scripts and multi-line paste declined |
 
 ## 9. Appendix: binary protocol (planned)
 
