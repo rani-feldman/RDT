@@ -113,11 +113,16 @@ def test_write_to_a_value_the_firmware_changes_is_not_confirmed(two_mcus):
             assert e.value.read_back is not None
 
 
-def test_max_response_comes_from_the_size_query(two_mcus):
+def test_max_response_comes_from_the_profile_only(two_mcus):
     dev = Device(two_mcus, SimProfile(max_response=32), internal_timeout_ms=1)
     with Simulator(dev, TransportConfig(tcp="127.0.0.1:0", udp=None)) as s:
-        with make_target("tcp", s.tcp_address) as t:
+        t = make_target("tcp", s.tcp_address, Profile(timeout_ms=300, max_response=32))
+        sent = []
+        send = t.session.protocol.send
+        t.session.protocol.send = lambda command: (sent.append(command), send(command))[1]
+        with t:
             assert t.max_response == 32
+            assert sent == ["*IDN?"]          # nothing asks the device for its maximum
             assert len(t.read("main", 0x20000000, 236)) == 236   # 8 reads, none over 32 bytes
 
 
@@ -134,7 +139,7 @@ def test_every_reply_format(two_mcus, fmt):
 
 def test_user_defined_commands(two_mcus):
     p = dict(read="RD? {mcu},{addr},{len}", write="WR {mcu},{addr},{value},{size}",
-             addr_format="{addr:X}", value_format="{value:X}", size_query=None)
+             addr_format="{addr:X}", value_format="{value:X}")
     dev = Device(two_mcus, SimProfile(**p))
     with Simulator(dev, TransportConfig(tcp="127.0.0.1:0", udp=None)) as s:
         with make_target("tcp", s.tcp_address, Profile(**p, timeout_ms=300)) as t:
@@ -252,7 +257,7 @@ def test_connect_fails_cleanly_when_nothing_listens():
 def test_udp_device_that_stops_answering_takes_the_link_down(sim):
     with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as s:
         s.bind(("127.0.0.1", 0))   # a UDP port that never answers
-        t = make_target("udp", s.getsockname(), Profile(timeout_ms=50, retries=1, probe=None, size_query=None),
+        t = make_target("udp", s.getsockname(), Profile(timeout_ms=50, retries=1, probe=None),
                         auto_reconnect=False)
         with t:
             with pytest.raises(LinkDown, match="stopped answering"):
