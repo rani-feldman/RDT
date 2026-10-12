@@ -32,6 +32,7 @@ Status values:
 
 - **Done:** implemented in the PC application and covered by tests.
 - **Firmware:** a requirement on the firmware. The simulator implements it today; the real firmware will implement it later.
+- **In review:** built in an open pull request, not merged yet.
 - **Planned:** agreed but not built yet.
 - **Removed:** was built or agreed, then dropped by rani.
 
@@ -108,6 +109,7 @@ Each requirement links to its design section.
 | MEM-2 | Refuse any access outside the ELF's memory and the ranges the user listed (2026-10-05) | Done | [D-MEM-2](#d-mem-2-known-memory-only) |
 | MEM-3 | Refuse writes to read-only ELF sections | Done | [D-MEM-3](#d-mem-3-read-only-sections) |
 | MEM-4 | Never merge a peripheral range into a larger read; read each item there alone at its exact size (2026-10-05) | Done | [D-MEM-4](#d-mem-4-peripheral-ranges) |
+| MEM-5 | List RAM and flash banks as memory ranges, matching the firmware's own table of readable regions (ITCM, Flash, DTCM, AXI SRAM, SRAM1-4, Backup SRAM); reads in them merge like reads in ELF sections (2026-10-12) | In review (PR #27) | [D-MEM-5](#d-mem-5-memory-ranges) |
 
 ### 2.7 Values and display
 
@@ -458,11 +460,17 @@ id   = 0
 name = "main"
 elf  = "build/main.elf"
 
-  [[mcu.ranges]]          # memory with no ELF section behind it, such as peripherals
+  [[mcu.ranges]]          # a peripheral block (kind = "peripheral" is the default)
   name     = "GPIOA"
   start    = 0x48000000
   size     = 0x400
   writable = true
+
+  [[mcu.ranges]]          # a whole RAM bank (D-MEM-5)
+  name  = "DTCM"
+  kind  = "memory"
+  start = 0x20000000
+  end   = 0x2001FFFF      # the last address in it; or give size
 
 [[mcu]]
 id         = 1
@@ -587,15 +595,41 @@ RDT compares a few bytes that differ between firmware builds, read from the devi
 
 #### D-MEM-2 Known memory only
 
-`rdt/memmap.py` builds a memory map per MCU from its ELF's allocated sections plus the listed ranges (`[[mcu.ranges]]`, or `[[ranges]]` in the profile with `mcu = "name"`). `Target._check` refuses an access outside them with `AccessRefused` before anything is sent. An access that touches a listed range must stay entirely inside it. The firmware's own region table is a second check (FW-7).
+`rdt/memmap.py` builds a memory map per MCU from its ELF's allocated sections plus the listed ranges (`[[mcu.ranges]]`, or `[[ranges]]` in the profile with `mcu = "name"`). `Target._check` refuses an access outside them with `AccessRefused` before anything is sent. A read that starts inside a known region and runs past its end is refused too, unless the next section or memory range continues it. An access that touches a peripheral range must stay entirely inside it. The firmware's own region table is a second check (FW-7).
 
 #### D-MEM-3 Read-only sections
 
-Sections without the ELF write flag (`.text`, `.rodata`) are readable but not writable, so writes to them are refused with `AccessRefused`. A listed range is writable unless it has `writable = false`.
+Sections without the ELF write flag (`.text`, `.rodata`) are readable but not writable, so writes to them are refused with `AccessRefused`. A listed range is writable unless it has `writable = false`. A read-only ELF section stays read-only even where a writable memory range covers it (D-MEM-5).
 
 #### D-MEM-4 Peripheral ranges
 
-Listed ranges usually hold peripherals, where reading a register can clear a flag or pop a FIFO. The scheduler never merges an item in a listed range with anything else, and reads it alone at its exact size (D-POLL-3).
+A range's `kind` is `"peripheral"` unless it says otherwise. Peripheral ranges hold registers, where reading one can clear a flag or pop a FIFO. The scheduler never merges an item in a peripheral range with anything else, and reads it alone at its exact size (D-POLL-3). A peripheral range may not overlap an ELF section or another range; that is a `ConfigError` when the file loads.
+
+#### D-MEM-5 Memory ranges
+
+Firmware often keeps a table of the regions it lets a debugger read, such as ITCM, Flash, DTCM, AXI SRAM, SRAM1 to SRAM4 and Backup SRAM. Each region becomes a range with `kind = "memory"`, in `[[mcu.ranges]]` or in the profile's `[[ranges]]`:
+
+```toml
+[[mcu.ranges]]
+name     = "AXI SRAM"
+kind     = "memory"
+start    = 0x24000000
+end      = 0x2407FFFF     # inclusive, as firmware tables write it; or size = 0x80000
+writable = true
+```
+
+| | `kind = "peripheral"` (default) | `kind = "memory"` |
+| --- | --- | --- |
+| For | Register blocks | RAM and flash banks |
+| Overlapping ELF sections or other ranges | Refused when the file loads | Allowed |
+| Reads | Each item alone, at its exact size, never merged | Merged with nearby items, like reads in ELF sections |
+| An access that runs past its end | Refused | Refused, unless another section or memory range continues it |
+| `writable = false` | Writes refused | Writes refused; a read-only ELF section inside a writable memory range stays read-only |
+
+- **Extent:** a range gives either `size` or `end`, the inclusive last address. Giving both, or neither, is a `ConfigError`, and so is an unknown `kind`.
+- **Access checks:** `MemoryMap` in `rdt/memmap.py` keeps memory ranges alongside the ELF's sections. A read may span adjacent sections and memory ranges, so a variable at the edge of `.data` can be read with the bank around it. A write is checked against every area it touches, overlapping ones included, so a writable bank never makes `.rodata` writable.
+- **Merging:** only peripheral ranges are kept out of block merging (D-POLL-3); memory ranges are treated like ELF sections.
+- **Code:** `Range` and `RANGE_KINDS` in `rdt/profile.py`, `Area.kind` and `MemoryMap` in `rdt/memmap.py`. Tests are in `tests/test_host_memmap.py`, `tests/test_workspace.py` and `tests/test_host_cli.py`.
 
 ### 4.7 Values and display
 
@@ -691,7 +725,7 @@ Each top-level item has `poll = "global" | "manual" | <ms>`. `global` follows th
 1. Collect every due item, from every tab, once each (D-TAB-3).
 2. Group the items by MCU and sort them by address.
 3. Merge items at most 32 bytes apart (`MERGE_GAP`) into one block of up to `max_response` bytes. The gaps between them are read too.
-4. Never merge an item in a listed range; read it alone at its exact size (D-MEM-4).
+4. Never merge an item in a peripheral range; read it alone at its exact size (D-MEM-4). Items in memory ranges merge like items in ELF sections (D-MEM-5).
 5. Send one read per block and decode every item from its block. Each `Sample` carries the PC time the reply arrived.
 6. If a merged read fails, read its items again one by one, so one bad item fails alone.
 
@@ -1175,6 +1209,7 @@ The application is built against the simulator. As soon as the firmware has the 
 | 2026-10-12 | Console as a terminal (CON-13): dark, TX/RX/ERR/SYS tags, the prompt as the last line, no Send button. Tab completes from the history and the imported commands only (CON-2 narrowed) |
 | 2026-10-12 | Typing on the transcript's next free line and a grey suggestion while typing (CON-14), at rani's request after CON-13 |
 | 2026-10-12 | Tab lists every match when several commands match, even while a grey suggestion shows (CON-2), at rani's request; → alone takes the grey suggestion |
+| 2026-10-12 | Ranges have a kind: `peripheral` (default, never merged) or `memory` (RAM and flash banks from the firmware's region table, may overlap ELF sections, merged like sections); a range may give `end` instead of `size` (MEM-5) |
 | 2026-10-12 | M5 built: ELF identity check by a constant variable or the GNU build ID, a mismatch refuses writes until allowed (SYM-8); the workspace's read-only default, which also refuses raw writes (WS-4); the GUI reopens the last workspace (WSP-3) |
 
 ## 9. Appendix: binary protocol (planned)
