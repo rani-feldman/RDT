@@ -17,7 +17,9 @@ Started with no file, `rdt-gui` reopens the workspace you last opened or saved. 
 - **Transport**: `tcp` or `udp` with the device's IP address and port, or `serial` with a COM port and baud rate.
 - **Profile**: opens the SCPI profile editor (below). The button shows the profile's name and, when it comes from a file of its own, the file.
 - **Connect / Disconnect** (F5). The state next to it is green while the link is up, red while it is down and RDT is reconnecting, and grey when not connected. The memory view and sending from the console are disabled unless the link is up (the transcript, search, log and command list still work), and the connection fields can only be changed while disconnected.
-- **Poll**: the global polling interval. `Off` (0) stops polling; items set to their own interval still poll.
+- **Poll** (F7, also **Watch > Poll automatically**): untick it to turn all polling off, including items with their own interval. The interval is kept and polling picks up where it was when you tick it again. Polling is on when RDT starts; the setting is not saved in the workspace.
+- The interval next to it is the global polling interval. `Off` (0) stops the global polling only; items set to their own interval still poll.
+- **Poll now** (F6, also **Watch > Poll now**): read every watched item once, in every tab, including manual items, whether polling is on or off.
 - **Log CSV** (Ctrl+L): log every watched value to a CSV file. See [CSV log](#csv-log).
 
 **Target > MCUs and ELF files** sets each MCU's id, name, ELF file, timeout and identity variable. MCU 0 is the main MCU and is required.
@@ -49,7 +51,7 @@ The watch tree of each tab shows each watched item with its value, type, address
 - Right-click a field or cell and choose **Watch this on its own** to give it its own row, with its own format and polling.
 - Grey values are read-only (in the workspace, or not a single value). A red value is an error; hover over it for the reason. When the link goes down or an MCU stops answering, the item shows `link down` or `MCU silent` in grey and its last values stay.
 
-Polling: each item is read at the global interval, at its own interval, or only by hand. Everything that is due is read in one poll, and items close to each other on the same MCU share one read (see [CLI.md](CLI.md#commands)), so they come from the same moment. While a poll is still running no new one starts: an item that can't keep up falls behind rather than queueing reads, and the **Rate** column shows what it actually gets. **Watch > Read all now** (F6) reads everything once, and every item is read once on connect.
+Polling: each item is read at the global interval, at its own interval, or only by hand. Everything that is due is read in one poll, and items close to each other on the same MCU share one read (see [CLI.md](CLI.md#commands)), so they come from the same moment. While a poll is still running no new one starts: an item that can't keep up falls behind rather than queueing reads, and the **Rate** column shows what it actually gets. **Poll now** (F6) reads everything once, and every item is read once on connect.
 
 ### Statistics
 
