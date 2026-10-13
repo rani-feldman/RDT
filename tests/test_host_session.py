@@ -197,6 +197,17 @@ def test_read_modify_write_confirms_only_the_value(two_mcus):
             assert t.read("main", 0x20000008, 4) == bytes.fromhex("55553412")
 
 
+def test_read_replies_are_comma_separated_words(two_mcus):
+    dev = Device(two_mcus)
+    with Simulator(dev, TransportConfig(tcp="127.0.0.1:0", udp=None)) as s:
+        assert dev.handle("MEM:READ? 0,20000000,8") == b"3FC00000,453B8000"   # 1.5 and 3000.0 as uint32 values
+        with make_target("tcp", s.tcp_address, Profile(timeout_ms=300)) as t:
+            assert t.read_value("@main:0x20000000:f32") == 1.5
+            assert t.read_value("@main:0x20000008:i16") == -120
+            t.write_value("@main:0x2000000A:u16", 0xBEEF)
+            assert t.read_value("@main:0x2000000A:u16") == 0xBEEF
+
+
 def test_user_defined_commands(two_mcus):
     p = dict(read="RD? {mcu},{addr},{len}", write="WR {mcu},{addr},{value},{size}")
     dev = Device(two_mcus, SimProfile(**p))
@@ -367,7 +378,7 @@ def test_another_scpi_client_on_the_same_device(sim):
                 f.write(b"MEM:READ? 0,7FFFFFF0,4\n")          # fails: no reply, error queued
                 f.write(b"SYST:ERR?\n")                         # may pop RDT's error, or its own
                 f.flush()
-                for expect in (b"F4010000", None):
+                for expect in (b"000001F4", None):
                     line = f.readline().rstrip(b"\n")
                     other["replies"] += 1
                     if expect is not None and line != expect:

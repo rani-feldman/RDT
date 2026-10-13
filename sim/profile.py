@@ -2,7 +2,8 @@
 
 The simulator reads the same ``[scpi]`` table the host uses, so whatever templates the user
 defines are exactly the commands the simulated device answers. As in the firmware, addresses
-and values are bare hex with no prefix (``20000000``), and read replies are bare hex bytes.
+and values are bare hex with no prefix (``20000000``), and a read reply is one bare hex value
+per aligned word, comma-separated (``3FC00000,00000101``).
 Every read and write must be whole aligned words (``align``, 4 bytes by default).
 """
 

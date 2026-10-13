@@ -988,7 +988,8 @@ class ProfileDialog(QDialog):
             if reply is None:
                 return f"> {cmd}\n(no reply)"
             try:
-                data = p.decode_data(reply.encode("latin-1"), length)
+                order = next((m.byte_order for m in t.mcus.values() if m.id == mcu), p.byte_order)
+                data = p.decode_data(reply.encode("latin-1"), length, order)
             except RdtError as e:
                 return f"> {cmd}\n< {reply[:200]}\n⚠ {e}"
             return f"> {cmd}\n< {reply[:200]}\nOK: {data.hex(' ').upper()}"
