@@ -9,7 +9,18 @@ python -m pip install -e .
 python -m sim -v
 ```
 
-With no arguments it loads [`sim/examples/two_mcus.toml`](../sim/examples/two_mcus.toml): MCU 0 `main` and MCU 1 `motorctl`, each loaded from its own ELF, listening on TCP and UDP port 5025 on `127.0.0.1`. `-vv` logs every command and reply.
+With no `--config`, it loads `sim.toml` from the current folder when there is one, and otherwise [`sim/examples/two_mcus.toml`](../sim/examples/two_mcus.toml): MCU 0 `main` and MCU 1 `motorctl`, each loaded from its own ELF, listening on TCP and UDP port 5025 on `127.0.0.1`. The first lines it prints name the config it loaded. `-vv` logs every command and reply.
+
+### Default config: sim.toml
+
+To start your own config without `--config`, save it as `sim.toml` in the folder you start the simulator from, such as the repository root. For an STM32H7, start from the H743/H753 example:
+
+```
+cd C:\work\Repo\RDT
+copy sim\examples\stm32h7_interface.toml sim.toml
+```
+
+In `sim.toml`, change `profile` to `"sim/examples/default_profile.toml"` (paths are relative to the file), then set `elf` and handle the signal as described in [Use your own ELF](use-your-own-elf.md#add-your-elf). Write Windows paths with `/` (`"C:/fw/build/interface.elf"`) or in single quotes. `sim.toml` and `rdt.toml` in the repository root are ignored by git, so they stay yours. For RDT itself, see [Default files](CLI.md#default-files).
 
 | Option | Meaning |
 | --- | --- |

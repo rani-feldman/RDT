@@ -12,6 +12,7 @@
     rdt history
     rdt -w bench.rdtw commands import fw_commands.csv
 
+Without -t or -w, rdt uses rdt.toml in the current folder when there is one.
 Without a target file, give the link and the MCUs on the command line:
 
     rdt --tcp 192.168.1.20:5025 --profile fw.toml --mcu main=0:main.elf --mcu motorctl=1:motorctl.elf info
@@ -68,7 +69,8 @@ def build_parser() -> argparse.ArgumentParser:
     ap.add_argument("--version", action="version", version=f"rdt {__version__}")
     g = ap.add_argument_group("target")
     g.add_argument("-w", "--workspace", "-t", "--target", dest="target", type=Path, metavar="FILE",
-                   help="workspace (.rdtw) or target file: connection, profile, MCUs and the watch list")
+                   help="workspace (.rdtw) or target file: connection, profile, MCUs and the watch list "
+                        "(default: rdt.toml in the current folder, if there is one)")
     link = g.add_mutually_exclusive_group()
     link.add_argument("--tcp", metavar="HOST:PORT", help="connect over LAN TCP")
     link.add_argument("--udp", metavar="HOST:PORT", help="connect over LAN UDP")
@@ -190,7 +192,12 @@ def build_parser() -> argparse.ArgumentParser:
     return ap
 
 
+LOCAL_TARGET = Path("rdt.toml")     # used when no -w/-t is given and the current folder has one
+
+
 def load_workspace(args: argparse.Namespace) -> Workspace:
+    if args.target is None and LOCAL_TARGET.is_file():
+        args.target = LOCAL_TARGET
     ws = Workspace.load(args.target) if args.target else Workspace()
     cfg = ws.config
     if args.profile:
@@ -211,7 +218,8 @@ def load_workspace(args: argparse.Namespace) -> Workspace:
     if args.mcu:
         cfg.mcus = [McuConfig(m.id, m.name, m.elf.resolve() if m.elf else None) for m in args.mcu]
     if not cfg.mcus:
-        raise ConfigError("no MCUs: give a workspace (-w) or --mcu NAME=ID[:ELF], such as --mcu main=0:main.elf")
+        raise ConfigError("no MCUs: give a workspace (-w), put an rdt.toml in the current folder, "
+                          "or give --mcu NAME=ID[:ELF], such as --mcu main=0:main.elf")
     return ws
 
 

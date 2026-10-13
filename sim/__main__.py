@@ -1,4 +1,5 @@
-"""Command line: python -m sim --config sim/examples/two_mcus.toml"""
+"""Command line: python -m sim [--config FILE]. Without --config it uses sim.toml in the current
+folder when there is one, else sim/examples/two_mcus.toml."""
 
 from __future__ import annotations
 
@@ -11,12 +12,18 @@ from pathlib import Path
 from .config import load_config
 from .transports import Simulator
 
-DEFAULT_CONFIG = Path(__file__).parent / "examples" / "two_mcus.toml"
+EXAMPLE_CONFIG = Path(__file__).parent / "examples" / "two_mcus.toml"
+LOCAL_CONFIG = Path("sim.toml")     # your own config, picked up from the current folder
+
+
+def default_config() -> Path:
+    return LOCAL_CONFIG if LOCAL_CONFIG.is_file() else EXAMPLE_CONFIG
 
 
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(prog="python -m sim", description="Simulated RDT device (SCPI memory commands).")
-    ap.add_argument("--config", type=Path, default=DEFAULT_CONFIG, help="simulator TOML (default: %(default)s)")
+    ap.add_argument("--config", type=Path,
+                    help="simulator TOML (default: sim.toml in the current folder, else the two-MCU example)")
     ap.add_argument("--tcp", help="HOST:PORT to listen on for TCP, or 'off'")
     ap.add_argument("--udp", help="HOST:PORT to listen on for UDP, or 'off'")
     ap.add_argument("--serial", help="serial port to serve, such as COM11, 'pty' on Linux, or 'off'")
@@ -28,7 +35,8 @@ def main(argv: list[str] | None = None) -> int:
     level = [logging.WARNING, logging.INFO, logging.DEBUG][min(args.verbose, 2)]
     logging.basicConfig(level=level, format="%(asctime)s %(message)s")
 
-    cfg = load_config(args.config)
+    config = args.config or default_config()
+    cfg = load_config(config)
     t = cfg.transport
     for name in ("tcp", "udp", "serial"):
         value = getattr(args, name)
@@ -41,6 +49,7 @@ def main(argv: list[str] | None = None) -> int:
 
     sim = Simulator(cfg.device, t).start()
     print(f"RDT simulator: {cfg.device.idn}")
+    print(f"  Config {config.resolve()}")
     for mcu in sorted(cfg.device.mcus.values(), key=lambda m: m.id):
         regions = ", ".join(f"{r.name} 0x{r.start:08X}+{len(r.data)}" for r in mcu.memory.regions)
         role = "main" if mcu.is_main else f"secondary, {mcu.frame_size}-byte frames"
