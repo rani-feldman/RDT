@@ -74,7 +74,7 @@ Each requirement links to its design section.
 | SCPI-8 | A manual SCPI console sends any command and shows the raw reply (2026-10-05) | Done | [D-SCPI-8](#d-scpi-8-scpi-console) |
 | SCPI-9 | The profile can be edited in the GUI, with a preview of the commands and a test read | Done | [D-SCPI-9](#d-scpi-9-profile-editor) |
 | SCPI-10 | Every SCPI read and write covers whole 4-byte aligned words: a 2-byte variable is read as its 4-byte word and the result is trimmed, and a smaller or unaligned write is done as read-modify-write (2026-10-12) | Done | [D-SCPI-10](#d-scpi-10-aligned-words) |
-| SCPI-11 | A read reply is one bare hex value per 4-byte word, comma-separated, lowest address first, the way the firmware prints a `uint32_t`: `30303030,2F30302F,43B40000`. This is the only reply format (2026-10-13). A regular expression can pick the words out of a longer reply | In review (PR #44) | [D-SCPI-11](#d-scpi-11-word-replies) |
+| SCPI-11 | A read reply is one bare hex value per 4-byte word, comma-separated, lowest address first, the way the firmware prints a `uint32_t`: `30303030,2F30302F,43B40000`. This is the only reply format (2026-10-13). A regular expression can pick the words out of a longer reply | Done | [D-SCPI-11](#d-scpi-11-word-replies) |
 
 ### 2.4 Multiple MCUs
 
