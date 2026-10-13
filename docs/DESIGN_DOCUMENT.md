@@ -60,7 +60,7 @@ Each requirement links to its design section.
 | LNK-5 | On link loss RDT reconnects on its own; values grey out and writes are refused while the link is down (2026-10-05) | Done | [D-LNK-5](#d-lnk-5-auto-reconnect) |
 | LNK-6 | Other tools may use the firmware's SCPI port over LAN at the same time as RDT (2026-10-05) | Done | [D-LNK-6](#d-lnk-6-sharing-the-link-with-other-tools) |
 | LNK-7 | On connect and every reconnect, check that the device answers | Done | [D-LNK-7](#d-lnk-7-probe-on-connect) |
-| LNK-8 | The GUI lists each COM port with its description, such as `COM3 - GAC serial port (COM3)` (2026-10-13) | In review (PR #47) | [D-LNK-1](#d-lnk-1-com-port) |
+| LNK-8 | The GUI lists each COM port with its description, such as `COM3 - GAC serial port (COM3)` (2026-10-13) | Done | [D-LNK-1](#d-lnk-1-com-port) |
 
 ### 2.3 SCPI commands
 
@@ -222,7 +222,7 @@ Console features taken from ComPort-Zone (an open serial terminal); rani approve
 | CON-12 | The GUI lists every keyboard shortcut in one window (2026-10-12) | Done | [D-CON-12](#d-con-12-keyboard-shortcuts) |
 | CON-13 | The GUI console looks like a terminal: dark, each line with its time and a TX, RX, ERR or SYS tag, and the prompt as its last line, with no separate line or button for sending (2026-10-12) | Done | [D-CON-13](#d-con-13-terminal-look) |
 | CON-14 | Commands are typed on the console's next free line, inside the transcript, and the best suggestion from the history or the known commands shows while typing, without pressing Tab (2026-10-12) | Done | [D-CON-14](#d-con-14-typing-in-the-transcript) |
-| CON-15 | The list of matching commands opens as soon as something is typed, without Tab; Tab or Enter takes the highlighted command (2026-10-13) | In review (PR #47) | [D-CON-2](#d-con-2-autocomplete) |
+| CON-15 | The list of matching commands opens as soon as something is typed, without Tab; Tab or Enter takes the highlighted command (2026-10-13) | Done | [D-CON-2](#d-con-2-autocomplete) |
 
 ### 2.18 Removed and not in v1
 
