@@ -89,6 +89,12 @@ silent           = false
   writable = true
   fill     = 0
 
+  [[mcu.ranges]]                   # a whole RAM or flash bank: the ELF's sections are laid over it
+  name     = "DTCM"
+  kind     = "memory"              # default "peripheral", which may not overlap anything
+  start    = 0x20000000
+  end      = 0x2001FFFF            # the last address in it; or give size
+
   [[mcu.signals]]                  # a variable the firmware keeps changing
   name      = "temperature"
   addr      = 0x20000088
@@ -102,10 +108,15 @@ silent           = false
 
 How the memory behaves:
 - Every allocated ELF section is loaded at its run address: `.data` with its initial values and `.bss` as zeros. Sections without the write flag, such as `.text` and `.rodata`, are read-only.
+- A `kind = "memory"` range is a bank the ELF's sections are laid over: where a section lies inside it, the section's contents and write flag win, and the rest of the bank keeps its `fill`. A peripheral range may not overlap anything.
 - A read may span adjacent sections. A read that touches any unmapped byte fails as a whole.
 - A signal is recomputed from the time each time its memory is read, and overwrites whatever was written there.
 - On a secondary MCU, signals are recomputed before each internal frame. So a struct bigger than one frame can mix values from different moments, as on the real device.
 - All transports and clients share one command handler that runs one command at a time, as the firmware would.
+
+## Your own ELF and the STM32H7 example
+
+[`stm32h7_interface.toml`](../sim/examples/stm32h7_interface.toml) is one MCU, `Interface`, with the STM32H743 memory banks, to pair with [`examples/stm32h7_interface.rdtw`](../examples/stm32h7_interface.rdtw). [use-your-own-elf.md](use-your-own-elf.md) shows how to load your own firmware's ELF into it.
 
 ## Example firmware
 
