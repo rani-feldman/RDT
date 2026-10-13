@@ -139,6 +139,8 @@ Each requirement links to its design section.
 | POLL-2 | Each watched item can use the global interval, its own interval, or be read only by hand (2026-10-05) | Done | [D-POLL-2](#d-poll-2-per-item-interval) |
 | POLL-3 | Nearby items are read together in one command, so they cost one round trip and come from the same moment | Done | [D-POLL-3](#d-poll-3-block-merging) |
 | POLL-4 | A slow link makes items fall behind instead of queueing, and each item shows the rate it actually gets | Done | [D-POLL-4](#d-poll-4-falling-behind) |
+| POLL-5 | A **Poll now** button next to Poll in the GUI reads every watched item once (2026-10-13) | In review (PR #41) | [D-POLL-5](#d-poll-5-poll-now-and-polling-switch) |
+| POLL-6 | Polling can be turned off in the GUI, including items with their own interval (2026-10-13) | In review (PR #41) | [D-POLL-5](#d-poll-5-poll-now-and-polling-switch) |
 
 ### 2.10 Watch tabs
 
@@ -715,11 +717,11 @@ The write guard lives in `Workspace.write` (`rdt/workspace.py`). It is used by t
 
 #### D-POLL-1 Global interval
 
-The workspace's `poll_ms` (default 500) is the global interval, shown as **Poll** in the GUI's connection bar. `0` (Off) stops polling for every item that follows the global interval; items with their own interval keep polling. In `rdt watch`, `-i MS` replaces it.
+The workspace's `poll_ms` (default 500) is the global interval, shown as **Poll** in the GUI's connection bar. `0` (Off) stops polling for every item that follows the global interval; items with their own interval keep polling. To stop all polling, untick **Poll** (D-POLL-5). In `rdt watch`, `-i MS` replaces it.
 
 #### D-POLL-2 Per-item interval
 
-Each top-level item has `poll = "global" | "manual" | <ms>`. `global` follows the global interval, including later changes to it. A number keeps its own interval. `manual` reads the item only on demand: **Watch > Read all now** (F6) in the GUI, or once at the start of `rdt watch`. Every item is also read once on connect. Fields and cells are read with their parent, so they share its interval; to poll one field at another rate, add it as its own item (**Watch this on its own** in the GUI).
+Each top-level item has `poll = "global" | "manual" | <ms>`. `global` follows the global interval, including later changes to it. A number keeps its own interval. `manual` reads the item only on demand: **Poll now** (F6) in the GUI (D-POLL-5), or once at the start of `rdt watch`. Every item is also read once on connect. Fields and cells are read with their parent, so they share its interval; to poll one field at another rate, add it as its own item (**Watch this on its own** in the GUI).
 
 #### D-POLL-3 Block merging
 
@@ -737,6 +739,16 @@ Each top-level item has `poll = "global" | "manual" | <ms>`. `global` follows th
 #### D-POLL-4 Falling behind
 
 Only one poll runs at a time. In the GUI, a 50 ms tick looks for due items and starts a poll only when the last one has finished; `rdt watch` works the same way. A slow link (likely SCPI on a slow COM port) makes items fall behind instead of building a queue. The watch tree's **Rate** column shows the rate each item actually gets, so the limit is visible. Collapsed structs and arrays are not read, which keeps the link free; while the CSV log runs, or for a charted field, they are read anyway.
+
+
+#### D-POLL-5 Poll now and polling switch
+
+rani asked for both on 2026-10-13. The toolbar reads **[✓] Poll [interval] [Poll now]**.
+
+- **Polling switch:** the **Poll** label in the connection bar is a checkbox, also **Watch > Poll automatically** (F7). Unticking it stops all polling, including items with their own interval, and greys the interval box. Ticking it again resumes at the same intervals. Polling is on at startup, and the switch is not saved in the workspace.
+- **Poll now:** a **Poll now** button next to the interval box, also **Watch > Poll now** (F6, formerly "Read all now"). It reads every watched item once, in every tab, including manual items, whether polling is on or off.
+- **Code:** `MainWindow.set_polling` in `rdt/gui/app.py` keeps the checkbox and the menu entry in step and sets `WatchTabs.polling`. That flag is passed to `WatchTree.due()` in `rdt/gui/variables.py`, which returns only items marked to be read by hand (Poll now, or connect) while polling is off.
+- **CLI:** `rdt watch` is unchanged; it polls until stopped.
 
 ### 4.10 Watch tabs
 
@@ -1220,6 +1232,7 @@ The application is built against the simulator. As soon as the firmware has the 
 | 2026-10-12 | No size query: the maximum response size comes only from the SCPI configuration, never from the device (SCPI-7 and FW-8 removed, now RM-6), at rani's request |
 | 2026-10-12 | Addresses and values in SCPI commands, and read-reply data, are bare hex with no prefix (`11AABBCCDD`); the address, value and reply format settings are removed (SCPI-4), at rani's request |
 | 2026-10-12 | Every SCPI read and write covers whole 4-byte aligned words (`align`); reads are trimmed, and smaller or unaligned writes are read-modify-write, which rani chose over refusing them (SCPI-10) |
+| 2026-10-13 | A **Poll now** button and a **Poll** on/off checkbox in the GUI; turning polling off stops every item, including those with their own interval, and is not saved in the workspace (POLL-5, POLL-6) |
 
 ## 9. Appendix: binary protocol (planned)
 
