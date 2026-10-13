@@ -158,14 +158,14 @@ class WatchTree(QTreeWidget):
 
     # --- polling -----------------------------------------------------------------------------
 
-    def due(self, now: float) -> list[_ItemState]:
-        """The items that should be read now."""
+    def due(self, now: float, polling: bool = True) -> list[_ItemState]:
+        """The items that should be read now. With ``polling`` off, only those read by hand."""
         out = []
         for expr, st in self.states.items():
             if st.gone:
                 continue
             interval = st.watch.interval_ms(self.ws.poll_ms)
-            if not st.force and (interval is None or now < st.due):
+            if not st.force and (not polling or interval is None or now < st.due):
                 continue
             if st.aggregate and not st.item.isExpanded() and not st.force and not self.main.reads_closed(expr):
                 continue   # a collapsed struct or array is not read
@@ -502,6 +502,7 @@ class WatchTabs(QTabWidget):
         self.main = main
         self.trees: list[WatchTree] = []
         self._stats_shown = False
+        self.polling = True   # off: nothing is read until Poll now (F6), whatever the intervals
         self.setMovable(True)
         self.setDocumentMode(True)
         self.tabBar().tabMoved.connect(self._moved)
@@ -669,7 +670,7 @@ class WatchTabs(QTabWidget):
         due: dict[str, Watch] = {}
         cells: dict[str, int] = {}
         for tree in self.trees:
-            for st in tree.due(now):
+            for st in tree.due(now, self.polling):
                 due.setdefault(st.watch.expr, st.watch)
                 cells[st.watch.expr] = max(cells.get(st.watch.expr, 0), st.max_cells)
         if not due:

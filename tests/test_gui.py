@@ -752,3 +752,21 @@ def test_commands_import_and_export_buttons(qtbot, win, tmp_path, monkeypatch):
     monkeypatch.setattr(QFileDialog, "getSaveFileName", lambda *a, **k: (str(out), ""))
     buttons["Export..."].click()
     assert out.read_text(encoding="utf-8-sig").splitlines()[1:] == ["*IDN?,,,", "MOTor:SPEed?,,,"]
+
+
+def test_polling_can_be_turned_off_and_polled_by_hand(qtbot, win):
+    connect(qtbot, win)
+    tree = win.watch_tree
+    far = time.monotonic() + 3600
+    assert tree.due(far)                                   # everything is due an hour from now
+    win.bar.polling.setChecked(False)
+    assert not win.watch_tabs.polling and not win.polling_action.isChecked()
+    assert not win.bar.poll.isEnabled()
+    assert tree.due(far, win.watch_tabs.polling) == []     # nothing is read while polling is off
+    st = tree.states["main:motor.speed"]
+    qtbot.waitUntil(lambda: not win.device.busy("poll"), timeout=3000)
+    last = st.last_done
+    win.bar.poll_now.click()                               # Poll now still reads every item once
+    qtbot.waitUntil(lambda: st.last_done != last, timeout=3000)
+    win.polling_action.trigger()                           # Watch > Poll automatically (F7) turns it back on
+    assert win.watch_tabs.polling and win.bar.polling.isChecked() and win.bar.poll.isEnabled()
