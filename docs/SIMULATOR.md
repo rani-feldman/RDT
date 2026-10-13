@@ -11,22 +11,16 @@ python -m sim -v
 
 With no `--config`, it loads `sim.toml` from the current folder when there is one, and otherwise [`sim/examples/two_mcus.toml`](../sim/examples/two_mcus.toml): MCU 0 `main` and MCU 1 `motorctl`, each loaded from its own ELF, listening on TCP and UDP port 5025 on `127.0.0.1`. The first lines it prints name the config it loaded. `-vv` logs every command and reply.
 
-### Your own ELF
+### Default config: sim.toml
 
-To simulate your own firmware, make a `sim.toml` in the folder you start the simulator from (the repository root, say) by copying the example:
+To start your own config without `--config`, save it as `sim.toml` in the folder you start the simulator from, such as the repository root. For an STM32H7, start from the H743/H753 example:
 
 ```
 cd C:\work\Repo\RDT
-copy sim\examples\two_mcus.toml sim.toml
+copy sim\examples\stm32h7_interface.toml sim.toml
 ```
 
-Then edit `sim.toml`:
-- `profile = "sim/examples/default_profile.toml"`, since paths are relative to the config file.
-- Each `[[mcu]]`'s `elf`: your ELF, built with `-g`. Write Windows paths with `/` (`"C:/fw/build/main.elf"`) or in single quotes.
-- Delete the `[[mcu.signals]]` blocks: they name addresses in the example ELF. Add your own with the addresses `rdt symbols` shows.
-- Delete the `motorctl` MCU if your device has one MCU, and the `GPIOA` range unless you want it. Ranges here must not overlap the ELF's sections.
-
-`python -m sim` now starts with it. `sim.toml` and `rdt.toml` in the repository root are ignored by git, so they stay yours. For RDT itself, see [Default files](CLI.md#default-files).
+In `sim.toml`, change `profile` to `"sim/examples/default_profile.toml"` (paths are relative to the file), then set `elf` and handle the signal as described in [Use your own ELF](use-your-own-elf.md#add-your-elf). Write Windows paths with `/` (`"C:/fw/build/interface.elf"`) or in single quotes. `sim.toml` and `rdt.toml` in the repository root are ignored by git, so they stay yours. For RDT itself, see [Default files](CLI.md#default-files).
 
 | Option | Meaning |
 | --- | --- |
