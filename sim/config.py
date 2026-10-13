@@ -40,12 +40,17 @@ def _build_mcu(table: dict, base: Path) -> Mcu:
     mcu_id = int(table["id"])
     memory = Memory()
     byte_order = None
+    # Memory banks first, so the ELF's sections can be laid over them; then the ELF; then the
+    # peripheral ranges, which may not overlap anything.
+    ranges = table.get("ranges", [])
+    banks = [r for r in ranges if r.get("kind", "peripheral") == "memory"]
+    others = [r for r in ranges if r.get("kind", "peripheral") != "memory"]
+    for r in banks:
+        memory.add(_region(r, backdrop=True))
     if table.get("elf"):
         byte_order = memory.load_elf(base / table["elf"])
-    for r in table.get("ranges", []):
-        fill = int(r.get("fill", 0)) & 0xFF
-        memory.add(Region(r.get("name", "range"), int(r["start"]), bytearray([fill]) * int(r["size"]),
-                          bool(r.get("writable", True))))
+    for r in others:
+        memory.add(_region(r, backdrop=False))
     if not memory.regions:
         raise ValueError(f"MCU {mcu_id} has no memory: give it an elf or [[mcu.ranges]]")
     signals = [Signal(**s) for s in table.get("signals", [])]
@@ -59,6 +64,20 @@ def _build_mcu(table: dict, base: Path) -> Mcu:
         frame_latency_ms=float(table.get("frame_latency_ms", 0.0)),
         silent=bool(table.get("silent", False)),
     )
+
+
+def _region(r: dict, backdrop: bool) -> Region:
+    """A ``[[mcu.ranges]]`` entry, with its extent as ``size`` or ``end`` (the last address in it)."""
+    name = r.get("name", "range")
+    kind = r.get("kind", "peripheral")
+    if kind not in ("peripheral", "memory"):
+        raise ValueError(f"range {name}: kind must be peripheral or memory, not {kind!r}")
+    if ("size" in r) == ("end" in r):
+        raise ValueError(f"range {name}: give either size or end")
+    start = int(r["start"])
+    size = int(r["size"]) if "size" in r else int(r["end"]) - start + 1
+    fill = int(r.get("fill", 0)) & 0xFF
+    return Region(name, start, bytearray([fill]) * size, bool(r.get("writable", True)), backdrop)
 
 
 def load_config(path: str | Path) -> SimConfig:
