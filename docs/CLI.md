@@ -173,13 +173,13 @@ A target file is also a workspace with no watch tabs; see [Workspace](#workspace
 
 ### Default files
 
-Without `-t` or `-w`, `rdt` uses `rdt.toml` from the current folder when there is one, so with your own bench in it, `rdt info` and `rdt read main:motor` need no options. Command-line options still override it. It can be a target file or a workspace; `add`, `remove` and `tab` save their changes into it, as for any workspace. `rdt-gui` opens it too when there is no last workspace to reopen. To start one for the simulator, from the repository root:
+Without `-t` or `-w`, `rdt` uses `rdt.toml` from the current folder when there is one, so with your own bench in it, `rdt info` and `rdt read main:motor` need no options. Command-line options still override it. It can be a target file or a workspace; `add`, `remove` and `tab` save their changes into it, as for any workspace. `rdt-gui` opens it too when there is no last workspace to reopen. To start one for an STM32H7, from the repository root:
 
 ```
-copy examples\sim_target.toml rdt.toml
+copy examples\stm32h7_interface.rdtw rdt.toml
 ```
 
-and change `profile` to `"sim/examples/default_profile.toml"` and each `elf` to your ELF (paths are relative to the file), with the same MCU ids and names as the simulator's `sim.toml` ([Your own ELF](SIMULATOR.md#your-own-elf)). Change or delete `identity`: `firmware_name` exists only in the example firmware. `rdt.toml` and `sim.toml` in the repository root are ignored by git.
+and change `profile` to `"sim/examples/default_profile.toml"` (paths are relative to the file) and `elf` to your ELF, with the same MCU id, name and ELF as the simulator's `sim.toml` ([Default config](SIMULATOR.md#default-config-simtoml), [Use your own ELF](use-your-own-elf.md)). `rdt.toml` and `sim.toml` in the repository root are ignored by git.
 
 ## Workspace
 
