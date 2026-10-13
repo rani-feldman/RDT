@@ -18,25 +18,25 @@ def test_identity(device):
 
 
 def test_read_each_mcu(device):
-    assert q(device, "MEM:READ? 0,20000000,4") == "0000C03F"   # main: motor.speed = 1.5f
-    assert q(device, "MEM:READ? 1,20000084,4") == "F4010000"   # motorctl: pwm_duty = 500
+    assert q(device, "MEM:READ? 0,20000000,4") == "3FC00000"   # main: motor.speed = 1.5f
+    assert q(device, "MEM:READ? 1,20000084,4") == "000001F4"   # motorctl: pwm_duty = 500
 
 
 def test_large_read_from_secondary_is_split_into_frames(device):
     reply = q(device, "MEM:READ? 1,20000000,140")
-    assert len(reply) == 280
+    assert len(reply.split(",")) == 35                  # 35 words of 4 bytes
     assert device.mcus[1].frames == 3
 
 
 def test_write_then_read_back(device):
     assert q(device, "MEM:WRITE 0,20000000,40490FDB,4") is None
-    assert q(device, "MEM:READ? 0,20000000,4") == "DB0F4940"
+    assert q(device, "MEM:READ? 0,20000000,4") == "40490FDB"
     assert q(device, "SYST:ERR?") == '0,"No error"'
 
 
 def test_write_takes_the_raw_value_in_bare_hex(device):
     q(device, "MEM:WRITE 1,20000084,FFFF,4")
-    assert q(device, "MEM:READ? 1,20000084,4") == "FFFF0000"
+    assert q(device, "MEM:READ? 1,20000084,4") == "0000FFFF"
 
 
 @pytest.mark.parametrize("line", [
@@ -87,9 +87,9 @@ def test_silent_secondary_mcu(device):
     assert q(device, "MEM:READ? 1,20000084,4") is None
     assert time.perf_counter() - start >= 0.018  # the main MCU waited out its internal timeout
     assert q(device, "SYST:ERR?") == '-240,"MCU not responding"'
-    assert q(device, "MEM:READ? 0,20000000,4") == "0000C03F"  # the others keep working
+    assert q(device, "MEM:READ? 0,20000000,4") == "3FC00000"  # the others keep working
     q(device, "SIM:MCU:SIL 1,OFF")
-    assert q(device, "MEM:READ? 1,20000084,4") == "F4010000"
+    assert q(device, "MEM:READ? 1,20000084,4") == "000001F4"
 
 
 def test_main_mcu_cannot_be_silent(device):
@@ -100,7 +100,7 @@ def test_main_mcu_cannot_be_silent(device):
 def test_reset_restores_memory(device):
     q(device, "MEM:WRITE 0,20000000,0,4")
     q(device, "*RST")
-    assert q(device, "MEM:READ? 0,20000000,4") == "0000C03F"
+    assert q(device, "MEM:READ? 0,20000000,4") == "3FC00000"
 
 
 def test_error_queue_overflow():
@@ -119,8 +119,9 @@ def test_error_reply_option():
     assert d.handle("MEM:WRITE 0,30000000,1,1") is None  # a write never replies
 
 
-def test_read_reply_is_bare_hex(two_mcus):
-    assert Device(two_mcus).handle("MEM:READ? 0,20000000,4") == b"0000C03F"
+def test_read_reply_is_comma_separated_words(two_mcus):
+    assert Device(two_mcus).handle("MEM:READ? 0,20000000,4") == b"3FC00000"
+    assert Device(two_mcus).handle("MEM:READ? 0,20000000,8").count(b",") == 1
 
 
 def test_user_defined_templates():
@@ -128,7 +129,7 @@ def test_user_defined_templates():
     profile = Profile(read="read {mcu},{addr},{len}", write="write {mcu},{addr},{value},{size}")
     d = Device([ram_mcu(0), ram_mcu(2)], profile)
     assert d.handle("write 2,20000010,DEADBEEF,4") is None
-    assert d.handle("read 2,20000010,4") == b"EFBEADDE"
+    assert d.handle("read 2,20000010,4") == b"DEADBEEF"
     assert q(d, "SYST:ERR?") == '0,"No error"'
     assert d.handle("read 2,30000000,4") is None
     assert q(d, "SYST:ERR?").startswith("-222,")
