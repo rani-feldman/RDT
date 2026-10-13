@@ -5,3 +5,7 @@ build/
 dist/
 .venv/
 .pytest_cache/
+
+# Your own default configs (python -m sim and rdt pick them up from the current folder)
+/sim.toml
+/rdt.toml

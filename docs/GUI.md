@@ -8,7 +8,7 @@ python -m sim &                          # the simulated device
 rdt-gui examples/sim_bench.rdtw          # or: python -m rdt.gui examples/sim_bench.rdtw
 ```
 
-Started with no file, `rdt-gui` reopens the workspace you last opened or saved. If that file is gone, it starts with a new workspace.
+Started with no file, `rdt-gui` reopens the workspace you last opened or saved. If there is none (or that file is gone), it opens `rdt.toml` from the current folder when there is one, the same default target file as the CLI (see [Default files](CLI.md#default-files)); otherwise it starts with a new workspace.
 
 ![RDT main window connected to the simulator](images/gui-main.png)
 

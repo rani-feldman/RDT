@@ -171,6 +171,16 @@ rdt --serial COM5 --profile fw_profile.toml --mcu main=0:build/main.elf read mai
 
 A target file is also a workspace with no watch tabs; see [Workspace](#workspace).
 
+### Default files
+
+Without `-t` or `-w`, `rdt` uses `rdt.toml` from the current folder when there is one, so with your own bench in it, `rdt info` and `rdt read main:motor` need no options. Command-line options still override it. It can be a target file or a workspace; `add`, `remove` and `tab` save their changes into it, as for any workspace. `rdt-gui` opens it too when there is no last workspace to reopen. To start one for the simulator, from the repository root:
+
+```
+copy examples\sim_target.toml rdt.toml
+```
+
+and change `profile` to `"sim/examples/default_profile.toml"` and each `elf` to your ELF (paths are relative to the file), with the same MCU ids and names as the simulator's `sim.toml` ([Your own ELF](SIMULATOR.md#your-own-elf)). Change or delete `identity`: `firmware_name` exists only in the example firmware. `rdt.toml` and `sim.toml` in the repository root are ignored by git.
+
 ## Workspace
 
 A workspace (`.rdtw`) is a target file plus everything set up on top of it: the watch tabs, each a named watch list, with each item's format, scaling, polling and write safety, and the chart layout. Give it with `-w` (`-t` is the same option). [`examples/sim_bench.rdtw`](../examples/sim_bench.rdtw) is one for the simulator, with the tabs `Motor` and `System`:

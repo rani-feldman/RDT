@@ -745,8 +745,8 @@ def main(argv: list[str] | None = None) -> int:
     win = MainWindow()
     if argv:
         win.open_path(argv[0])
-    else:
-        win.reopen_last()
+    elif not win.reopen_last() and Path("rdt.toml").is_file():
+        win.open_path("rdt.toml")         # the CLI's default target file, as a starting point
     win.show()
     return app.exec()
 
