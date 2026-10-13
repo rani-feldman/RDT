@@ -123,7 +123,8 @@ def test_console(sim, monkeypatch):
     assert lines[4] == "@main:0x20000000:f32 = 1.5"
 
 
-def test_mcus_on_the_command_line(sim):
+def test_mcus_on_the_command_line(sim, tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)        # no rdt.toml here
     out = io.StringIO()
     elf = ROOT / "sim" / "examples" / "firmware" / "motorctl.elf"
     code = main(["--tcp", "%s:%d" % sim.tcp_address, "--mcu", "main=0", "--mcu", f"motor=1:{elf}",
@@ -131,9 +132,18 @@ def test_mcus_on_the_command_line(sim):
     assert (code, out.getvalue().strip()) == (0, "@motor:0x20000084:u32 = 500 (0x000001F4)")
 
 
-def test_no_mcus_is_an_error(capsys):
+def test_no_mcus_is_an_error(capsys, tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)        # no rdt.toml here
     assert main(["--tcp", "127.0.0.1:1", "info"]) == 1
     assert "no MCUs" in capsys.readouterr().err
+
+
+def test_rdt_toml_in_the_current_folder_is_the_default(sim, tmp_path, monkeypatch):
+    (tmp_path / "rdt.toml").write_text(EXAMPLE_TARGET.read_text().replace('"../', f'"{ROOT.as_posix()}/'))
+    monkeypatch.chdir(tmp_path)
+    out = io.StringIO()
+    code = main(["--tcp", "%s:%d" % sim.tcp_address, "read", "main:motor.target"], out=out)
+    assert code == 0 and out.getvalue().startswith("main:motor.target = ")
 
 
 def test_read_by_name(sim):
