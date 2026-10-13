@@ -1,0 +1,76 @@
+# Simulated device with one MCU, "Interface", laid out like an STM32H743/H753
+# (RM0433 memory map: 2 MB flash, 1 MB RAM in six banks).
+#   python -m sim --config sim/examples/stm32h7_interface.toml
+# RDT side: examples/stm32h7_interface.rdtw
+#
+# With no ELF every bank starts as zeros (flash as 0xFF, as erased). To load your firmware, set
+# elf below: its sections (.text, .data, .bss ...) are laid over the banks, so .data starts with
+# its initial values and .text and .rodata stay read-only. See docs/use-your-own-elf.md.
+idn                 = "RDT,Simulator,SIM-H7,0.1.0"
+profile             = "default_profile.toml"
+internal_timeout_ms = 50
+error_reply         = false   # as the firmware: a failed command sends no reply
+
+[transport]
+tcp      = "127.0.0.1:5025"
+udp      = "127.0.0.1:5025"
+# serial = "COM11"            # one end of a com0com pair on Windows; "pty" on Linux
+baud     = 115200
+
+[[mcu]]
+id   = 0                      # the main MCU, which owns the link
+name = "Interface"
+# elf = "C:/work/firmware/build/interface.elf"
+
+  [[mcu.ranges]]
+  name  = "ITCM"
+  kind  = "memory"
+  start = 0x00000000
+  end   = 0x0000FFFF          # 64 KB
+
+  [[mcu.ranges]]
+  name     = "FLASH"
+  kind     = "memory"
+  start    = 0x08000000
+  end      = 0x081FFFFF       # 2 MB, banks 1 and 2
+  writable = false
+  fill     = 0xFF             # erased
+
+  [[mcu.ranges]]
+  name  = "DTCM"
+  kind  = "memory"
+  start = 0x20000000
+  end   = 0x2001FFFF          # 128 KB
+
+  [[mcu.ranges]]
+  name  = "AXI_SRAM"
+  kind  = "memory"
+  start = 0x24000000
+  end   = 0x2407FFFF          # 512 KB, D1 domain
+
+  [[mcu.ranges]]
+  name  = "SRAM1_3"
+  kind  = "memory"
+  start = 0x30000000
+  end   = 0x30047FFF          # 288 KB, D2 domain: SRAM1 128 KB, SRAM2 128 KB, SRAM3 32 KB
+
+  [[mcu.ranges]]
+  name  = "SRAM4"
+  kind  = "memory"
+  start = 0x38000000
+  end   = 0x3800FFFF          # 64 KB, D3 domain
+
+  [[mcu.ranges]]
+  name  = "BKPSRAM"
+  kind  = "memory"
+  start = 0x38800000
+  end   = 0x38800FFF          # 4 KB backup SRAM
+
+  # A variable the firmware keeps changing, so something moves without an ELF. Remove it, or
+  # move it onto one of your own variables, once you load your ELF.
+  [[mcu.signals]]
+  name      = "uptime_ms"
+  addr      = 0x24000000
+  type      = "u32"
+  kind      = "counter"
+  period_ms = 1

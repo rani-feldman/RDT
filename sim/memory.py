@@ -19,6 +19,7 @@ class Region:
     start: int
     data: bytearray
     writable: bool
+    backdrop: bool = False   # a whole RAM or flash bank from the config; ELF sections are laid over it
     initial: bytes = field(init=False, repr=False)
 
     def __post_init__(self) -> None:
@@ -34,18 +35,30 @@ class Memory:
         self.regions: list[Region] = []
 
     def add(self, region: Region) -> None:
+        """Add a region. It may overlap backdrop regions (memory banks), which it replaces where
+        they overlap; overlapping any other region is an error."""
         if not region.data:
             return
         for r in self.regions:
-            if region.start < r.end and r.start < region.end:
+            if region.start < r.end and r.start < region.end and not r.backdrop:
                 raise ValueError(f"region {region.name} overlaps {r.name}")
-        self.regions.append(region)
-        self.regions.sort(key=lambda r: r.start)
+        kept = []
+        for r in self.regions:
+            if not (region.start < r.end and r.start < region.end):
+                kept.append(r)
+                continue
+            if r.start < region.start:   # the part of the bank below the new region
+                kept.append(Region(r.name, r.start, r.data[:region.start - r.start], r.writable, True))
+            if region.end < r.end:       # and the part above it
+                kept.append(Region(r.name, region.end, r.data[region.end - r.start:], r.writable, True))
+        kept.append(region)
+        self.regions = sorted(kept, key=lambda r: r.start)
 
     def load_elf(self, path: str | Path) -> str:
         """Load every allocated section at its run address; returns the ELF's byte order.
 
         ``.data`` gets its initial values and ``.bss`` is zero, as after the firmware's startup code.
+        A section inside a memory bank declared in the config replaces that part of the bank.
         """
         with open(path, "rb") as f:
             elf = ELFFile(f)
