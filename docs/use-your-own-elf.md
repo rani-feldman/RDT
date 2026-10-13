@@ -49,6 +49,8 @@ For another STM32H7 part, change the banks to match its reference manual, in bot
 3. In the simulator config, delete the `uptime_ms` signal, or set its `addr` to one of your own variables. A signal overwrites its address every time it is read.
 4. Start the simulator with your config, then RDT with your workspace, and press **Connect**. The **Variables** panel lists your globals; double-click one to watch it.
 
+To skip `--config` and `-w` every time, save the two files as `sim.toml` and `rdt.toml` in the folder you start from (the repository root is fine, git ignores them there). `python -m sim`, `rdt` and `rdt-gui` then pick them up by themselves; see [Default config](SIMULATOR.md#default-config-simtoml) and [Default files](CLI.md#default-files).
+
 What the simulator does with the ELF:
 
 - Every section the firmware loads is placed at its run address, over the banks. `.data` starts with its initial values, `.bss` and the rest of RAM start as zeros, and the rest of flash reads as `0xFF`.
