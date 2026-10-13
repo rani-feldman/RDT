@@ -43,12 +43,27 @@ def new_workspace() -> Workspace:
     return Workspace(TargetConfig(mcus=[McuConfig(0, "main")]))
 
 
-def serial_ports() -> list[str]:
+def serial_ports() -> list[tuple[str, str]]:
+    """The COM ports present, as (port, description) such as ("COM3", "GAC serial port (COM3)")."""
     try:
         from serial.tools import list_ports
     except ImportError:
         return []
-    return sorted(p.device for p in list_ports.comports())
+    found = []
+    for p in list_ports.comports():
+        desc = (p.description or "").strip()
+        found.append((p.device, "" if desc in ("", "n/a", p.device) else desc))
+    return sorted(found)
+
+
+def port_label(port: str, description: str) -> str:
+    """How a port shows in the list: ``COM3 - GAC serial port (COM3)``."""
+    return f"{port} - {description}" if description else port
+
+
+def port_name(text: str) -> str:
+    """The port in what the COM box shows: a list entry's label, or a port typed by hand."""
+    return text.split(" - ", 1)[0].strip()
 
 
 class ConnectionBar(QToolBar):
@@ -120,7 +135,21 @@ class ConnectionBar(QToolBar):
         for a in self._serial:
             a.setVisible(kind == "serial")
         if kind == "serial" and self.com.count() == 0:
-            self.com.addItems(serial_ports())
+            typed = self.com.currentText()
+            self.com.blockSignals(True)
+            for port, desc in serial_ports():
+                self.com.addItem(port_label(port, desc), port)
+            self.com.view().setMinimumWidth(self.com.view().sizeHintForColumn(0) + 24)
+            self.set_port(typed)
+            self.com.blockSignals(False)
+
+    def set_port(self, port: str) -> None:
+        """Show ``port`` in the COM box: its list entry, with the description, when it is listed."""
+        i = self.com.findData(port_name(port))
+        if i >= 0:
+            self.com.setCurrentIndex(i)
+        else:
+            self.com.setEditText(port)
 
     def show_config(self, ws: Workspace) -> None:
         widgets = (self.transport, self.host, self.port, self.com, self.baud, self.poll)
@@ -129,7 +158,7 @@ class ConnectionBar(QToolBar):
         c = ws.config.connection
         self.transport.setCurrentText(c.transport)
         if c.transport == "serial":
-            self.com.setCurrentText(c.address)
+            self.set_port(c.address)
             self.baud.setCurrentText(str(c.baud))
         else:
             host, _, port = c.address.rpartition(":")
@@ -149,7 +178,7 @@ class ConnectionBar(QToolBar):
     def connection(self) -> ConnectionConfig:
         kind = self.transport.currentText()
         if kind == "serial":
-            port = self.com.currentText().strip()
+            port = port_name(self.com.currentText())
             if not port:
                 raise ConfigError("choose a COM port")
             try:

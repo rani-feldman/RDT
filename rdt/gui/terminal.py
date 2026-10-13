@@ -35,6 +35,7 @@ class Terminal(QPlainTextEdit):
         self.suggestion = ""            # the whole command suggested for what is typed
         self.input_enabled = True
         self.popup_open = lambda: False  # set by the console: is the completer's list showing?
+        self.popup_key = lambda key: False  # set by the console: Tab, Enter or Esc while the list shows
         self._input_start = 0
         self._write_prompt("")
 
@@ -128,6 +129,9 @@ class Terminal(QPlainTextEdit):
             return super().keyPressEvent(event)
         if key in _VIEW_KEYS or (mods & Qt.ControlModifier and key in (Qt.Key_C, Qt.Key_A, Qt.Key_Home, Qt.Key_End)):
             return super().keyPressEvent(event)
+        if key in (Qt.Key_Tab, Qt.Key_Return, Qt.Key_Enter, Qt.Key_Escape) and self.popup_open() \
+                and self.popup_key(key):
+            return
         if key in (Qt.Key_Return, Qt.Key_Enter):
             if self.input_enabled:
                 self.suggestion = ""
@@ -215,8 +219,7 @@ class Terminal(QPlainTextEdit):
     def paintEvent(self, event) -> None:
         super().paintEvent(event)
         ghost = self.ghost()
-        if not ghost or self.textCursor().position() != self.document().characterCount() - 1 \
-                or self.popup_open():
+        if not ghost or self.textCursor().position() != self.document().characterCount() - 1:
             return
         rect = self.cursorRect()
         painter = QPainter(self.viewport())
