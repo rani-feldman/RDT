@@ -16,7 +16,7 @@ from pathlib import Path
 from PySide6.QtCore import QSettings, Qt, QTimer
 from PySide6.QtGui import QAction, QKeySequence
 from PySide6.QtWidgets import (
-    QAbstractItemView, QApplication, QComboBox, QDialog, QDialogButtonBox, QDockWidget, QFileDialog, QLabel,
+    QAbstractItemView, QApplication, QCheckBox, QComboBox, QDialog, QDialogButtonBox, QDockWidget, QFileDialog, QLabel,
     QLineEdit, QMainWindow, QMessageBox, QPushButton, QSpinBox, QTableWidget, QTableWidgetItem, QToolBar,
     QVBoxLayout,
 )
@@ -84,6 +84,14 @@ class ConnectionBar(QToolBar):
         self.poll.setSpecialValueText("Off")
         self.poll.setToolTip("Global polling interval; each watched item can override it")
         self.poll.valueChanged.connect(main.set_poll_ms)
+        self.polling = QCheckBox("Poll")
+        self.polling.setChecked(True)
+        self.polling.setToolTip("Poll the watched items; untick to stop all polling, "
+                                "including items with their own interval (F7)")
+        self.polling.toggled.connect(main.set_polling)
+        self.poll_now = QPushButton("Poll now")
+        self.poll_now.setToolTip("Read every watched item once, in every tab (F6)")
+        self.poll_now.clicked.connect(main.read_all)
         self.log_button = QPushButton("Log CSV")
         self.log_button.setCheckable(True)
         self.log_button.setToolTip("Log every watched value to a CSV file while connected (Ctrl+L)")
@@ -96,8 +104,9 @@ class ConnectionBar(QToolBar):
         self.addWidget(self.connect_button)
         self.addWidget(self.state)
         self.addSeparator()
-        self.addWidget(QLabel(" Poll "))
+        self.addWidget(self.polling)
         self.addWidget(self.poll)
+        self.addWidget(self.poll_now)
         self.addWidget(self.log_button)
         self.transport.currentTextChanged.connect(self._kind)
         for w in (self.transport, self.com, self.baud):
@@ -244,7 +253,10 @@ class MainWindow(QMainWindow):
         self.allow_action.setEnabled(False)
         m = self.menuBar().addMenu("&Watch")
         action(m, "&Add expression...", self.add_expression, "Ctrl+E")
-        action(m, "&Read all now", self.read_all, "F6")
+        action(m, "&Poll now", self.read_all, "F6")
+        self.polling_action = action(m, "Poll &automatically", lambda: self.set_polling(self.polling_action.isChecked()), "F7")
+        self.polling_action.setCheckable(True)
+        self.polling_action.setChecked(True)
         action(m, "Re&move selected", lambda: [self.watch_tree.remove_watch(e) for e in self.watch_tree.selected_exprs()],
                QKeySequence.Delete)
         m.addSeparator()
@@ -457,6 +469,18 @@ class MainWindow(QMainWindow):
             self.watch_tabs.decorate()
             if self.memory.auto.isChecked():
                 self.memory._auto(True)
+
+    def set_polling(self, on: bool) -> None:
+        """Turn all polling on or off; Poll now (F6) still reads every item once."""
+        if on == self.watch_tabs.polling:
+            return
+        self.watch_tabs.polling = on
+        for w in (self.bar.polling, self.polling_action):
+            w.blockSignals(True)
+            w.setChecked(on)
+            w.blockSignals(False)
+        self.bar.poll.setEnabled(on)
+        self.status("Polling on" if on else "Polling off: press Poll now (F6) to read the watched items")
 
     def toggle_connection(self) -> None:
         if self.device.target is not None or self._connecting:
