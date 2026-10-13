@@ -68,12 +68,13 @@ Each requirement links to its design section.
 | SCPI-1 | No SCPI command is hard-coded; the user defines the read and write commands and the reply format in an SCPI profile (2026-10-05) | Done | [D-SCPI-1](#d-scpi-1-scpi-profile) |
 | SCPI-2 | Memory is read with one command, `read mcu,startAddress,size`; one reply carries up to a configurable maximum response size (2026-10-05) | Done | [D-SCPI-2](#d-scpi-2-block-read) |
 | SCPI-3 | Memory is written one value per command, `write mcu,address,value,size`, with the value as a raw hex integer (2026-10-05) | Done | [D-SCPI-3](#d-scpi-3-single-value-write) |
-| SCPI-4 | Addresses and values in commands, and the data in read replies, are bare upper-case hex with no prefix: address 0x11AABBCCDD is sent as `11AABBCCDD` (2026-10-12). A regular expression can pick the hex data out of a longer reply | Done | [D-SCPI-4](#d-scpi-4-bare-hex) |
+| SCPI-4 | Addresses and values in commands are bare upper-case hex with no prefix: address 0x11AABBCCDD is sent as `11AABBCCDD` (2026-10-12) | Done | [D-SCPI-4](#d-scpi-4-bare-hex) |
 | SCPI-5 | A failed command sends no reply and its error goes only to the error queue; RDT copes with that (2026-10-11) | Done | [D-SCPI-5](#d-scpi-5-failed-commands-send-no-reply) |
 | SCPI-6 | Every write is confirmed by reading the value back | Done | [D-SCPI-6](#d-scpi-6-write-confirmation) |
 | SCPI-8 | A manual SCPI console sends any command and shows the raw reply (2026-10-05) | Done | [D-SCPI-8](#d-scpi-8-scpi-console) |
 | SCPI-9 | The profile can be edited in the GUI, with a preview of the commands and a test read | Done | [D-SCPI-9](#d-scpi-9-profile-editor) |
 | SCPI-10 | Every SCPI read and write covers whole 4-byte aligned words: a 2-byte variable is read as its 4-byte word and the result is trimmed, and a smaller or unaligned write is done as read-modify-write (2026-10-12) | Done | [D-SCPI-10](#d-scpi-10-aligned-words) |
+| SCPI-11 | A read reply is one bare hex value per 4-byte word, comma-separated, lowest address first, the way the firmware prints a `uint32_t`: `30303030,2F30302F,43B40000`. This is the only reply format (2026-10-13). A regular expression can pick the words out of a longer reply | In review (PR #44) | [D-SCPI-11](#d-scpi-11-word-replies) |
 
 ### 2.4 Multiple MCUs
 
@@ -381,7 +382,7 @@ read         = "MEMory:READ? {mcu},{addr},{len}"
 write        = "MEMory:WRITE {mcu},{addr},{value},{size}"
 max_write    = 4               # largest value one write accepts: 1, 2, 4 or 8 bytes
 align        = 4               # every read and write covers whole aligned words: 1, 2, 4 or 8
-reply_regex  = ""              # optional; group "data" (or group 1) holds the hex data
+reply_regex  = ""              # optional; group "data" (or group 1) holds the reply words
 byte_order   = "little"        # only for an MCU without an ELF
 max_response = 1024            # bytes of data one read reply can carry
 error_query  = "SYSTem:ERRor?"
@@ -403,11 +404,9 @@ A write sends one value per command. The value is the raw integer of the variabl
 
 #### D-SCPI-4 Bare hex
 
-rani set this on 2026-10-12: addresses and values are hex with no prefix, in commands and in replies, so address 0x11AABBCCDD is sent as `11AABBCCDD`.
+rani set this on 2026-10-12: addresses and values in commands are hex with no prefix, so address 0x11AABBCCDD is sent as `11AABBCCDD`. Read replies are comma-separated words (D-SCPI-11).
 
 - **Commands:** `fill_template` (`rdt/profile.py`) writes `{addr}` and `{value}` as upper-case hex with no prefix. A template may pad them, as in `{addr:08X}`, but any spec that changes the base is a `ConfigError`. A read of 4 bytes at 0x20000000 on MCU 0 is `MEMory:READ? 0,20000000,4`, and a write of 1.5 to a float is `MEMory:WRITE 0,20000004,3FC00000,4`.
-- **Read replies:** `Profile.decode_data` takes the bytes in bare hex, lowest address first. The 4 bytes `00 00 C0 3F` come back as `0000C03F`. Whitespace is ignored, and a prefix such as `0x` or an odd number of digits is a `BadReply`.
-- **Longer replies:** when the firmware wraps the data in other text, `reply_regex` picks the hex out of the reply (group `data`, or group 1).
 - **Old files:** the earlier `addr_format`, `value_format` and `data_format` keys (with the `bytes_csv`, `decimal` and `ieee_block` reply formats) are gone. A profile or workspace that still has them loads with those keys ignored.
 - **Simulator:** it takes addresses and values only in bare hex. A prefixed or signed number (`0x20000000`, `#H20`, `-1`) fails with `-104,"Data type error"`.
 
@@ -452,6 +451,22 @@ rani set this on 2026-10-12: the firmware is only ever asked for whole 4-byte al
 - **Polling:** the scheduler sizes each merged block by its aligned span, so a block never needs more than one reply (D-POLL-3).
 - **GUI:** the profile editor has an **Align** field. Its preview writes one word, and **Test read** sends an aligned read (D-SCPI-9).
 - **Simulator:** an address, length or write size that is not a multiple of `align` fails with `-224,"Illegal parameter value"`.
+
+
+#### D-SCPI-11 Word replies
+
+rani set this on 2026-10-13, after connecting RDT to the real target on COM3: the firmware prints each 4-byte word of a read as a `uint32_t` in bare hex, comma-separated, lowest address first. This is the only reply format; the earlier run of bare bytes (`0000C03F`) is removed.
+
+| Read | Reply | Value |
+| --- | --- | --- |
+| a `float` 1.5 at 20000000 | `3FC00000` | bytes `00 00 C0 3F` on a little-endian MCU |
+| 12 bytes holding the string `0000/00/00` | `30303030,2F30302F,06003030` | each word turned back into bytes in the MCU's byte order |
+
+- **Decoding:** `Profile.decode_data(reply, length, byte_order)` in `rdt/profile.py` splits the reply on commas. Each token is a bare hex value of at most `align` bytes (D-SCPI-10), and leading zeros may be left out. Each value becomes `align` bytes in the MCU's byte order.
+- **Byte order:** the order comes from that MCU's ELF. `Target` passes it to `Session` as `byte_order_of`, and the profile's `byte_order` is used only for an MCU without an ELF.
+- **Refused replies:** a `0x` prefix, a token wider than `align`, or the wrong number of words is a `BadReply`.
+- **Longer replies:** when the firmware wraps the words in other text, `reply_regex` picks them out first (group `data`, or group 1).
+- **Simulator:** it replies in the same words, in each simulated MCU's byte order.
 
 ### 4.4 Multiple MCUs
 
@@ -1120,7 +1135,7 @@ The firmware side is not written yet; rani adds it to the existing firmware late
 
 | ID | Requirement |
 | --- | --- |
-| FW-1 | A memory read command with the MCU as a parameter, such as `MEMory:READ? <mcu>,<addr>,<len>`, replying with `len` bytes in bare hex, lowest address first (D-SCPI-4). `addr` and `len` are multiples of 4 (D-SCPI-10) |
+| FW-1 | A memory read command with the MCU as a parameter, such as `MEMory:READ? <mcu>,<addr>,<len>`, replying with `len` bytes as comma-separated 4-byte words in bare hex, lowest address first (D-SCPI-11). `addr` and `len` are multiples of 4 (D-SCPI-10) |
 | FW-2 | A memory write command, such as `MEMory:WRITE <mcu>,<addr>,<value>,<size>`, storing one aligned 4-byte word as a single store (D-SCPI-10). The value is a raw integer in bare hex |
 | FW-3 | A failed command sends no reply and puts its error in the SCPI error queue, read with `SYSTem:ERRor?`. A read longer than the reply buffer is such a failure |
 | FW-4 | The main MCU forwards commands for MCUs 1 and up over the internal channel in 64-byte frames, and splits and joins larger reads |
@@ -1133,15 +1148,16 @@ The firmware side is not written yet; rani adds it to the existing firmware late
 Recommended shape, which the simulator and the default profile use:
 
 ```
-MEMory:READ? <mcu>,<addr>,<len>          -> hex bytes, lowest address first
+MEMory:READ? <mcu>,<addr>,<len>          -> one hex word per 4 bytes, comma-separated
 MEMory:WRITE <mcu>,<addr>,<value>,<size> ; no reply
 SYSTem:ERRor?                            -> 0,"No error" or a code and text
 
-MEMory:READ? 0,20000000,4                -> 0000C03F
+MEMory:READ? 0,20000000,4                -> 3FC00000
+MEMory:READ? 0,20000000,12               -> 30303030,2F30302F,06003030
 MEMory:WRITE 0,20000004,3FC00000,4       ; no reply
 ```
 
-`<addr>` and `<value>` are bare upper-case hex with no prefix (D-SCPI-4); `<mcu>`, `<len>` and `<size>` are decimal. The read reply is plain hex text because it is trivial to produce and readable in the console. Names are up to the firmware, since the profile maps them.
+`<addr>` and `<value>` are bare upper-case hex with no prefix (D-SCPI-4); `<mcu>`, `<len>` and `<size>` are decimal. The read reply is each word printed as a `uint32_t` in hex, which is what the firmware already does and is readable in the console (D-SCPI-11). Names are up to the firmware, since the profile maps them.
 
 Error codes the simulator uses, as a reference:
 
@@ -1233,6 +1249,7 @@ The application is built against the simulator. As soon as the firmware has the 
 | 2026-10-12 | Addresses and values in SCPI commands, and read-reply data, are bare hex with no prefix (`11AABBCCDD`); the address, value and reply format settings are removed (SCPI-4), at rani's request |
 | 2026-10-12 | Every SCPI read and write covers whole 4-byte aligned words (`align`); reads are trimmed, and smaller or unaligned writes are read-modify-write, which rani chose over refusing them (SCPI-10) |
 | 2026-10-13 | A **Poll now** button and a **Poll** on/off checkbox in the GUI; turning polling off stops every item, including those with their own interval, and is not saved in the workspace (POLL-5, POLL-6) |
+| 2026-10-13 | Read replies are comma-separated 4-byte words in bare hex (`30303030,2F30302F`), decoded in each MCU's byte order; the run-of-bytes reply is removed, at rani's request after connecting to the real target (SCPI-11) |
 
 ## 9. Appendix: binary protocol (planned)
 
