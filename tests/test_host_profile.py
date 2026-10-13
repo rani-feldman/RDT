@@ -51,27 +51,27 @@ def test_bad_profiles_are_refused(table):
 def test_decodes_what_the_simulator_encodes():
     data = bytes(range(256))
     assert Profile().decode_data(encode_data(data), 256) == data
-    assert Profile().decode_data(b"0000c03f", 4) == bytes.fromhex("0000C03F")   # either case
+    assert Profile().decode_data(b"3fc00000", 4) == bytes.fromhex("0000C03F")   # either case
 
 
 def test_reply_data_must_be_bare_hex():
-    for reply in (b"0x0000C03F", b"00,00,C0,3F", b"#H0000C03F"):
+    for reply in (b"0x3FC00000", b"0000C03F00", b"#H3FC00000"):
         with pytest.raises(BadReply, match="bare hex"):
             Profile().decode_data(reply, 4)
 
 
 def test_reply_size_must_match():
     with pytest.raises(BadReply):
-        Profile().decode_data(b"0000C0", 4)
+        Profile().decode_data(b"3FC00000,00000001", 4)
     with pytest.raises(BadReply):
         Profile().decode_data(b"zz00C03F", 4)
 
 
 def test_reply_regex():
     p = Profile(reply_regex=r"DATA=(?P<data>[0-9A-F]+);")
-    assert p.decode_data(b"OK DATA=0000C03F;", 4) == bytes.fromhex("0000C03F")
+    assert p.decode_data(b"OK DATA=3FC00000;", 4) == bytes.fromhex("0000C03F")
     with pytest.raises(BadReply):
-        p.decode_data(b"0000C03F", 4)
+        p.decode_data(b"3FC00000", 4)
 
 
 def test_error_replies():
@@ -106,3 +106,20 @@ def test_an_old_size_query_key_is_ignored():
 def test_old_format_keys_are_ignored():
     p = Profile.from_dict({"addr_format": "0x{addr:08X}", "value_format": "0x{value:X}", "data_format": "hex"})
     assert p.format_read(0, 0x20000000, 4) == "MEMory:READ? 0,20000000,4"
+
+
+def test_word_replies():
+    """rani's firmware (2026-10-13) prints each 4-byte word as a uint32 value, comma-separated."""
+    import struct
+    p = Profile()
+    data = p.decode_data(b"30303030,2F30302F,06003030,00000101,43B40000", 20, "little")
+    assert data[:12] == b"0000/00/00\x00\x06"                 # a date string, in memory order
+    assert struct.unpack("<I", data[12:16])[0] == 0x101
+    assert struct.unpack("<f", data[16:20])[0] == 360.0
+    assert p.decode_data(b"43B40000", 4, "big") == bytes.fromhex("43B40000")
+    assert p.decode_data(b"1, 2", 8, "little") == bytes.fromhex("0100000002000000")   # spaces, no padding
+    for reply in (b"30303030,", b"0x43B40000", b"30303030 2F30302F", b"123456789"):
+        with pytest.raises(BadReply):
+            p.decode_data(reply, 4, "little")
+    with pytest.raises(BadReply, match="expected 8 bytes"):
+        p.decode_data(b"30303030", 8, "little")

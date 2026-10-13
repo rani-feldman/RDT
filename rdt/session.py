@@ -68,6 +68,7 @@ class Session:
         *,
         mcu_timeouts_ms: dict[int, float] | None = None,
         mcu_names: dict[int, str] | None = None,
+        byte_order_of: Callable[[int], str] | None = None,
         auto_reconnect: bool = True,
     ):
         self.transport = transport
@@ -75,6 +76,7 @@ class Session:
         self.protocol = ScpiProtocol(transport, profile)
         self.mcu_timeouts_ms = dict(mcu_timeouts_ms or {})
         self.mcu_names = dict(mcu_names or {})
+        self.byte_order_of = byte_order_of or (lambda mcu: profile.byte_order)   # for word replies
         self.auto_reconnect = auto_reconnect
         self.max_response = profile.max_response
         self.idn: str | None = None
@@ -263,7 +265,8 @@ class Session:
                     time.sleep(delay)
                     delay *= 2
                 try:
-                    data = self.protocol.read_mem(mcu, addr, size, self.timeout_s(mcu))
+                    data = self.protocol.read_mem(mcu, addr, size, self.timeout_s(mcu),
+                                                  self.byte_order_of(mcu))
                 except BadReply as e:
                     # Perhaps a late reply meant for an earlier command; the next send flushes it.
                     log.debug("%s: %s", what, e)
