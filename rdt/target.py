@@ -244,7 +244,9 @@ class Target:
         self.transport = transport or make_transport(c.transport, c.address, c.baud)
         timeouts = {m.id: m.timeout_ms for m in self.mcus.values() if m.timeout_ms}
         names = {m.id: m.name for m in self.mcus.values()}
+        by_id = {m.id: m for m in self.mcus.values()}
         self.session = Session(self.transport, self.profile, mcu_timeouts_ms=timeouts, mcu_names=names,
+                               byte_order_of=lambda i: by_id[i].byte_order if i in by_id else self.profile.byte_order,
                                auto_reconnect=auto_reconnect)
 
     @classmethod

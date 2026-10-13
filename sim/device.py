@@ -176,7 +176,7 @@ class Device:
             data = mcu.read(addr, size)
         except MemoryFault as e:
             raise _out_of_range(str(e)) from None
-        return encode_data(data)
+        return encode_data(data, self.profile.align, mcu.byte_order)
 
     def _write(self, args: dict) -> None:
         mcu = self._mcu(args)
@@ -214,6 +214,8 @@ class Device:
         return ",".join(f'{m.id},"{m.name}"' for m in sorted(self.mcus.values(), key=lambda m: m.id))
 
 
-def encode_data(data: bytes) -> bytes:
-    """A read reply: the bytes in bare hex, lowest address first, such as ``0000A041``."""
-    return data.hex().upper().encode()
+def encode_data(data: bytes, size: int = 4, byte_order: str = "little") -> bytes:
+    """A read reply in words: one bare hex value per ``size``-byte word, comma-separated, such as
+    ``3FC00000,00000101``, the way a firmware that prints ``uint32_t`` values sends it."""
+    return ",".join(f"{int.from_bytes(data[i:i + size], byte_order):0{2 * size}X}"
+                    for i in range(0, len(data), size)).encode()

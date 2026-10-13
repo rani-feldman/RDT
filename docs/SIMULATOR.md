@@ -42,7 +42,7 @@ The read, write and error commands come from the SCPI profile, the same `[scpi]`
 
 | Command (default profile) | Reply |
 | --- | --- |
-| `MEMory:READ? <mcu>,<addr>,<len>` | `<len>` bytes in bare hex, lowest address first, such as `0000C03F`. `<addr>` and `<len>` are multiples of `align` |
+| `MEMory:READ? <mcu>,<addr>,<len>` | `<len>` bytes as comma-separated words: one bare hex value per `align`-byte word, lowest address first, such as `3FC00000,43B40000`. `<addr>` and `<len>` are multiples of `align` |
 | `MEMory:WRITE <mcu>,<addr>,<value>,<size>` | none. `<size>` is 1, 2, 4 or 8 bytes, at least `align` and at most `max_write`; `<addr>` is a multiple of `align` |
 | `SYSTem:ERRor?` | oldest error, or `0,"No error"` |
 | `*IDN?`, `*RST`, `*CLS`, `*OPC?` | standard. `*RST` reloads every MCU's memory from its image |
@@ -52,7 +52,7 @@ The read, write and error commands come from the SCPI profile, the same `[scpi]`
 
 Long and short header forms both work, in any case (`MEMORY:READ?`, `mem:read?`).
 
-`<addr>` and `<value>` are bare hex with no prefix, as in the firmware: address `0x11AABBCCDD` is sent as `11AABBCCDD`, and a write of 1.5 as a float is `MEMory:WRITE 0,20000004,3FC00000,4`. A prefixed or signed number (`0x20000000`, `#H20`, `-1`) fails with `-104,"Data type error"`. `<mcu>`, `<len>` and `<size>` are decimal. Reads and writes are whole aligned words: with the default `align = 4`, `MEMory:READ? 0,20000002,2` fails with `-224`, and RDT asks for `MEMory:READ? 0,20000000,4` instead. A read reply is the bytes in bare hex, lowest address first: the 4 bytes `00 00 C0 3F` come back as `0000C03F`.
+`<addr>` and `<value>` are bare hex with no prefix, as in the firmware: address `0x11AABBCCDD` is sent as `11AABBCCDD`, and a write of 1.5 as a float is `MEMory:WRITE 0,20000004,3FC00000,4`. A prefixed or signed number (`0x20000000`, `#H20`, `-1`) fails with `-104,"Data type error"`. `<mcu>`, `<len>` and `<size>` are decimal. Reads and writes are whole aligned words: with the default `align = 4`, `MEMory:READ? 0,20000002,2` fails with `-224`, and RDT asks for `MEMory:READ? 0,20000000,4` instead. A read reply is one bare hex value per word, comma-separated, as the firmware prints a `uint32_t`: on a little-endian MCU the 8 bytes `00 00 C0 3F 00 00 B4 43` (the floats 1.5 and 360.0) come back as `3FC00000,43B40000`.
 
 ## Errors
 

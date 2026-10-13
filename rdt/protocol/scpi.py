@@ -47,7 +47,7 @@ class ScpiProtocol:
 
     # --- memory ------------------------------------------------------------------------------
 
-    def read_mem(self, mcu: int, addr: int, length: int, timeout: float) -> bytes | None:
+    def read_mem(self, mcu: int, addr: int, length: int, timeout: float, byte_order: str | None = None) -> bytes | None:
         """One read command. None on timeout; ``BadReply`` if a reply came but doesn't fit."""
         self.send(self.profile.format_read(mcu, addr, length))
         reply = self.read_line(timeout)
@@ -62,7 +62,7 @@ class ScpiProtocol:
                 error = None
             if error is not None:
                 raise CommandRejected(error)
-        return self.profile.decode_data(reply, length)
+        return self.profile.decode_data(reply, length, byte_order)
 
     def write_mem(self, mcu: int, addr: int, value: int, size: int) -> None:
         """One write command. The firmware sends no reply to a write, success or failure."""

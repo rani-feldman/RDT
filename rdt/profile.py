@@ -1,9 +1,9 @@
 """SCPI profile: the user-defined command templates and reply format.
 
 Nothing about the firmware's commands is hard-coded. The profile says how to spell a read, a
-write and the error query. Addresses and values in commands, and the data in read replies, are
-always bare hex with no prefix: address 0x11AABBCCDD is sent as ``11AABBCCDD`` (rani,
-2026-10-12). Every read and write covers whole 4-byte aligned words (``align``, rani, 2026-10-12):
+write and the error query. Addresses and values in commands are always bare hex with no
+prefix: address 0x11AABBCCDD is sent as ``11AABBCCDD`` (rani, 2026-10-12). A read reply is one
+bare hex value per 4-byte word, comma-separated, such as ``3FC00000,00000101`` (rani, 2026-10-13). Every read and write covers whole 4-byte aligned words (``align``, rani, 2026-10-12):
 a 2-byte variable is read as its 4-byte word and trimmed. The simulator reads the same ``[scpi]`` table, so one file describes both sides.
 """
 
@@ -191,10 +191,12 @@ class Profile:
 
     # --- replies -----------------------------------------------------------------------------
 
-    def decode_data(self, reply: bytes, length: int) -> bytes:
+    def decode_data(self, reply: bytes, length: int, byte_order: str | None = None) -> bytes:
         """Decode a read reply (without its terminator) into exactly ``length`` bytes.
 
-        The reply is the bytes in bare hex, lowest address first, such as ``0000C03F``.
+        The reply is one bare hex value per aligned word (``align`` bytes), lowest address first,
+        separated by commas, such as ``3FC00000,00000101`` (rani, 2026-10-13: the firmware prints
+        each word as a ``uint32_t``). Each value is turned into bytes in the MCU's ``byte_order``.
         """
         text = reply.decode("latin-1").strip()
         if self._regex:
@@ -202,21 +204,24 @@ class Profile:
             if not m:
                 raise BadReply(f"reply {text[:60]!r} does not match reply_regex")
             text = m.group("data") if "data" in self._regex.groupindex else m.group(1 if m.groups() else 0)
-        data = decode_hex(text)
+        data = decode_words(text, self.align, byte_order or self.byte_order)
         if len(data) != length:
             raise BadReply(f"expected {length} bytes, got {len(data)}")
         return data
 
 
-_HEX_DATA = re.compile(r"^[0-9A-Fa-f\s]*$")
+_WORD = re.compile(r"^[0-9A-Fa-f]+$")
 
 
-def decode_hex(text: str) -> bytes:
-    """Bare hex bytes, such as ``0000C03F``. A prefix such as ``0x`` is not accepted."""
-    t = "".join(text.split())
-    if not _HEX_DATA.match(t) or len(t) % 2:
-        raise BadReply(f"reply {text[:60]!r} is not bare hex bytes")
-    return bytes.fromhex(t)
+def decode_words(text: str, size: int, byte_order: str) -> bytes:
+    """Comma-separated bare hex values of ``size`` bytes each, such as ``3FC00000,00000101``."""
+    out = bytearray()
+    for token in text.split(","):
+        t = token.strip()
+        if not _WORD.match(t) or len(t) > 2 * size:
+            raise BadReply(f"reply {text[:60]!r} is not comma-separated bare hex words of {size} bytes")
+        out += int(t, 16).to_bytes(size, byte_order)
+    return bytes(out)
 
 
 _ERROR = re.compile(r'^\s*([+-]?\d+)\s*(?:,\s*"?(.*?)"?\s*)?$')
