@@ -1,0 +1,75 @@
+# RDT workspace for one MCU, "Interface", laid out like an STM32H743/H753 (RM0433 memory map).
+# Matches the simulator config sim/examples/stm32h7_interface.toml:
+#   python -m sim --config sim/examples/stm32h7_interface.toml
+#   rdt-gui examples/stm32h7_interface.rdtw
+#
+# Without an ELF, watch raw addresses such as @Interface:0x24000000:u32. To see variables by
+# name, set elf below (or Target > MCUs and ELF files in the GUI). The banks are "memory"
+# ranges: they may overlap the ELF's sections, and RDT refuses anything outside them.
+# See docs/use-your-own-elf.md.
+profile = "../sim/examples/default_profile.toml"
+poll_ms = 500
+
+[connection]
+transport = "tcp"
+address   = "127.0.0.1:5025"
+
+[[mcu]]
+id   = 0
+name = "Interface"
+# elf = "C:/work/firmware/build/interface.elf"
+
+  [[mcu.ranges]]
+  name  = "ITCM"
+  kind  = "memory"
+  start = 0x00000000
+  end   = 0x0000FFFF          # 64 KB
+
+  [[mcu.ranges]]
+  name     = "FLASH"
+  kind     = "memory"
+  start    = 0x08000000
+  end      = 0x081FFFFF       # 2 MB; RDT never writes flash
+  writable = false
+
+  [[mcu.ranges]]
+  name  = "DTCM"
+  kind  = "memory"
+  start = 0x20000000
+  end   = 0x2001FFFF          # 128 KB
+
+  [[mcu.ranges]]
+  name  = "AXI_SRAM"
+  kind  = "memory"
+  start = 0x24000000
+  end   = 0x2407FFFF          # 512 KB
+
+  [[mcu.ranges]]
+  name  = "SRAM1_3"
+  kind  = "memory"
+  start = 0x30000000
+  end   = 0x30047FFF          # SRAM1, SRAM2, SRAM3: 288 KB
+
+  [[mcu.ranges]]
+  name  = "SRAM4"
+  kind  = "memory"
+  start = 0x38000000
+  end   = 0x3800FFFF          # 64 KB
+
+  [[mcu.ranges]]
+  name  = "BKPSRAM"
+  kind  = "memory"
+  start = 0x38800000
+  end   = 0x38800FFF          # 4 KB
+
+[[watch]]
+expr = "@Interface:0x24000000:u32"   # the simulator's uptime_ms counter
+
+[[watch]]
+expr   = "@Interface:0x20000000:u32"
+format = "hex"
+
+[[watch]]
+expr      = "@Interface:0x08000000:u32"   # first word of flash: 0xFFFFFFFF until an ELF is loaded
+format    = "hex"
+read_only = true
