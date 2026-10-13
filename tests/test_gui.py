@@ -239,13 +239,34 @@ def test_console_history_and_completion(qtbot, win):
     assert con.input.text() == "*IDN?"
     QTest.keyClicks(con.output, "x")
     assert con.output.ghost() == ""                    # nothing starts with *IDN?x
+    # the list of matches opens as you type, without Tab
+    popup = con.completer.popup()
     con.input.setText("")
     QTest.keyClicks(con.output, "mem")
-    assert con.output.ghost() == "ory:READ? 0,20000000,12"
-    key(Qt.Key_Tab)                                    # several: Tab lists them all, not just the grey one
-    assert con.input.text() == "MEMory:READ? 0,20000000," and con.completer.popup().isVisible()
+    assert popup.isVisible() and con.output.ghost() == "ory:READ? 0,20000000,12"
     assert con.completer.model().stringList() == ["MEMory:READ? 0,20000000,12", "MEMory:READ? 0,20000000,4"]
-    con.completer.popup().hide()
+    QTest.keyClick(popup, Qt.Key_Down)
+    QTest.keyClick(popup, Qt.Key_Down)                 # highlight the second
+    key(Qt.Key_Tab)                                    # Tab takes the highlighted command
+    assert con.input.text() == "MEMory:READ? 0,20000000,4" and not popup.isVisible()
+    con.input.setText("")
+    QTest.keyClicks(con.output, "mem")
+    key(Qt.Key_Tab)                                    # none highlighted: Tab takes the first
+    assert con.input.text() == "MEMory:READ? 0,20000000,12" and not popup.isVisible()
+    con.input.setText("")
+    QTest.keyClicks(con.output, "syst")
+    QTest.keyClick(popup, Qt.Key_Down)
+    key(Qt.Key_Return)                                 # Enter takes the highlighted one, sends nothing
+    assert con.input.text() == "SYSTem:ERRor?" and con.entries[-1][2] != "SYSTem:ERRor?"
+    con.input.setText("")
+    QTest.keyClicks(con.output, "mem")
+    key(Qt.Key_Escape)                                 # Esc closes the list
+    assert not popup.isVisible() and con.input.text() == "mem"
+    QTest.keyClicks(con.output, "o")
+    assert popup.isVisible()
+    con.input.setText("*IDN?")
+    con._typed("*IDN?")                                # a whole command matching only itself: no list
+    assert not popup.isVisible()
     con.input.setText("")
     assert con.output.ghost() == con.output.hint
 
@@ -770,3 +791,18 @@ def test_polling_can_be_turned_off_and_polled_by_hand(qtbot, win):
     qtbot.waitUntil(lambda: st.last_done != last, timeout=3000)
     win.polling_action.trigger()                           # Watch > Poll automatically (F7) turns it back on
     assert win.watch_tabs.polling and win.bar.polling.isChecked() and win.bar.poll.isEnabled()
+
+
+def test_com_ports_show_their_description(qtbot, win, monkeypatch):
+    import rdt.gui.app as app
+    monkeypatch.setattr(app, "serial_ports", lambda: [("COM1", ""), ("COM3", "GAC serial port (COM3)")])
+    bar = win.bar
+    bar.transport.setCurrentText("serial")
+    assert [bar.com.itemText(i) for i in range(bar.com.count())] == ["COM1", "COM3 - GAC serial port (COM3)"]
+    bar.com.setCurrentIndex(1)
+    assert bar.connection().address == "COM3"          # the port, not its description
+    bar.com.setEditText("COM9")                        # a port typed by hand
+    assert bar.connection().address == "COM9"
+    bar.set_port("COM3")                               # a saved port shows its description
+    assert bar.com.currentText() == "COM3 - GAC serial port (COM3)"
+    assert app.port_name("COM3 - GAC serial port (COM3)") == "COM3" and app.port_name(" /dev/ttyUSB0 ") == "/dev/ttyUSB0"

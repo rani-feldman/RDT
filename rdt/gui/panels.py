@@ -36,6 +36,7 @@ CONSOLE_KEYS = [
     ("Up / Down", "Walk the command history"),
     ("\u2192", "Take the grey suggestion shown while typing"),
     ("Tab / Ctrl+Space", "Complete the command; with several matches, list them all"),
+    ("Tab / Enter in the list", "Take the highlighted command (Tab with none highlighted takes the first)"),
     ("Ctrl+F", "Find in the transcript"),
     ("Enter / Shift+Enter", "Next / previous match, in the find bar"),
     ("Esc", "Close the find bar"),
@@ -305,6 +306,7 @@ class Console(QWidget):
         self.completer.setCompletionMode(QCompleter.UnfilteredPopupCompletion)
         self.completer.activated.connect(self._apply_completion)
         self.output.popup_open = lambda: self.completer.popup().isVisible()
+        self.output.popup_key = self._popup_key
 
         split = QSplitter(Qt.Horizontal)
         split.addWidget(self.terminal)
@@ -577,10 +579,31 @@ class Console(QWidget):
         typed = self.input.text().casefold()
         self.output.suggestion = next((c for c in found if c.casefold().startswith(typed)), "")
         self.output.viewport().update()
-        if self.completer.popup().isVisible():
-            self.suggest_model.setStringList(found)
-            if not found:
-                self.completer.popup().hide()
+        # The list of matches opens as you type, without Tab; a command typed out in full that
+        # matches only itself needs no list.
+        if not found or (len(found) == 1 and found[0].casefold() == typed.strip()):
+            self.completer.popup().hide()
+            return
+        self.suggest_model.setStringList(found)
+        self.completer.complete(self._popup_rect())
+
+    def _popup_key(self, key) -> bool:
+        """Tab, Enter or Esc while the list of matches shows. Tab takes the highlighted command,
+        or the first when none is highlighted; Enter takes the highlighted one, and with none
+        highlighted sends what is typed; Esc closes the list. True when the key was used here."""
+        popup = self.completer.popup()
+        current = popup.currentIndex()
+        if key == Qt.Key_Escape:
+            popup.hide()
+            return True
+        if current.isValid():
+            self._apply_completion(current.data())
+            return True
+        if key == Qt.Key_Tab and self.suggest_model.rowCount():
+            self._apply_completion(self.suggest_model.index(0).data())
+            return True
+        popup.hide()
+        return False
 
     def _history_step(self, step: int) -> None:
         if self.completer.popup().isVisible():
@@ -685,6 +708,7 @@ class Console(QWidget):
         text = self.input.text().strip()
         if not text:
             return
+        self.completer.popup().hide()
         self.input.setText("")
         self.send_command(text)
 
