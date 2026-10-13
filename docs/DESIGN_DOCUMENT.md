@@ -139,8 +139,8 @@ Each requirement links to its design section.
 | POLL-2 | Each watched item can use the global interval, its own interval, or be read only by hand (2026-10-05) | Done | [D-POLL-2](#d-poll-2-per-item-interval) |
 | POLL-3 | Nearby items are read together in one command, so they cost one round trip and come from the same moment | Done | [D-POLL-3](#d-poll-3-block-merging) |
 | POLL-4 | A slow link makes items fall behind instead of queueing, and each item shows the rate it actually gets | Done | [D-POLL-4](#d-poll-4-falling-behind) |
-| POLL-5 | A **Poll now** button next to Poll in the GUI reads every watched item once (2026-10-13) | In review (PR #41) | [D-POLL-5](#d-poll-5-poll-now-and-polling-switch) |
-| POLL-6 | Polling can be turned off in the GUI, including items with their own interval (2026-10-13) | In review (PR #41) | [D-POLL-5](#d-poll-5-poll-now-and-polling-switch) |
+| POLL-5 | A **Poll now** button next to Poll in the GUI reads every watched item once (2026-10-13) | Done | [D-POLL-5](#d-poll-5-poll-now-and-polling-switch) |
+| POLL-6 | Polling can be turned off in the GUI, including items with their own interval (2026-10-13) | Done | [D-POLL-5](#d-poll-5-poll-now-and-polling-switch) |
 
 ### 2.10 Watch tabs
 
