@@ -446,8 +446,8 @@ class MainWindow(QMainWindow):
         self.resizeDocks([self.docks["Chart"]], [300], Qt.Vertical)
         self.resizeDocks([self.docks["Target"]], [300], Qt.Horizontal)
         self.mode = "watch"
+        self.menu_bar = titlebar.install(self)
         self._menus()
-        titlebar.install(self)
         self.set_theme()
         self.set_mode(str(self.ui.value("session/mode", "watch")), remember=False)
         self.message = QLabel()
@@ -478,7 +478,7 @@ class MainWindow(QMainWindow):
             menu.addAction(a)
             return a
 
-        m = self.menuBar().addMenu("&File")
+        m = self.menu_bar.addMenu("&File")
         action(m, "&New workspace", self.new_file, QKeySequence.New)
         action(m, "&Open...", self.open_file, QKeySequence.Open)
         action(m, "&Save", self.save, QKeySequence.Save)
@@ -494,14 +494,14 @@ class MainWindow(QMainWindow):
         action(sub, "&Interface settings...", lambda: self.export_ui())
         m.addSeparator()
         action(m, "&Quit", self.close, QKeySequence.Quit)
-        m = self.menuBar().addMenu("&Target")
+        m = self.menu_bar.addMenu("&Target")
         action(m, "&Connect or disconnect", self.toggle_connection, "F5")
         action(m, "SCPI &profile...", self.edit_profile)
         action(m, "Load profile file...", self.load_profile)
         action(m, "&MCUs and ELF files...", self.edit_mcus)
         m.addSeparator()
         action(m, "Check ELF &identity", lambda: self.check_identity())
-        m = self.menuBar().addMenu("&Watch")
+        m = self.menu_bar.addMenu("&Watch")
         action(m, "&Add expression...", self.add_expression, "Ctrl+E")
         action(m, "&Poll now", self.read_all, "F6")
         self.polling_action = action(m, "Poll &automatically", lambda: self.set_polling(self.polling_action.isChecked()), "F7")
@@ -524,7 +524,7 @@ class MainWindow(QMainWindow):
         self.log_action.setCheckable(True)
         self.read_only_action = action(m, "All items &read-only", self.set_read_only)
         self.read_only_action.setCheckable(True)
-        m = self.menuBar().addMenu("&View")
+        m = self.menu_bar.addMenu("&View")
         for k, (name, text) in enumerate(MODES.items(), start=1):
             action(m, f"{text} mode", lambda _=False, n=name: self.set_mode(n), f"Ctrl+{k}")
         action(m, "Reset this mode's layout", self.reset_layout)
@@ -542,14 +542,14 @@ class MainWindow(QMainWindow):
             a.setCheckable(True)
             group.addAction(a)
             self.theme_actions[name] = a
-        m = self.menuBar().addMenu("&Help")
+        m = self.menu_bar.addMenu("&Help")
         action(m, "&Keyboard shortcuts", self.show_shortcuts, "F1")
 
     def shortcut_rows(self) -> list[tuple[str, str, str]]:
         """(where, what, keys) for every menu shortcut, read from the menus themselves, then the
         console's keys."""
         rows = []
-        for top in self.menuBar().actions():
+        for top in self.menu_bar.actions():
             menu = top.menu()
             for a in menu.actions() if menu else []:
                 if not a.shortcut().isEmpty():
