@@ -13,12 +13,12 @@ import time
 from datetime import datetime
 from pathlib import Path
 
-from PySide6.QtCore import QSettings, Qt, QTimer
-from PySide6.QtGui import QAction, QColor, QIcon, QKeySequence, QPainter, QPen, QPixmap
+from PySide6.QtCore import QByteArray, QSettings, Qt, QTimer
+from PySide6.QtGui import QAction, QActionGroup, QColor, QIcon, QKeySequence, QPainter, QPen, QPixmap
 from PySide6.QtWidgets import (
     QAbstractItemView, QApplication, QCheckBox, QComboBox, QDialog, QDialogButtonBox, QDockWidget, QFileDialog, QLabel,
     QLineEdit, QMainWindow, QMessageBox, QPushButton, QSpinBox, QTableWidget, QTableWidgetItem, QToolBar,
-    QHBoxLayout, QSizePolicy, QVBoxLayout, QWidget,
+    QButtonGroup, QHBoxLayout, QSizePolicy, QToolButton, QVBoxLayout, QWidget,
 )
 
 from ..console import history_path
@@ -30,9 +30,12 @@ from ..target import ConnectionConfig, McuConfig, TargetConfig
 from ..ui_settings import SETTINGS, UiSettings, workspace_dir
 from ..workspace import Workspace, default_target
 from .chart import ChartPanel
+from .cards import McuCards
 from .device import Device, describe_error
+from .dnd import DropTarget
 from .panels import CONSOLE_KEYS, Console, McuDialog, MemoryView, ProfileDialog, mono
-from .variables import SymbolBrowser, WatchTabs, WatchTree
+from .style import THEMES, apply_theme, is_dark
+from .variables import WatchTabs, WatchTree
 
 FILTER = "RDT workspace (*.rdtw);;Target file (*.toml);;All files (*)"
 WATCH_FILTER = "Watch list (*.watch.toml *.toml);;RDT workspace (*.rdtw);;All files (*)"
@@ -134,9 +137,6 @@ class ConnectionBar(QToolBar):
         self.connect_button = QPushButton("Disconnected")
         self.connect_button.setFont(mono())
         self.connect_button.clicked.connect(main.toggle_connection)
-        self.image = QLabel()
-        self.image.setFont(mono())
-        self.image.setVisible(False)
         self.poll = QSpinBox()
         self.poll.setRange(0, 3_600_000)
         self.poll.setSingleStep(100)
@@ -162,8 +162,6 @@ class ConnectionBar(QToolBar):
         self.addSeparator()
         self.addWidget(self.profile)
         self.addWidget(self.connect_button)
-        self._image = self.addWidget(self.image)
-        self._image.setVisible(False)
         self.addSeparator()
         self.addWidget(self.polling)
         self.addWidget(self.poll)
@@ -238,6 +236,45 @@ class ConnectionBar(QToolBar):
         return ConnectionConfig(kind, f"{host}:{self.port.value()}")
 
 
+MODES = {"watch": "&Watch", "scope": "&Scope", "memory": "&Memory", "console": "&Console"}
+
+
+class ModeBar(QToolBar):
+    """The mode tabs at the left of the toolbar: Watch, Scope, Memory, Console (GUI-14)."""
+
+    def __init__(self, main):
+        super().__init__("Modes")
+        self.setObjectName("modes")
+        self.setMovable(False)
+        holder = QWidget()
+        row = QHBoxLayout(holder)
+        row.setContentsMargins(0, 0, 6, 0)
+        row.setSpacing(0)
+        self.group = QButtonGroup(self)
+        self.buttons = {}
+        for k, (name, text) in enumerate(MODES.items(), start=1):
+            b = QToolButton()
+            b.setText(text.replace("&", ""))
+            b.setCheckable(True)
+            b.setAutoRaise(False)
+            b.setToolTip(f"{b.text()} mode (Ctrl+{k})")
+            b.setObjectName("first" if k == 1 else "last" if k == len(MODES) else "mid")
+            b.clicked.connect(lambda _=False, n=name: main.set_mode(n))
+            self.group.addButton(b)
+            row.addWidget(b)
+            self.buttons[name] = b
+        self.addWidget(holder)
+        holder.setStyleSheet(
+            "QToolButton { padding: 3px 12px; border: 1px solid palette(mid); background: palette(base); }"
+            "QToolButton:checked { background: palette(highlight); color: palette(highlighted-text);"
+            " font-weight: bold; }"
+            "QToolButton#first { border-top-left-radius: 4px; border-bottom-left-radius: 4px; }"
+            "QToolButton#last { border-top-right-radius: 4px; border-bottom-right-radius: 4px; }")
+
+    def show_mode(self, name: str) -> None:
+        self.buttons[name].setChecked(True)
+
+
 class ErrorBanner(QToolBar):
     """One slim red bar under the toolbar for every error: an MCU whose ELF does not match its
     firmware (SYM-8; stays until it matches again) and the latest failed action (stays until
@@ -303,7 +340,7 @@ class ErrorBanner(QToolBar):
         self.setVisible(bool(lines))
 
 
-# The connect button and the image box: text, border and background for each state.
+# The connect button: text, border and background for each state.
 STATE_COLORS = {
     "up": ("#3ccf7a", "#1f7a46", "#0d1f15"),
     "busy": ("#e0a030", "#8a6418", "#211a0c"),
@@ -337,26 +374,6 @@ LINK_TIPS = {   # the connect button's tooltip for each link state (LNK-9)
                         "writes are refused until it answers again",
     LinkState.CLOSED: "Not connected",
 }
-
-IMAGE_LOOKS = {   # the toolbar's image box (SYM-8): text and STATE_COLORS key, worst status first
-    "mismatch": ("Image \u2717 mismatch", "down"),
-    "checking": ("Image: checking", "busy"),
-    "unread": ("Image ? not read", "busy"),
-    "match": ("Image \u2713 verified", "up"),
-    "unchecked": ("Image not checked", "closed"),
-}
-
-
-def image_state(results, checking: bool) -> str:
-    """The image box's state for the MCUs' identity results: the worst of them."""
-    statuses = {r.status for r in results}
-    if checking:
-        statuses.add("checking")
-    for key in IMAGE_LOOKS:
-        if key in statuses:
-            return key
-    return "unchecked"
-
 
 IDENTITY_WORDS = {"match": "ELF matches the firmware", "mismatch": "ELF does NOT match the firmware",
                   "unchecked": "ELF not checked (nothing to compare)",
@@ -395,18 +412,24 @@ class MainWindow(QMainWindow):
         self.watch_tabs.sampled.connect(self.chart.feed)
         self.watch_tabs.sampled.connect(self._log_readings)
         self.watch_tabs.chart_requested.connect(self.add_to_chart)
+        self.chart_pending: set[str] = set()   # dropped on the chart, charted once read (GUI-16)
+        self.watch_tabs.sampled.connect(lambda _: self._chart_dropped())
+        for w in (self.chart.plot.viewport(), self.chart.list.viewport()):
+            DropTarget(w, self.drop_on_chart)
         self.setCentralWidget(self.watch_tabs)
-        self.symbols = SymbolBrowser(self)
+        self.symbols = McuCards(self)
         self.symbols.add_requested.connect(lambda expr: self.watch_tabs.add_watch(expr))
         self.console = Console(self)
         self.memory = MemoryView(self)
+        self.modes = ModeBar(self)
+        self.addToolBar(self.modes)
         self.bar = ConnectionBar(self)
         self.addToolBar(self.bar)
         self.addToolBarBreak()
         self.banner = ErrorBanner(self)
         self.addToolBar(self.banner)
         self.docks = {}
-        for title, widget, area in (("Variables", self.symbols, Qt.LeftDockWidgetArea),
+        for title, widget, area in (("Target", self.symbols, Qt.LeftDockWidgetArea),
                                     ("Chart", self.chart, Qt.BottomDockWidgetArea),
                                     ("Console", self.console, Qt.BottomDockWidgetArea),
                                     ("Memory", self.memory, Qt.BottomDockWidgetArea)):
@@ -415,12 +438,16 @@ class MainWindow(QMainWindow):
             dock.setWidget(widget)
             self.addDockWidget(area, dock)
             self.docks[title] = dock
+        self.setCorner(Qt.BottomLeftCorner, Qt.LeftDockWidgetArea)   # the MCU cards run full height
         self.tabifyDockWidget(self.docks["Chart"], self.docks["Console"])
         self.tabifyDockWidget(self.docks["Console"], self.docks["Memory"])
         self.docks["Chart"].raise_()
         self.resizeDocks([self.docks["Chart"]], [300], Qt.Vertical)
-        self.resizeDocks([self.docks["Variables"]], [250], Qt.Horizontal)
+        self.resizeDocks([self.docks["Target"]], [300], Qt.Horizontal)
+        self.mode = "watch"
         self._menus()
+        self.set_theme()
+        self.set_mode(str(self.ui.value("session/mode", "watch")), remember=False)
         self.message = QLabel()
         self.statusBar().addWidget(self.message, 1)
         self.log_label = QLabel()
@@ -496,11 +523,23 @@ class MainWindow(QMainWindow):
         self.read_only_action = action(m, "All items &read-only", self.set_read_only)
         self.read_only_action.setCheckable(True)
         m = self.menuBar().addMenu("&View")
+        for k, (name, text) in enumerate(MODES.items(), start=1):
+            action(m, f"{text} mode", lambda _=False, n=name: self.set_mode(n), f"Ctrl+{k}")
+        action(m, "Reset this mode's layout", self.reset_layout)
+        m.addSeparator()
         for dock in self.docks.values():
             m.addAction(dock.toggleViewAction())
         m.addSeparator()
         stats = action(m, "&Statistics columns", self.watch_tabs.show_stats, "Ctrl+T")
         stats.setCheckable(True)
+        sub = m.addMenu("&Theme")
+        group = QActionGroup(self)
+        self.theme_actions = {}
+        for name, text in THEMES.items():
+            a = action(sub, text, lambda _=False, n=name: self.set_theme(n))
+            a.setCheckable(True)
+            group.addAction(a)
+            self.theme_actions[name] = a
         m = self.menuBar().addMenu("&Help")
         action(m, "&Keyboard shortcuts", self.show_shortcuts, "F1")
 
@@ -599,6 +638,84 @@ class MainWindow(QMainWindow):
             ws.path = None   # a target file opens as a new workspace; don't overwrite it on save
         self.load(ws)
         return True
+
+    # --- modes (GUI-14) ------------------------------------------------------------------------
+
+    def set_mode(self, name: str, remember: bool = True) -> None:
+        """Lay the window out for one job: Watch (watch tabs, cards, chart below), Scope (a large
+        chart beside the watch tabs), Memory (the cards and a large memory view) or Console (the
+        console alone). Each mode keeps the panel sizes it was left with."""
+        if name not in MODES:
+            name = "watch"
+        if remember and name != self.mode:
+            self._keep_layout()
+        self.mode = name
+        self.modes.show_mode(name)
+        self._default_layout(name)
+        saved = self.ui.value(f"session/layout_{name}", "")
+        if saved:
+            self.restoreState(QByteArray.fromBase64(saved.encode()))
+            self.modes.show()
+            self.bar.show()
+        self.centralWidget().setVisible(name in ("watch", "scope"))
+        if remember:
+            self.ui.set_value("session/mode", name)
+
+    def _keep_layout(self) -> None:
+        """Remember the panel layout of the mode in front, for the next time it is chosen."""
+        self.ui.set_value(f"session/layout_{self.mode}", bytes(self.saveState().toBase64()).decode())
+
+    def reset_layout(self) -> None:
+        """Put the panels of the mode in front back where they start."""
+        self.ui.values.pop(f"session/layout_{self.mode}", None)
+        self.ui.save()
+        self._default_layout(self.mode)
+
+    def _default_layout(self, name: str) -> None:
+        d = self.docks
+        for dock in d.values():   # take every panel out first, or Qt leaves stale tab bars behind
+            dock.setFloating(False)
+            self.removeDockWidget(dock)
+        if name == "watch":
+            self.addDockWidget(Qt.LeftDockWidgetArea, d["Target"])
+            for t in ("Chart", "Console", "Memory"):
+                self.addDockWidget(Qt.BottomDockWidgetArea, d[t])
+            self.tabifyDockWidget(d["Chart"], d["Console"])
+            self.tabifyDockWidget(d["Console"], d["Memory"])
+            shown = ("Target", "Chart", "Console", "Memory")
+            front = "Chart"
+        elif name == "scope":
+            self.addDockWidget(Qt.LeftDockWidgetArea, d["Chart"])
+            shown, front = ("Chart",), "Chart"
+        elif name == "memory":
+            self.addDockWidget(Qt.LeftDockWidgetArea, d["Target"])
+            self.addDockWidget(Qt.RightDockWidgetArea, d["Memory"])
+            shown, front = ("Target", "Memory"), "Memory"
+        else:
+            self.addDockWidget(Qt.RightDockWidgetArea, d["Console"])
+            shown, front = ("Console",), "Console"
+        for title, dock in d.items():
+            dock.setVisible(title in shown)
+        d[front].raise_()
+        width = self.width()
+        if name == "watch":
+            self.resizeDocks([d["Target"], d["Chart"]], [300, 300], Qt.Horizontal)
+            self.resizeDocks([d["Chart"]], [300], Qt.Vertical)
+        elif name == "scope":
+            self.resizeDocks([d["Chart"]], [int(width * 0.7)], Qt.Horizontal)
+        elif name == "memory":
+            self.resizeDocks([d["Target"], d["Memory"]], [300, max(400, width - 300)], Qt.Horizontal)
+
+    def set_theme(self, name: str | None = None) -> None:
+        """Use a theme and remember it in ui.toml; with no name, the one ui.toml has (GUI-15)."""
+        if name is None:
+            name = str(self.ui.value("ui/theme", "system"))
+        elif name != self.ui.value("ui/theme", "system"):
+            self.ui.set_value("ui/theme", name)
+        name = apply_theme(name)
+        self.theme_actions[name].setChecked(True)
+        self.chart.set_dark(is_dark())
+        self.symbols.restyle()
 
     def settings(self) -> UiSettings:
         """Per-user interface settings (ui.toml), next to the console history."""
@@ -717,6 +834,7 @@ class MainWindow(QMainWindow):
             return False
         self.console.apply_settings()
         self.memory.apply_settings()
+        self.set_theme()
         self.status(f"Imported the interface settings from {Path(path).name}")
         return True
 
@@ -737,6 +855,7 @@ class MainWindow(QMainWindow):
         if not self._maybe_save():
             event.ignore()
             return
+        self._keep_layout()
         for t in (self.poll_timer, self.state_timer, self.elf_timer, self.memory.timer, self.chart.timer):
             t.stop()
         self.stop_log()
@@ -830,7 +949,7 @@ class MainWindow(QMainWindow):
 
     def show_identity(self, results) -> None:
         """Note each MCU's identity check in the console; a mismatch also shows in the error bar
-        (see _show_image). There is no way around a mismatch in the GUI: load the matching ELF."""
+        (see _show_mismatch). There is no way around a mismatch in the GUI: load the matching ELF."""
         self._shown_identities = {id(r) for r in results}
         for r in results:
             self.console.log(str(r), "error" if r.status == "mismatch" else "note")
@@ -888,7 +1007,8 @@ class MainWindow(QMainWindow):
             stale = t.stale_identities()
             if stale:
                 self.check_identity(stale)
-        self._show_image(up)
+        self._show_mismatch(up)
+        self.symbols.show_health(t, state if t is not None else None)
         self.memory.setEnabled(up)
         # With no reply the port is still open, so the console can send, such as to see whether
         # the device answers anything.
@@ -896,31 +1016,17 @@ class MainWindow(QMainWindow):
         for w in (self.bar.transport, self.bar.host, self.bar.port, self.bar.com, self.bar.baud):
             w.setEnabled(self.device.target is None and not self._connecting)
 
-    def _show_image(self, up: bool) -> None:
-        """The toolbar's image box: whether the firmware on the device was checked against the
-        ELF, and the result (SYM-8). Hidden while not connected."""
+    def _show_mismatch(self, up: bool) -> None:
+        """An ELF that does not match its firmware shows in the error bar (SYM-8); each MCU's
+        result shows on its card (GUI-14)."""
         t = self.device.target
-        shown = up and t is not None
-        self.bar._image.setVisible(shown)
-        if not shown:
+        if not up or t is None:
             self.banner.show_mismatch([])
             return
         results = [m.identity for m in t.mcus.values() if m.identity is not None]
         self.banner.show_mismatch(results)
-        checking = self.device.busy("identity") or bool(t.stale_identities())
-        key = image_state(results, checking)
         if any(r.status == "mismatch" and id(r) not in self._shown_identities for r in results):
             self.show_identity(results)   # found by a check run before a poll, not by this window
-        text, look = IMAGE_LOOKS[key]
-        fg, border, bg = STATE_COLORS[look]
-        self.bar.image.setText(text)
-        self.bar.image.setStyleSheet(f"color: {fg}; background: {bg}; border: 1px solid {border}; "
-                                     "border-radius: 3px; padding: 2px 8px")
-        tip = "\n".join(f"{m.name}: {m.identity.status} \u2014 {m.identity.detail}" if m.identity else
-                        f"{m.name}: not checked yet" for m in t.mcus.values())
-        if key == "mismatch":
-            tip += "\nReads and writes to it are refused until its ELF matches the firmware"
-        self.bar.image.setToolTip(tip)
 
     def _check_elfs(self) -> None:
         if self.device.target is None or self.device.busy("elfs"):
@@ -995,6 +1101,41 @@ class MainWindow(QMainWindow):
         self.chart.add(path, unit)
         self.docks["Chart"].show()
         self.docks["Chart"].raise_()
+
+    def show_memory(self, mcu: str) -> None:
+        """The memory view, on one MCU."""
+        self.memory.mcu.setCurrentText(mcu)
+        self.docks["Memory"].show()
+        self.docks["Memory"].raise_()
+
+    def drop_on_chart(self, exprs: list[str]) -> None:
+        """Expressions dragged onto the chart (GUI-16). One not watched yet goes to the tab in
+        front first, since the chart plots what the watch tabs read; each is charted after its
+        first read, when RDT knows whether it is a number."""
+        watched = set(self.watch_tabs.exprs())
+        for e in exprs:
+            if any(tree.chartable(e) for tree in self.watch_tabs.trees):   # a value already shown
+                self.chart_pending.add(e)
+                continue
+            if e not in watched and self.watch_tree.add_watch(e) is None:
+                continue
+            self.chart_pending.add(e)
+            for tree in self.watch_tabs.trees:
+                tree.read_now(e)
+        self._chart_dropped()
+
+    def _chart_dropped(self) -> None:
+        for e in list(self.chart_pending):
+            for tree in self.watch_tabs.trees:
+                if tree.chartable(e):
+                    self.chart_pending.discard(e)
+                    tree.chart(e)
+                    break
+                st = tree.states.get(e)
+                if st is not None and st.shown.get(e) is not None:   # read, but not a number
+                    self.chart_pending.discard(e)
+                    self.status(f"{e} is not a number, so it can't be charted")
+                    break
 
     def chart_selected(self) -> None:
         paths = [p for p in self.watch_tree.selected_paths() if self.watch_tree.chartable(p)]
