@@ -11,7 +11,7 @@ from pathlib import Path
 
 from PySide6.QtCore import QEvent, QObject, QPoint, Qt
 from PySide6.QtGui import QPixmap
-from PySide6.QtWidgets import QHBoxLayout, QLabel, QMainWindow, QToolButton, QWidget
+from PySide6.QtWidgets import QHBoxLayout, QLabel, QMainWindow, QMenuBar, QToolButton, QWidget
 
 BAR_HEIGHT = 48
 ICON_SIZE = 32
@@ -32,22 +32,22 @@ def _button(text: str, tip: str, close: bool = False) -> QToolButton:
     b.setFocusPolicy(Qt.NoFocus)
     hover = "rgba(232,17,35,230)" if close else "rgba(128,128,128,70)"
     b.setStyleSheet(
-        f"QToolButton {{ border: none; font-size: 15pt; background: transparent; }}"
+        f"QToolButton {{ border: none; font-size: 15pt; background: transparent; color: palette(window-text); }}"
         f"QToolButton:hover {{ background: {hover}; {'color: white;' if close else ''} }}")
     return b
 
 
 class _Edges(QObject):
-    """Moves the window by its menu row and resizes it by its edges."""
+    """Resizes the window by its thin edge and keeps the maximise button in step."""
 
-    def __init__(self, win: QMainWindow, bar: QWidget, maximise: QToolButton):
+    def __init__(self, win: QMainWindow, maximise: QToolButton):
         super().__init__(win)
-        self.win, self.bar, self.maximise = win, bar, maximise
+        self.win, self.maximise = win, maximise
 
     def _edges(self, pos: QPoint) -> Qt.Edges:
         if self.win.isMaximized() or self.win.isFullScreen():
-            return Qt.Edges()
-        e = Qt.Edges()
+            return Qt.Edge(0)
+        e = Qt.Edge(0)
         if pos.x() <= GRIP:
             e |= Qt.LeftEdge
         if pos.x() >= self.win.width() - GRIP:
@@ -68,18 +68,6 @@ class _Edges(QObject):
 
     def eventFilter(self, obj, ev):
         t = ev.type()
-        if obj is self.bar:                      # the menu row: empty parts drag the window
-            if t == QEvent.MouseButtonPress and ev.button() == Qt.LeftButton \
-                    and self.bar.actionAt(ev.position().toPoint()) is None:
-                if self._edges(self.bar.mapTo(self.win, ev.position().toPoint())):
-                    return False
-                self.win.windowHandle().startSystemMove()
-                return True
-            if t == QEvent.MouseButtonDblClick and ev.button() == Qt.LeftButton \
-                    and self.bar.actionAt(ev.position().toPoint()) is None:
-                toggle_maximized(self.win)
-                return True
-            return False
         # the window itself: its maximised state and its thin edge
         if t == QEvent.WindowStateChange:
             maxed = self.win.isMaximized()
@@ -102,47 +90,64 @@ def toggle_maximized(win: QMainWindow) -> None:
     win.showNormal() if win.isMaximized() else win.showMaximized()
 
 
-def install(win: QMainWindow) -> None:
-    """Replace win's standard title bar with the 48 px row. Call after the menus are built."""
+class _Row(QWidget):
+    """The 48 px row. Empty parts of it (and its icon and title) move the window."""
+
+    def __init__(self, win: QMainWindow):
+        super().__init__()
+        self.win = win
+        self.setFixedHeight(BAR_HEIGHT)
+        self.setAutoFillBackground(True)
+
+    def mousePressEvent(self, ev) -> None:
+        if ev.button() == Qt.LeftButton:
+            self.win.windowHandle().startSystemMove()
+
+    def mouseDoubleClickEvent(self, ev) -> None:
+        if ev.button() == Qt.LeftButton:
+            toggle_maximized(self.win)
+
+
+def install(win: QMainWindow) -> QMenuBar:
+    """Give win the 48 px title bar row and return the menu bar inside it. Call before the menus
+    are built, and add the menus to the returned bar (not to win.menuBar())."""
+    bar = QMenuBar()
     if not enabled():
-        return
+        win.setMenuBar(bar)
+        return bar
     win.setWindowFlag(Qt.FramelessWindowHint, True)
     win.setMouseTracking(True)
     win.setContentsMargins(GRIP // 2, 0, GRIP // 2, GRIP // 2)
-    bar = win.menuBar()
-    bar.setMinimumHeight(BAR_HEIGHT)
-    bar.setStyleSheet(f"QMenuBar {{ font-size: 11pt; }} QMenuBar::item {{ padding: 6px 12px; }}")
 
-    left = QWidget()
-    lay = QHBoxLayout(left)
-    lay.setContentsMargins(10, 0, 14, 0)
+    row = _Row(win)
+    lay = QHBoxLayout(row)
+    lay.setContentsMargins(10, 0, 0, 0)
     lay.setSpacing(10)
     icon = QLabel()
     icon.setPixmap(QPixmap(str(ICON_FILE)).scaled(ICON_SIZE, ICON_SIZE, Qt.KeepAspectRatio,
                                                   Qt.SmoothTransformation))
-    title = QLabel(win.windowTitle())
-    title.setStyleSheet("font-size: 12pt;")
+    title = QLabel(win.windowTitle() or "RDT")
+    title.setStyleSheet("QLabel { font-size: 12pt; color: palette(window-text); }")
     win.windowTitleChanged.connect(title.setText)
+    bar.setStyleSheet("QMenuBar { font-size: 11pt; background: transparent; color: palette(window-text); }"
+                      "QMenuBar::item { padding: 6px 12px; background: transparent; color: palette(window-text); }"
+                      "QMenuBar::item:selected { background: rgba(128,128,128,70); }")
     lay.addWidget(icon)
     lay.addWidget(title)
-    bar.setCornerWidget(left, Qt.TopLeftCorner)
-
-    right = QWidget()
-    rl = QHBoxLayout(right)
-    rl.setContentsMargins(0, 0, 0, 0)
-    rl.setSpacing(0)
-    mn = _button("–", "Minimise")
-    mx = _button("☐", "Maximise")
-    cl = _button("✕", "Close", close=True)
+    lay.addSpacing(14)
+    lay.addWidget(bar)
+    lay.addStretch(1)
+    mn = _button("\u2013", "Minimise")
+    mx = _button("\u2610", "Maximise")
+    cl = _button("\u2715", "Close", close=True)
     mn.clicked.connect(win.showMinimized)
     mx.clicked.connect(lambda: toggle_maximized(win))
     cl.clicked.connect(win.close)
     for b in (mn, mx, cl):
-        rl.addWidget(b)
-    bar.setCornerWidget(right, Qt.TopRightCorner)
+        lay.addWidget(b)
+    win.setMenuWidget(row)
 
-    edges = _Edges(win, bar, mx)
-    bar.installEventFilter(edges)
+    edges = _Edges(win, mx)
     win.installEventFilter(edges)
     win._titlebar_edges = edges               # keep alive
-    title.setText(win.windowTitle() or "RDT")
+    return bar
