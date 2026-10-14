@@ -54,7 +54,7 @@ class McuStatus:
     silent: bool = False
     timeouts_in_row: int = 0
     last_probe: float = 0.0
-    reply_ms: float | None = None     # how long the MCU takes to answer a read, smoothed (GUI-16)
+    reply_ms: float | None = None     # how long the MCU takes to answer a read, smoothed (GUI-14)
     timeouts: list[float] = field(default_factory=list)   # when reads timed out, the last minute
 
     def recent_timeouts(self, now: float | None = None) -> int:

@@ -1,4 +1,4 @@
-"""The Target panel (GUI-16): one card per MCU, with its tag, whether it answers and how fast,
+"""The Target panel (GUI-14): one card per MCU, with its tag, whether it answers and how fast,
 whether its ELF matches the firmware, and, opened, its variables and memory ranges. It replaces
 the Variables panel and the toolbar's image box."""
 

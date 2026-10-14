@@ -126,7 +126,7 @@ class WatchTree(DragTree):
         return w
 
     def dropped(self, exprs: list[str]) -> None:
-        """Expressions dragged onto this tab (GUI-15): add those it doesn't have yet."""
+        """Expressions dragged onto this tab (GUI-16): add those it doesn't have yet."""
         for e in exprs:
             if not self.tab.watch(e):
                 self.add_watch(e)
@@ -663,7 +663,7 @@ class WatchTabs(QTabWidget):
     # --- across every tab --------------------------------------------------------------------
 
     def _drag_over_tab(self, pos) -> None:
-        """A drag held over a tab's title shows that tab, so the drop goes there (GUI-15)."""
+        """A drag held over a tab's title shows that tab, so the drop goes there (GUI-16)."""
         i = self.tabBar().tabAt(pos)
         if i >= 0 and i != self.currentIndex():
             self.setCurrentIndex(i)
@@ -854,7 +854,7 @@ class SymbolBrowser(QWidget):
     def __init__(self, main, mcu: str | None = None):
         super().__init__()
         self.main = main
-        self.fixed = mcu     # one MCU's variables only, as in its card (GUI-16)
+        self.fixed = mcu     # one MCU's variables only, as in its card (GUI-14)
         layout = QVBoxLayout(self)
         layout.setContentsMargins(4, 4, 4, 4)
         top = QHBoxLayout()

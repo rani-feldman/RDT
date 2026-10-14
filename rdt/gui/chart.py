@@ -320,7 +320,7 @@ class ChartPanel(QWidget):
         return next((a for a in range(1, MAX_AXES + 1) if a not in used), MAX_AXES)
 
     def set_dark(self, dark: bool) -> None:
-        """Plot colours for the dark or the light theme (GUI-14)."""
+        """Plot colours for the dark or the light theme (GUI-15)."""
         self.plot.setBackground("#1a1b1e" if dark else "w")
         line, self.axis_text = ("#80858d", "#c8ccd2") if dark else ("#606060", "#404040")
         for axis in self.axes + [self.plot.getAxis("bottom")]:

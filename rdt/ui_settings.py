@@ -35,11 +35,11 @@ SETTINGS: dict[str, type] = {
     "memory/kind": str,
     "memory/type": str,
     "memory/decimal": bool,
-    "ui/theme": str,          # system, light or dark (GUI-14)
+    "ui/theme": str,          # system, light or dark (GUI-15)
 }
 STATE: dict[str, type] = {
     "session/last_workspace": str,   # not a setting: never exported, kept on import
-    "session/mode": str,             # the window's mode when it was closed (GUI-17)
+    "session/mode": str,             # the window's mode when it was closed (GUI-14)
     "session/layout_watch": str,     # each mode's panel layout, as QMainWindow.saveState in base64
     "session/layout_scope": str,
     "session/layout_memory": str,

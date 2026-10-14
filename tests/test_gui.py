@@ -1016,7 +1016,7 @@ def test_drag_and_drop_to_tabs_and_chart(qtbot, win):
 
 
 def test_mcu_cards(qtbot, win):
-    """The Target panel: one card per MCU with its tag, link and ELF, one open at a time (GUI-16)."""
+    """The Target panel: one card per MCU with its tag, link and ELF, one open at a time (GUI-14)."""
     main, motor = card(win, "main"), card(win, "motorctl")
     assert main.tag.text() == "MAIN" and motor.tag.text() == "MOTO"
     assert "not connected" in main.link.text() and "main.elf" in main.elf.text()
@@ -1039,7 +1039,7 @@ def test_mcu_cards(qtbot, win):
 
 
 def test_modes(qtbot, win):
-    """The mode tabs lay the window out for one job and keep each mode's layout (GUI-17)."""
+    """The mode tabs lay the window out for one job and keep each mode's layout (GUI-14)."""
     win.show()
     assert win.mode == "watch" and win.modes.buttons["watch"].isChecked()
     win.modes.buttons["scope"].click()
