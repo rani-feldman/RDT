@@ -171,9 +171,9 @@ Each requirement links to its design section.
 | GUI-11 | The status box and the Connect / Disconnect button become one button that shows the link state and the link, and a click connects, disconnects or cancels: green `Connected · COM3`, blue `Disconnected · COM3`, red `Link down · COM3`, amber `Connecting · COM3` (2026-10-14) | Done | [D-GUI-2](#d-gui-2-connection-bar) |
 | GUI-12 | Each MCU has an optional short name and tag colour, and each watch row shows its MCU as a coloured tag with the short name before the expression (2026-10-14) | Done | [D-GUI-12](#d-gui-12-mcu-tags) |
 | GUI-13 | A watched value that changed since the previous read is highlighted for a moment (2026-10-14) | Done | [D-GUI-13](#d-gui-13-change-highlight) |
-| GUI-14 | Layout C: a Target panel with one card per MCU (link and ELF state, variables, memory ranges) replaces the Variables panel and the toolbar image box, and Watch, Scope, Memory and Console mode tabs in the toolbar each keep their own layout (2026-10-14) | In review (PR to come) | [D-GUI-14](#d-gui-14-layout-c) |
-| GUI-15 | A dark theme: View > Theme offers System, Light or Dark, saved per user (2026-10-14) | In review (PR to come) | [D-GUI-15](#d-gui-15-dark-theme) |
-| GUI-16 | Drag variables and watch rows onto a watch tab, a tab's title or the chart (2026-10-14) | In review (PR to come) | [D-GUI-16](#d-gui-16-drag-and-drop) |
+| GUI-14 | Layout C: a Target panel with one card per MCU (link and ELF state, variables, memory ranges) replaces the Variables panel and the toolbar image box, and Watch, Scope, Memory and Console mode tabs in the toolbar each keep their own layout (2026-10-14) | In review (PR #89) | [D-GUI-14](#d-gui-14-layout-c) |
+| GUI-15 | A dark theme: View > Theme offers System, Light or Dark, saved per user (2026-10-14) | In review (PR #89) | [D-GUI-15](#d-gui-15-dark-theme) |
+| GUI-16 | Drag variables and watch rows onto a watch tab, a tab's title or the chart (2026-10-14) | In review (PR #89) | [D-GUI-16](#d-gui-16-drag-and-drop) |
 
 ### 2.12 Live chart
 
