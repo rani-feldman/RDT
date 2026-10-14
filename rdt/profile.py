@@ -20,7 +20,7 @@ from .errors import BadReply, ConfigError, DeviceError
 # Keys older profiles may still have, ignored on load (rani, 2026-10-12): there is no size query,
 # since the largest read reply is the profile's max_response; and addresses, values and reply data
 # are always bare hex, so their format keys are gone.
-RETIRED_KEYS = {"size_query", "addr_format", "value_format", "data_format", "error_query", "probe"}
+RETIRED_KEYS = {"size_query", "addr_format", "value_format", "data_format", "error_query", "probe", "reply_regex"}
 _HEX_SPEC = re.compile(r"^0?\d*X$")
 TEMPLATE_FIELDS = {"read": {"mcu", "addr", "len"}, "write": {"mcu", "addr", "value", "size"}}
 
@@ -111,7 +111,6 @@ class Profile:
     write: str = "MEMory:WRITE {mcu},{addr},{value},{size}"
     max_write: int = 4                     # largest value one write accepts, in bytes
     align: int = 4                         # every read and write covers whole aligned words of this size
-    reply_regex: str | None = None         # optional; group "data" (or group 1) holds the hex data
     byte_order: str = "little"             # used for an MCU without an ELF
     max_response: int = 1024               # bytes of data one read reply can carry; set here only
     terminator: str = "\n"
@@ -138,7 +137,6 @@ class Profile:
             raise ConfigError("timeout_ms must be positive")
         if self.retries < 0:
             raise ConfigError("retries must be 0 or more")
-        self._regex = re.compile(self.reply_regex) if self.reply_regex else None
         for key, allowed in TEMPLATE_FIELDS.items():
             names = {n for _, n, _, _ in string.Formatter().parse(getattr(self, key)) if n is not None}
             if names - allowed:
@@ -197,11 +195,6 @@ class Profile:
         each word as a ``uint32_t``). Each value is turned into bytes in the MCU's ``byte_order``.
         """
         text = reply.decode("latin-1").strip()
-        if self._regex:
-            m = self._regex.search(text)
-            if not m:
-                raise BadReply(f"reply {text[:60]!r} does not match reply_regex")
-            text = m.group("data") if "data" in self._regex.groupindex else m.group(1 if m.groups() else 0)
         data = decode_words(text, self.align, byte_order or self.byte_order)
         if len(data) != length:
             raise BadReply(f"expected {length} bytes, got {len(data)}")
