@@ -11,7 +11,12 @@ The session is where the firmware's habits are handled:
 - A secondary MCU that stops answering is marked silent: on a -240 error reply, or after three
   timeouts in a row. Only that MCU's accesses fail, and it is tried again every few seconds.
 - When the port or socket breaks, the session goes down, refuses accesses, and reconnects in the
-  background with a growing delay.
+  background with a growing delay. A watcher checks the port or socket every second while the
+  session is idle, without sending anything, so an unplugged USB COM port is noticed with polling
+  off too.
+- When the device as a whole stops answering (the last three reads to any MCU got no reply at
+  all) while the port stays open, the link is "no reply": writes are refused, reads still go out,
+  and the first reply brings the link back up.
 
 One lock serialises every exchange, so the GUI's poller and its console can share a session.
 """
@@ -40,7 +45,8 @@ MCU_NOT_RESPONDING = -240
 class LinkState(Enum):
     CLOSED = "closed"
     UP = "up"
-    DOWN = "down"
+    DOWN = "down"            # the port or socket broke; reconnecting
+    NO_REPLY = "no reply"    # the port is open but the device answers nothing
 
 
 @dataclass
@@ -56,6 +62,8 @@ Listener = Callable[[str, dict], None]
 class Session:
     SILENT_AFTER = 3            # timeouts in a row that mark a secondary MCU silent
     SILENT_PROBE_S = 2.0        # how often a silent MCU is tried again
+    NO_REPLY_AFTER = 3          # reads in a row with no reply from any MCU before the link is "no reply"
+    WATCH_S = 1.0               # how often an idle port or socket is checked
     RECONNECT_DELAYS = (0.25, 0.5, 1.0, 2.0, 4.0, 5.0)
     RETRY_DELAY_S = 0.05        # first delay before re-sending a timed-out read; doubles each time
 
@@ -84,6 +92,8 @@ class Session:
         self._listeners: list[Listener] = []
         self._stop = threading.Event()
         self._reconnector: threading.Thread | None = None
+        self._watcher: threading.Thread | None = None
+        self._unanswered = 0     # reads in a row that got no reply from the device at all
 
     # --- events ------------------------------------------------------------------------------
 
@@ -112,26 +122,46 @@ class Session:
         return self.state is LinkState.UP
 
     def connect(self) -> None:
-        """Open the link and check that the device answers. Raises ``LinkError`` if it doesn't."""
+        """Open the link. Raises ``LinkError`` if the port or socket can't be opened."""
         self._stop.clear()
         with self._lock:
             self._open()
             self._set_state(LinkState.UP)
+        if self._watcher is None or not self._watcher.is_alive():
+            self._watcher = threading.Thread(target=self._watch_loop, name="rdt-linkwatch", daemon=True)
+            self._watcher.start()
 
     def _open(self) -> None:
         self.transport.open()
         self.max_response = self.profile.max_response
+        self._unanswered = 0
         for st in self._mcus.values():
             st.timeouts_in_row = 0
+
+    def _watch_loop(self) -> None:
+        """Check the port or socket while nothing else uses it, sending nothing (LNK-7), so a COM
+        port that disappears takes the link down even with polling off."""
+        while not self._stop.wait(self.WATCH_S):
+            if self.state not in (LinkState.UP, LinkState.NO_REPLY):
+                continue
+            if not self._lock.acquire(blocking=False):
+                continue      # an exchange is running; it notices a broken port by itself
+            try:
+                if self.state in (LinkState.UP, LinkState.NO_REPLY):
+                    self.transport.check()
+            except LinkError as e:
+                self._link_lost(str(e))
+            finally:
+                self._lock.release()
 
     def close(self) -> None:
         self._stop.set()
         with self._lock:
             self.transport.close()
             self._set_state(LinkState.CLOSED)
-        t = self._reconnector
-        if t is not None and t is not threading.current_thread():
-            t.join(timeout=2)
+        for t in (self._reconnector, self._watcher):
+            if t is not None and t is not threading.current_thread():
+                t.join(timeout=2)
 
     def _link_lost(self, reason: str) -> LinkDown:
         """Mark the link down, start reconnecting, and return the error to raise."""
@@ -174,6 +204,19 @@ class Session:
             raise LinkDown("not connected")
         if self.state is LinkState.DOWN:
             raise LinkDown(f"link down: {self.down_reason}")
+
+    def _device_answered(self) -> None:
+        self._unanswered = 0
+        if self.state is LinkState.NO_REPLY:
+            self._set_state(LinkState.UP)
+
+    def _device_unanswered(self) -> None:
+        """A read got no reply at all. After a few in a row from any MCU the device is not
+        answering, though the port is still open: a hung or reset board."""
+        self._unanswered += 1
+        if self._unanswered >= self.NO_REPLY_AFTER and self.state is LinkState.UP:
+            self._set_state(LinkState.NO_REPLY,
+                            f"the device did not answer the last {self._unanswered} reads; the port is still open")
 
     # --- MCUs --------------------------------------------------------------------------------
 
@@ -247,22 +290,28 @@ class Session:
                     # Perhaps a late reply meant for an earlier command; the next send flushes it.
                     log.debug("%s: %s", what, e)
                     bad = e
+                    self._device_answered()
                     continue
                 except CommandRejected as e:
+                    self._device_answered()
                     if mcu != 0 and e.error.code == MCU_NOT_RESPONDING:
                         raise self._mark_silent(mcu, str(e.error)) from None
                     raise
                 if data is not None:
+                    self._device_answered()
                     self._mcu_answered(mcu)
                     return data
                 if mcu != 0:
                     st.timeouts_in_row += 1
                     if st.timeouts_in_row >= self.SILENT_AFTER:
+                        if bad is None:
+                            self._device_unanswered()
                         raise self._mark_silent(mcu, f"{st.timeouts_in_row} timeouts in a row")
         except LinkError as e:
             raise self._link_lost(str(e)) from None
         if bad is not None:
             raise BadReply(f"{what}: {bad}")
+        self._device_unanswered()
         raise CommandTimeout(f"no reply to {what}")
 
     # --- writes ------------------------------------------------------------------------------
@@ -280,6 +329,8 @@ class Session:
         off = addr - start
         with self._lock:
             self._require_up()
+            if self.state is LinkState.NO_REPLY:
+                raise LinkDown(f"link down: {self.down_reason}; write refused")
             if self.is_silent(mcu):
                 raise McuSilent(f"{self._name(mcu)} is not responding; write refused")
             if (start, end) == (addr, addr + len(data)):
@@ -361,7 +412,10 @@ class Session:
             self._require_up()
             try:
                 if expect_reply:
-                    return self.protocol.query(text, timeout)
+                    reply = self.protocol.query(text, timeout)
+                    if reply is not None:
+                        self._device_answered()
+                    return reply
                 self.protocol.send(text)
                 return None
             except LinkError as e:

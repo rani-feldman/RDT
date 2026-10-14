@@ -51,6 +51,19 @@ class SerialTransport(Transport):
             self.close()
             raise LinkError(f"{self.description}: {e}") from None
 
+    def check(self) -> None:
+        """Asking how many bytes are waiting fails once a USB COM port is unplugged or its
+        device resets (Windows: ClearCommError fails; Linux: EIO)."""
+        import serial
+
+        if self._serial is None:
+            raise LinkError(f"{self.description}: not open")
+        try:
+            _ = self._serial.in_waiting
+        except (serial.SerialException, OSError) as e:
+            self.close()
+            raise LinkError(f"{self.description}: {e}") from None
+
     def send_break(self, duration: float) -> None:
         import serial
 
