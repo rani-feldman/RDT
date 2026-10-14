@@ -6,15 +6,16 @@ polling and write safety, and the chart layout; and the device's known commands.
 file loads as a workspace with no tabs, and a workspace works anywhere a target file does.
 
 The watch tabs and chart are kept in their own watch list file, and the known commands in their
-own CSV file; the ``.rdtw`` names them (``watch_file``, ``commands_file``), so opening it loads
+own commands file; the ``.rdtw`` names them (``watch_file``, ``commands_file``), so opening it loads
 everything. By default they sit next to it, named after it::
 
     bench.rdtw               connection, profile, MCUs, polling, read-only default
     bench.watch.toml         [[tab]] / [[tab.watch]] and [chart]
-    bench.commands.csv       command,name,group,description
+    bench.commands.toml      [[command]] tables: command, name, group, description
 
 Each can be imported into another workspace or exported on its own. A workspace from before the
-split (tabs and commands inside the ``.rdtw``) still opens, and is split when it is saved.
+split (tabs and commands inside the ``.rdtw``) still opens, and is split when it is saved; so
+does one whose commands are in a CSV file (bench.commands.csv), which becomes bench.commands.toml.
 
 An expression may be in several tabs. It is still one item: its settings are the same in every
 tab, and it is read once per poll.
@@ -51,7 +52,8 @@ from .target import Target, TargetConfig
 POLL_KINDS = ("global", "manual")
 DEFAULT_POLL_MS = 500
 WATCH_SUFFIX = ".watch.toml"        # bench.rdtw keeps its watch tabs in bench.watch.toml
-COMMANDS_SUFFIX = ".commands.csv"   # and its known commands in bench.commands.csv
+COMMANDS_SUFFIX = ".commands.toml"  # and its known commands in bench.commands.toml
+OLD_COMMANDS_SUFFIX = ".commands.csv"   # where they were before; read, and turned into TOML on save
 
 
 def canonical(expr: str) -> str:
@@ -177,7 +179,7 @@ class Workspace:
     read_only: bool = False          # every item read-only unless it says otherwise (WS-4)
     path: Path | None = None
     watch_path: Path | None = None     # the watch list file (tabs and chart); None until saved
-    commands_path: Path | None = None  # the known commands file (CSV); None until saved
+    commands_path: Path | None = None  # the known commands file (TOML); None until saved
     warnings: list[str] = field(default_factory=list)   # about the file as it was loaded
 
     # --- files -------------------------------------------------------------------------------
@@ -285,14 +287,12 @@ class Workspace:
             raise ConfigError("the workspace has no file yet; give a path to save it to")
         watch_path = _own_file(self.watch_path, self.path, path, WATCH_SUFFIX,
                                bool(self.tabs or self.chart))
-        commands_path = _own_file(self.commands_path, self.path, path, COMMANDS_SUFFIX, bool(self.commands))
+        commands_path = _own_file(_as_toml(self.commands_path, self.path), self.path, path, COMMANDS_SUFFIX,
+                                  bool(self.commands))
         if watch_path is not None:
             write_watch_file(watch_path, self.tabs, self.chart)
         if commands_path is not None:
-            try:
-                _write_atomic(commands_path, lambda tmp: write_commands(tmp, self.commands))
-            except OSError as e:
-                raise ConfigError(f"cannot save commands file {commands_path}: {e.strerror}") from None
+            write_commands_file(commands_path, self.commands)
         self.watch_path, self.commands_path = watch_path, commands_path
         text = tomlw.dumps(self.to_dict(path.parent), "RDT workspace. Saved by RDT, so comments are not kept.\n"
                            "The watch tabs and the known commands are in the files it names.")
@@ -334,8 +334,12 @@ class Workspace:
         return added, skipped
 
     def export_commands(self, path: str | Path) -> Path:
-        """Write the known commands to a CSV file."""
+        """Write the known commands to a file: a commands file (``.toml``), or CSV for any other
+        name (``.csv``, to open in Excel)."""
         path = Path(path)
+        if path.suffix.lower() == ".toml":
+            write_commands_file(path, self.commands)
+            return path
         try:
             write_commands(path, self.commands)
         except OSError as e:
@@ -343,8 +347,9 @@ class Workspace:
         return path
 
     def import_commands(self, path: str | Path, replace: bool = False) -> tuple[int, int]:
-        """Add commands from a CSV or text file (or replace the list with them), skipping ones
-        already listed. Returns how many were added and how many skipped."""
+        """Add commands from a commands file (``.toml``), a CSV file or a text file (or replace
+        the list with them), skipping ones already listed. Returns how many were added and how
+        many skipped."""
         self.commands, added, skipped = merge_commands(self.commands, _read_commands(Path(path)), replace)
         return added, skipped
 
@@ -690,7 +695,48 @@ def _write_atomic(path: Path, write: Callable[[Path], None]) -> None:
     os.replace(tmp, path)
 
 
+def _as_toml(current: Path | None, ws_path: Path | None) -> Path | None:
+    """The commands file a workspace saves to: an old CSV one (bench.commands.csv) becomes the
+    TOML file of the same name (bench.commands.toml); the CSV file is left as it is."""
+    if current is None or Path(current).suffix.lower() == ".toml":
+        return current
+    current = Path(current)
+    if current.name.lower().endswith(OLD_COMMANDS_SUFFIX):
+        return current.with_name(current.name[:-len(OLD_COMMANDS_SUFFIX)] + COMMANDS_SUFFIX)
+    return current.with_suffix(".toml")
+
+
+def write_commands_file(path: str | Path, commands: list[SavedCommand]) -> None:
+    """Write the known commands as a TOML commands file: one [[command]] table each."""
+    path = Path(path)
+    d = {"command": [{k: v for k, v in (("command", c.command), ("name", c.name), ("group", c.group),
+                                         ("description", c.description)) if v} for c in commands]}
+    text = tomlw.dumps(d if commands else {}, "RDT known commands: one [[command]] table each, with its name, "
+                                               "group and description.\nSaved by RDT, so comments are not kept.")
+    try:
+        _write_atomic(path, lambda tmp: tmp.write_text(text, encoding="utf-8"))
+    except OSError as e:
+        raise ConfigError(f"cannot save commands file {path}: {e.strerror}") from None
+
+
 def _read_commands(path: Path) -> list[SavedCommand]:
+    """A commands file (TOML), or a CSV or text list as read_commands() takes it."""
+    if path.suffix.lower() == ".toml":
+        try:
+            with open(path, "rb") as f:
+                raw = tomllib.load(f)
+        except OSError as e:
+            raise ConfigError(f"cannot read commands file {path}: {e.strerror}") from None
+        except tomllib.TOMLDecodeError as e:
+            raise ConfigError(f"commands file {path}: {e}") from None
+        unknown = set(raw) - {"command"}
+        if unknown:
+            raise ConfigError(f"commands file {path}: unknown keys {', '.join(sorted(unknown))}; it holds only "
+                              f"[[command]] tables")
+        try:
+            return _commands_from(raw)
+        except ConfigError as e:
+            raise ConfigError(f"commands file {path}: {e}") from None
     try:
         return read_commands(path)
     except OSError as e:

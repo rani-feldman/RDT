@@ -383,9 +383,8 @@ def test_saved_commands_round_trip(tmp_path):
     ws.commands = [SavedCommand("MOT:SPE?", "Speed", "Motor", "rpm"), SavedCommand("*IDN?")]
     path = ws.save(tmp_path / "w.rdtw")
     assert Workspace.load(path).commands == ws.commands
-    assert 'commands_file = "w.commands.csv"' in path.read_text(encoding="utf-8")
-    assert (tmp_path / "w.commands.csv").read_text(encoding="utf-8-sig").splitlines() == [
-        "command,name,group,description", "MOT:SPE?,Speed,Motor,rpm", "*IDN?,,,"]
+    assert 'commands_file = "w.commands.toml"' in path.read_text(encoding="utf-8")
+    assert '[[command]]\ncommand = "*IDN?"\n' in (tmp_path / "w.commands.toml").read_text(encoding="utf-8")
     old = tmp_path / "old.rdtw"   # from before the split: the commands inside the workspace
     old.write_text('[[command]]\ncommand = "*IDN?"\n\n[[command]]\nname = "no command"\n', encoding="utf-8")
     with pytest.raises(ConfigError, match=r"\[\[command\]\]"):

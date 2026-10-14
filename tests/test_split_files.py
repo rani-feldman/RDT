@@ -53,11 +53,12 @@ def bench() -> Workspace:
 def test_save_writes_three_files(tmp_path):
     path = bench().save(tmp_path / "bench.rdtw")
     raw = tomllib.loads(path.read_text())
-    assert raw["watch_file"] == "bench.watch.toml" and raw["commands_file"] == "bench.commands.csv"
+    assert raw["watch_file"] == "bench.watch.toml" and raw["commands_file"] == "bench.commands.toml"
     assert not {"tab", "watch", "chart", "command"} & set(raw)
     watch = tomllib.loads((tmp_path / "bench.watch.toml").read_text())
     assert [t["name"] for t in watch["tab"]] == ["Motor", "System"] and watch["chart"] == {"window_s": 10}
-    assert (tmp_path / "bench.commands.csv").read_text(encoding="utf-8-sig").splitlines()[1] == "MOT:SPE?,Speed,,"
+    assert tomllib.loads((tmp_path / "bench.commands.toml").read_text()) == \
+        {"command": [{"command": "MOT:SPE?", "name": "Speed"}]}
     back = Workspace.load(path)
     assert [t.name for t in back.tabs] == ["Motor", "System"] and back.watches[0].display.unit == "rpm"
     assert back.chart == {"window_s": 10} and back.commands == [SavedCommand("MOT:SPE?", "Speed")]
@@ -77,7 +78,7 @@ def test_an_old_single_file_workspace_is_split_on_save(tmp_path):
     ws.save()
     text = path.read_text()
     assert "[[tab" not in text and "[chart]" not in text and "[[command]]" not in text
-    assert (tmp_path / "old.watch.toml").is_file() and (tmp_path / "old.commands.csv").is_file()
+    assert (tmp_path / "old.watch.toml").is_file() and (tmp_path / "old.commands.toml").is_file()
     back = Workspace.load(path)
     assert back.tabs[0].watches[0].display.unit == "rpm" and back.chart == {"window_s": 10}
     assert back.commands == [SavedCommand("MOT:SPE?", "Speed")] and back.poll_ms == 250
@@ -86,13 +87,13 @@ def test_an_old_single_file_workspace_is_split_on_save(tmp_path):
 def test_save_as_takes_its_own_files_along(tmp_path):
     ws = bench()
     ws.save(tmp_path / "a.rdtw")
-    shared = tmp_path / "shared.csv"
+    shared = tmp_path / "shared.toml"
     ws.commands_path = shared                  # a commands file several workspaces use
     ws.save()
     ws.save(tmp_path / "b.rdtw")
     raw = tomllib.loads((tmp_path / "b.rdtw").read_text())
     assert raw["watch_file"] == "b.watch.toml"   # named after the workspace: follows its new name
-    assert raw["commands_file"] == "shared.csv"   # named otherwise: stays
+    assert raw["commands_file"] == "shared.toml"  # named otherwise: stays
     assert (tmp_path / "a.watch.toml").is_file() and (tmp_path / "b.watch.toml").is_file()
 
 
@@ -103,9 +104,36 @@ def test_files_in_another_folder(tmp_path):
     ws = Workspace.load(tmp_path / "w.rdtw")
     assert ws.commands == [SavedCommand("*IDN?")]
     ws.commands.append(SavedCommand("MOT:SPE?"))
+    ws.save()   # a CSV commands file becomes a TOML one beside it; the CSV file is left as it was
+    assert (tmp_path / "lists" / "cmds.csv").read_text() == "*IDN?\n"
+    assert 'commands_file = "lists/cmds.toml"' in (tmp_path / "w.rdtw").read_text()
+    assert Workspace.load(tmp_path / "w.rdtw").commands == [SavedCommand("*IDN?"), SavedCommand("MOT:SPE?")]
+
+
+def test_commands_csv_from_before_becomes_toml(tmp_path):
+    """A workspace saved by the first split keeps its commands in bench.commands.csv: it still
+    loads, and saving moves them to bench.commands.toml (rani, 2026-10-14)."""
+    (tmp_path / "bench.commands.csv").write_text("command,name,group,description\nMOT:SPE?,Speed,Motor,rpm\n")
+    (tmp_path / "bench.rdtw").write_text('commands_file = "bench.commands.csv"\n')
+    ws = Workspace.load(tmp_path / "bench.rdtw")
+    assert ws.commands == [SavedCommand("MOT:SPE?", "Speed", "Motor", "rpm")] and ws.warnings == []
     ws.save()
-    assert "MOT:SPE?" in (tmp_path / "lists" / "cmds.csv").read_text(encoding="utf-8-sig")
-    assert 'commands_file = "lists/cmds.csv"' in (tmp_path / "w.rdtw").read_text()
+    assert tomllib.loads((tmp_path / "bench.rdtw").read_text())["commands_file"] == "bench.commands.toml"
+    assert tomllib.loads((tmp_path / "bench.commands.toml").read_text()) == {"command": [
+        {"command": "MOT:SPE?", "name": "Speed", "group": "Motor", "description": "rpm"}]}
+    assert Workspace.load(tmp_path / "bench.rdtw").commands == ws.commands
+    ws.save(tmp_path / "other.rdtw")            # and it follows a new name, like the watch list
+    assert (tmp_path / "other.commands.toml").is_file()
+
+
+def test_bad_commands_file(tmp_path):
+    (tmp_path / "c.toml").write_text('[[command]]\nname = "no command"\n')
+    (tmp_path / "w.rdtw").write_text('commands_file = "c.toml"\n')
+    with pytest.raises(ConfigError, match=r"commands file .*c.toml: every \[\[command\]\]"):
+        Workspace.load(tmp_path / "w.rdtw")
+    (tmp_path / "c.toml").write_text('[[tab]]\nname = "A"\n')
+    with pytest.raises(ConfigError, match="unknown keys tab"):
+        Workspace.load(tmp_path / "w.rdtw")
 
 
 def test_a_missing_file_is_a_warning(tmp_path):
@@ -155,6 +183,8 @@ def test_watch_list_import_and_export(tmp_path):
 
 def test_commands_import_and_export(tmp_path):
     ws = bench()
+    assert "[[command]]" in ws.export_commands(tmp_path / "c.toml").read_text()
+    assert Workspace().import_commands(tmp_path / "c.toml") == (1, 0)
     out = ws.export_commands(tmp_path / "c.csv")
     other = Workspace(commands=[SavedCommand("*IDN?")])
     assert other.import_commands(out) == (1, 0)

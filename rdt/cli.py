@@ -183,10 +183,12 @@ def build_parser() -> argparse.ArgumentParser:
     cmds = p.add_subparsers(dest="commands_cmd", metavar="ACTION", required=True)
     q = cmds.add_parser("list", help="show the list, by group")
     q.add_argument("text", nargs="?", default="", help="only commands, names or descriptions containing this")
-    q = cmds.add_parser("import", help="add commands from a CSV or text file, skipping ones already listed")
+    q = cmds.add_parser("import", help="add commands from a commands file (.toml), a CSV or a text file, "
+                                       "skipping ones already listed")
     q.add_argument("file", type=Path)
     q.add_argument("--replace", action="store_true", help="replace the list instead of adding to it")
-    cmds.add_parser("export", help="write the list to a CSV file").add_argument("file", type=Path)
+    cmds.add_parser("export", help="write the list to a commands file (.toml) or, for any other name, CSV"
+                    ).add_argument("file", type=Path)
     cmds.add_parser("clear", help="empty the list")
 
     p = sub.add_parser("watchlist", help="import or export the workspace's watch tabs and chart (no device needed)")
