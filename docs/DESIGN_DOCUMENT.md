@@ -168,7 +168,7 @@ Each requirement links to its design section.
 | GUI-8 | The memory view's ASCII column shows only beside the default hex bytes (unsigned Char in hex); any other display format hides it, and Ascii in the menu shows memory as text (2026-10-14, updated 2026-10-14) | Done | [D-GUI-7](#d-gui-7-memory-display-formats) |
 | GUI-9 | Show the link state and the link, such as a green `Connected · COM3` (2026-10-14; since GUI-11 shown on the connect button itself) | Done | [D-GUI-2](#d-gui-2-connection-bar) |
 | GUI-10 | Every error shows in one slim red bar under the toolbar: an ELF that does not match its firmware and the latest failed connect, read, write or poll. The status bar shows only ordinary messages (2026-10-14) | Done | [D-GUI-10](#d-gui-10-error-bar) |
-| GUI-11 | The status box and the Connect / Disconnect button become one button that shows the link state and the link, and a click connects, disconnects or cancels: green `Connected · COM3`, blue `Disconnected · COM3`, red `Link down · COM3`, amber `Connecting · COM3` (2026-10-14) | In review (PR #80) | [D-GUI-2](#d-gui-2-connection-bar) |
+| GUI-11 | The status box and the Connect / Disconnect button become one button that shows the link state and the link, and a click connects, disconnects or cancels: green `Connected · COM3`, blue `Disconnected · COM3`, red `Link down · COM3`, amber `Connecting · COM3` (2026-10-14) | Done | [D-GUI-2](#d-gui-2-connection-bar) |
 
 ### 2.12 Live chart
 
@@ -193,7 +193,7 @@ Each requirement links to its design section.
 | WSP-1 | A workspace holds the connection, the SCPI profile, the MCUs and their ELFs, the watch tabs with every item's settings, and the chart layout (2026-10-05); since 2026-10-14 the watch tabs, chart and commands are in separate files the workspace names (WSP-4) | Done | [D-WSP-1](#d-wsp-1-workspace-file) |
 | WSP-2 | Workspaces from older versions still open | Done | [D-WSP-2](#d-wsp-2-older-workspaces) |
 | WSP-3 | The last workspace reopens when the GUI starts (2026-10-12) | Done | [D-WSP-3](#d-wsp-3-reopen-last-workspace) |
-| WSP-4 | The settings are split into separate files: the watched variables and watch tabs in one file, the imported commands in another, both opened with the workspace (2026-10-14) | Done | [D-WSP-4](#d-wsp-4-split-files) |
+| WSP-4 | The settings are split into separate files: the watched variables and watch tabs in one file, the imported commands in another, both opened with the workspace (2026-10-14); the commands file is a TOML file the workspace names, and the `.rdtw` and its files sit together, by default in `%LOCALAPPDATA%\rdt` (2026-10-14) | In review (PR #83) | [D-WSP-4](#d-wsp-4-split-files) |
 | WSP-5 | The interface settings are kept in their own file, per user, not in the workspace (2026-10-14) | Done | [D-WSP-5](#d-wsp-5-interface-settings-file) |
 | WSP-6 | The watch list, the commands and the interface settings can each be imported and exported (2026-10-14) | Done | [D-WSP-6](#d-wsp-6-import-and-export) |
 
@@ -967,7 +967,7 @@ profile = "fw_profile.toml"   # or an inline [scpi] table
 poll_ms = 500                 # global polling interval; 0 = off
 read_only = false             # true: every item read-only unless it says read_only = false (D-WS-4)
 watch_file    = "bench.watch.toml"     # the watch tabs and chart (D-WSP-4)
-commands_file = "bench.commands.csv"   # the known commands (D-CON-7)
+commands_file = "bench.commands.toml"  # the known commands (D-CON-7)
 
 [connection]
 transport = "tcp"             # tcp | udp | serial
@@ -1003,7 +1003,15 @@ name = "Motor"
 window_s = 30
 ```
 
-`bench.commands.csv` is the same CSV as a commands export, with the header `command,name,group,description`, such as `MOTor:SPEed?,,Motor,Motor speed in rpm`.
+`bench.commands.toml` holds one `[[command]]` table per command; only `command` is required:
+
+```toml
+[[command]]
+command     = "MOTor:SPEed?"
+name        = "Speed"
+group       = "Motor"
+description = "Motor speed in rpm"
+```
 
 Every key in a `[[tab.watch]]` except `expr` is optional. Saving rewrites the files (`rdt/tomlw.py`), so comments are not kept. Paths are stored relative to the file. On the CLI, `-w` opens a workspace (`-t` is the same option), and `rdt init FILE` saves the current target as a new workspace. [`examples/sim_bench.rdtw`](../examples/sim_bench.rdtw) is a working example for the simulator.
 
@@ -1011,11 +1019,12 @@ Every key in a `[[tab.watch]]` except `expr` is optional. Saving rewrites the fi
 
 - **Old watch list:** a file with a top-level `[[watch]]` list (from before watch tabs) loads as one tab named `Watch` and is saved with tabs.
 - **Single-file workspace:** a `.rdtw` from before 2026-10-14 with its `[[tab]]`, `[chart]` and `[[command]]` tables inline still opens, and the next save splits it into the separate files (D-WSP-4).
+- **Commands in CSV:** a workspace whose `commands_file` is a CSV file (`bench.commands.csv`, as saved before PR #83) still opens; the next save writes `bench.commands.toml`, points `commands_file` at it and leaves the CSV file as it was (`_as_toml` in `rdt/workspace.py`).
 - **Old buttons:** a file with `[[button]]` tables (command buttons, RM-1) loads with a warning, in the GUI's status bar or on the CLI. The buttons are left out when the file is saved.
 
 #### D-WSP-3 Reopen last workspace
 
-The GUI remembers the last workspace file it opened or saved, as `session/last_workspace` in `ui.toml` next to the console history (`%LOCALAPPDATA%\rdt` on Windows, D-WSP-5), and opens it when `rdt-gui` starts with no file named. A file given on the command line wins. If the remembered file is gone, the GUI starts with a new workspace and says so in the status bar. A target file (`.toml`) opened as a new workspace is not remembered, since it is not a workspace. Code: `MainWindow.remember()` and `reopen_last()` in `rdt/gui/app.py`.
+The GUI remembers the last workspace file it opened or saved, as `session/last_workspace` in `ui.toml` next to the console history (`%LOCALAPPDATA%\rdt` on Windows, D-WSP-5), and opens it when `rdt-gui` starts with no file named. A file given on the command line wins. If the remembered file is gone, the GUI opens the default target (D-WSP-4) if there is one, else starts with a new workspace, and says so in the status bar. A target file (`.toml`) opened as a new workspace is not remembered, since it is not a workspace. Code: `MainWindow.remember()` and `reopen_last()` in `rdt/gui/app.py`.
 
 #### D-WSP-4 Split files
 
@@ -1023,9 +1032,12 @@ rani asked on 2026-10-14 for the imported commands, the watched variables and wa
 
 - **`bench.rdtw`:** the connection, profile, MCUs, `poll_ms` and `read_only`, plus `watch_file` and `commands_file`, which name the other two relative to the `.rdtw`.
 - **`bench.watch.toml`:** the `[[tab]]` and `[[tab.watch]]` tables and `[chart]` (`read_watch_file` and `write_watch_file` in `rdt/workspace.py`).
-- **`bench.commands.csv`:** the known commands, in the same CSV as the commands export (D-CON-7).
+- **`bench.commands.toml`:** the known commands, one `[[command]]` table each with `command`, `name`, `group` and `description` (`write_commands_file` in `rdt/workspace.py`). rani asked on 2026-10-14 for it to be a TOML file the `.rdtw` points to, like the watch list; it was a CSV file at first (D-WSP-2).
 
-Opening the `.rdtw` loads all three (`Workspace.watch_path`, `Workspace.commands_path`). A file is only made once it has something in it. If a named file is missing, the workspace still opens with a warning and that list is empty. Naming a file and also having the same tables inline is a `ConfigError`. Save As takes the files named after the workspace along to the new name (`bench.watch.toml` becomes `new.watch.toml`); a file with any other name, such as a commands CSV shared between workspaces, stays where it is and keeps being used. Example: [`examples/sim_bench.rdtw`](../examples/sim_bench.rdtw) with `sim_bench.watch.toml`.
+Opening the `.rdtw` loads all three (`Workspace.watch_path`, `Workspace.commands_path`). A file is only made once it has something in it. If a named file is missing, the workspace still opens with a warning and that list is empty. Naming a file and also having the same tables inline is a `ConfigError`. The files are always saved beside the `.rdtw`, named after it (`_beside` in `rdt/workspace.py`), and Save As writes them under the new name (`bench.watch.toml` becomes `new.watch.toml`). A workspace that names a file in another folder (`commands_file = "../gac_commands.toml"`) still loads it; the next save writes the list beside the `.rdtw`, points the `.rdtw` at it and leaves the other file alone. rani asked on 2026-10-14 for the `.rdtw` and its `.toml` files all to be in one place, `%LOCALAPPDATA%\rdt`. This replaces the first version, where a file named otherwise stayed where it was.
+
+- **Default folder:** the GUI's Open and Save as dialogs start in `%LOCALAPPDATA%\rdt`, the folder of `ui.toml` (`workspace_dir` in `rdt/ui_settings.py`).
+- **Default target:** with no `-t` or `-w`, `rdt` and `rdt-gui` use `./rdt.toml`, else `%LOCALAPPDATA%\rdt\rdt.toml` (`default_target` in `rdt/workspace.py`); `rdt-gui` falls back to it when there is no last workspace to reopen (D-WSP-3). Example: [`examples/sim_bench.rdtw`](../examples/sim_bench.rdtw) with `sim_bench.watch.toml`.
 
 #### D-WSP-5 Interface settings file
 
@@ -1040,7 +1052,7 @@ Each change re-reads the file before writing it, so two windows keep each other'
 
 - **GUI:** **File > Import** and **File > Export**, each with **Watch list**, **Commands** and **Interface settings**.
 - **Watch list:** an import asks **Add** or **Replace**. Add merges tabs by name, skips items already in a tab and keeps the settings already here; Replace takes the file's tabs and also its chart. A `.rdtw` can be imported as a watch list. Code: `Workspace.import_watches` and `export_watches`.
-- **Commands:** `Workspace.import_commands` and `export_commands`, the same CSV or text import and CSV export as before (D-CON-7).
+- **Commands:** `Workspace.import_commands` and `export_commands`. Import takes a commands file (`.toml`), CSV or text (D-CON-7). Export writes a commands file for a `.toml` name (the GUI's default) and CSV for any other name, such as `.csv` for Excel.
 - **Interface settings:** an export writes the settings, never the session state. An import applies at once, and settings left out of the file go back to their defaults (`UiSettings.import_file` and `export`).
 - **CLI:** `rdt watchlist import FILE [--replace]` and `rdt watchlist export FILE`; `rdt ui show`, `rdt ui import FILE` and `rdt ui export FILE`; `rdt commands import|export` now go through the `Workspace` methods.
 - **Tests:** `tests/test_split_files.py` and the split-file tests in `tests/test_gui.py`.
@@ -1165,9 +1177,9 @@ Ctrl+F (a shortcut on the console panel) opens a find bar under the transcript, 
 
 A list of the device's commands, so nobody has to remember the exact SCPI spelling. Unlike the removed command buttons (RM-1), an entry is never sent by a click: it goes to the input line to be checked and completed first.
 
-- **Model:** `SavedCommand(command, name, group, description)` in `rdt/console.py`; `Workspace.commands` holds the list, saved in the workspace's commands CSV (D-WSP-4; before 2026-10-14 as `[[command]]` tables in the `.rdtw`). It belongs to the workspace because the list belongs to one firmware, like the profile (rani, 2026-10-12).
-- **Import:** `read_commands` reads a `.csv` file whose header names the columns `command`, `name` (or `label`), `group` and `description` in any order; without a header the columns are taken in that order. A header with no `command` column is refused. Any other file is plain text, one command per line. Blank lines and lines starting with `#` are skipped, and a UTF-8 BOM (Excel) is accepted. The CSV separator is a comma, semicolon or tab, whichever the first line has most of, and a file that is not UTF-8 is read in the Windows code page (Excel's plain "CSV"). In the GUI the Import and Export buttons call their slots through lambdas, since `clicked` passes a checked flag that would otherwise arrive as the file path. `merge_commands` appends, skipping commands already in the list (ignoring case), or replaces the list, and reports how many were added and skipped.
-- **Export:** `write_commands` writes CSV with a header, UTF-8 with a BOM so Excel opens it.
+- **Model:** `SavedCommand(command, name, group, description)` in `rdt/console.py`; `Workspace.commands` holds the list, saved in the workspace's commands file, `bench.commands.toml` (D-WSP-4; before 2026-10-14 as `[[command]]` tables in the `.rdtw`). It belongs to the workspace because the list belongs to one firmware, like the profile (rani, 2026-10-12).
+- **Import:** a `.toml` file is read as a commands file (`[[command]]` tables, as the workspace saves them). `read_commands` reads a `.csv` file whose header names the columns `command`, `name` (or `label`), `group` and `description` in any order; without a header the columns are taken in that order. A header with no `command` column is refused. Any other file is plain text, one command per line. Blank lines and lines starting with `#` are skipped, and a UTF-8 BOM (Excel) is accepted. The CSV separator is a comma, semicolon or tab, whichever the first line has most of, and a file that is not UTF-8 is read in the Windows code page (Excel's plain "CSV"). In the GUI the Import and Export buttons call their slots through lambdas, since `clicked` passes a checked flag that would otherwise arrive as the file path. `merge_commands` appends, skipping commands already in the list (ignoring case), or replaces the list, and reports how many were added and skipped.
+- **Export:** a commands file (`.toml`, `write_commands_file`) by default; for CSV, `write_commands` writes a header and UTF-8 with a BOM so Excel opens it.
 - **GUI:** the console's **Commands** button shows `CommandsPanel` beside the transcript: a filter box, a tree by group (descriptions as tooltips), Import, Export and Clear. Double-click puts the command in the input line. Changes mark the workspace changed. The panel, transcript, search and log stay usable while the link is down; only sending is disabled (`Console.set_link_up`).
 - **CLI:** `rdt commands list|import|export|clear` (offline, needs `-w`), and `.commands [TEXT]` in `rdt console`.
 - **Autocomplete:** the known commands come right after the history in CON-2's suggestions, in the GUI and in Tab completion.
@@ -1350,6 +1362,8 @@ The application is built against the simulator. As soon as the firmware has the 
 | 2026-10-14 | The large ELF mismatch banner becomes one slim red error bar under the toolbar that holds every error: the mismatch and the latest failed action, which has a close button. The status bar no longer shows errors (GUI-10, SYM-8), at rani's request |
 | 2026-10-14 | The link shows as down when the port or socket breaks (checked every second, with no bytes sent) or when the device answers none of 3 reads in a row, so the status box no longer stays green after the connection is lost (LNK-9). Reported by rani; the behaviour is the thread's default, not yet confirmed by rani |
 | 2026-10-14 | The status box and the Connect / Disconnect button become one button showing the link state; a click connects, disconnects or cancels, and disconnected shows blue instead of grey `Closed` (GUI-11). rani picked this from mockups |
+| 2026-10-14 | The known commands are kept in a TOML file the `.rdtw` names (`bench.commands.toml`, `[[command]]` tables) instead of CSV; an old CSV commands file still loads and becomes TOML on the next save; export writes TOML by default, CSV on request (WSP-4, D-CON-7), at rani's request |
+| 2026-10-14 | A workspace's `.watch.toml` and `.commands.toml` are always saved beside its `.rdtw`; workspaces live by default in `%LOCALAPPDATA%\rdt` (Open and Save as start there), and the default target is `./rdt.toml`, else `%LOCALAPPDATA%\rdt\rdt.toml` (WSP-4), at rani's request |
 
 ## 9. Appendix: binary protocol (planned)
 
