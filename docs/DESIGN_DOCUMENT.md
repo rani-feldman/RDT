@@ -169,6 +169,11 @@ Each requirement links to its design section.
 | GUI-9 | Show the link state and the link, such as a green `Connected · COM3` (2026-10-14; since GUI-11 shown on the connect button itself) | Done | [D-GUI-2](#d-gui-2-connection-bar) |
 | GUI-10 | Every error shows in one slim red bar under the toolbar: an ELF that does not match its firmware and the latest failed connect, read, write or poll. The status bar shows only ordinary messages (2026-10-14) | Done | [D-GUI-10](#d-gui-10-error-bar) |
 | GUI-11 | The status box and the Connect / Disconnect button become one button that shows the link state and the link, and a click connects, disconnects or cancels: green `Connected · COM3`, blue `Disconnected · COM3`, red `Link down · COM3`, amber `Connecting · COM3` (2026-10-14) | Done | [D-GUI-2](#d-gui-2-connection-bar) |
+| GUI-12 | Each MCU has an optional short name and tag colour, and each watch row shows its MCU as a coloured tag with the short name before the expression (2026-10-14) | In review (PR #85) | [D-GUI-12](#d-gui-12-mcu-tags) |
+| GUI-13 | A watched value that changed since the previous read is highlighted for a moment (2026-10-14) | In review (PR #85) | [D-GUI-13](#d-gui-13-change-highlight) |
+| GUI-14 | Layout C: MCU cards in the left sidebar replace the image box and the Variables panel, and Watch, Scope, Memory and Console mode tabs sit in the toolbar (2026-10-14) | Planned | [D-GUI-14](#d-gui-14-planned-layout-c-dark-theme-and-drag-and-drop) |
+| GUI-15 | A dark theme (2026-10-14) | Planned | [D-GUI-14](#d-gui-14-planned-layout-c-dark-theme-and-drag-and-drop) |
+| GUI-16 | Drag and drop (2026-10-14) | Planned | [D-GUI-14](#d-gui-14-planned-layout-c-dark-theme-and-drag-and-drop) |
 
 ### 2.12 Live chart
 
@@ -505,6 +510,8 @@ MCU 0 is the main MCU; it owns the link and is required. The others have IDs 1, 
 id   = 0
 name = "main"
 elf  = "build/main.elf"
+short = "MAIN"          # optional: the GUI tag, 1 to 6 letters, digits or _ (D-GUI-12)
+color = "#7b61d6"       # optional: the tag colour, #rrggbb
 
   [[mcu.ranges]]          # a peripheral block (kind = "peripheral" is the default)
   name     = "GPIOA"
@@ -525,7 +532,7 @@ elf        = "build/motorctl.elf"
 timeout_ms = 1000
 ```
 
-The GUI edits them in **Target > MCUs and ELF files**, and the CLI can replace them with `--mcu NAME=ID[:ELF]`.
+The GUI edits them in **Target > MCUs and ELF files** (with the short name and colour, D-GUI-12), and the CLI can replace them with `--mcu NAME=ID[:ELF]`.
 
 #### D-MCU-2 One ELF per MCU
 
@@ -896,6 +903,27 @@ rani asked on 2026-10-14 for every error to be in one place, after an error show
 - **Latest error:** a failed connect, read, write or poll, or a refused write. It has a ✕ to close it, and a newer error replaces it. Any later message that is not an error clears it, since the later action went through (`MainWindow.status(msg, error=True)` calls `show_error`).
 
 The bar is hidden when both lines are empty. The status bar at the bottom shows only ordinary messages, never in red. The text can be selected and copied, and a long error never widens the window.
+
+#### D-GUI-12 MCU tags
+
+rani picked this from mockups on 2026-10-14 (thread "UI improvement ideas"), so that watch rows from several MCUs are told apart at a glance.
+
+- **Workspace:** each `[[mcu]]` takes an optional `short` (1 to 6 letters, digits or `_`) and `color` (`#rrggbb`). `check_short` and `check_color` in `rdt/target.py` validate them; short names must be unique.
+- **Defaults:** `mcu_short` takes the part of the name after its last underscore, at most 4 characters, in upper case (`Control_CM7` is `CM7`, `main` is `MAIN`). `mcu_color` picks from `MCU_COLORS` by the MCU's id.
+- **Editing:** **Target > MCUs and ELF files** has **Short name** and **Colour** columns; double-click the colour to choose one.
+- **Watch rows:** the name column shows a rounded pill in the MCU's colour with its short name, then the expression without the MCU prefix; the tooltip has the full expression. `TagDelegate` in `rdt/gui/style.py` draws the pill; `WatchTree._decorate` sets it and `retag` redraws the tags after the MCUs change. Watched names still carry the MCU prefix in the workspace and the CLI (MCU-7).
+
+#### D-GUI-13 Change highlight
+
+A value whose text differs from the previous read gets a yellow background (`#fff1a8`, or `#5a4c12` on a dark palette) for `FLASH_S` = 1 s. The first read of an item is not highlighted, nor is an error. `WatchTree._fill` compares with the value shown before and calls `_flash`; `fade`, called from `WatchTabs.tick`, takes the highlight off once its time is up.
+
+#### D-GUI-14 Planned: layout C, dark theme and drag and drop
+
+rani chose layout C from the mockups on 2026-10-14; these follow in later PRs.
+
+- **Layout C (GUI-14):** MCU cards in the left sidebar, replacing the image box and the Variables panel, and **Watch**, **Scope**, **Memory** and **Console** mode tabs in the toolbar.
+- **Dark theme (GUI-15).**
+- **Drag and drop (GUI-16).**
 
 ### 4.12 Live chart
 
@@ -1364,6 +1392,7 @@ The application is built against the simulator. As soon as the firmware has the 
 | 2026-10-14 | The status box and the Connect / Disconnect button become one button showing the link state; a click connects, disconnects or cancels, and disconnected shows blue instead of grey `Closed` (GUI-11). rani picked this from mockups |
 | 2026-10-14 | The known commands are kept in a TOML file the `.rdtw` names (`bench.commands.toml`, `[[command]]` tables) instead of CSV; an old CSV commands file still loads and becomes TOML on the next save; export writes TOML by default, CSV on request (WSP-4, D-CON-7), at rani's request |
 | 2026-10-14 | A workspace's `.watch.toml` and `.commands.toml` are always saved beside its `.rdtw`; workspaces live by default in `%LOCALAPPDATA%\rdt` (Open and Save as start there), and the default target is `./rdt.toml`, else `%LOCALAPPDATA%\rdt\rdt.toml` (WSP-4), at rani's request |
+| 2026-10-14 | Each MCU gets an optional short name and colour, shown as a tag on its watch rows (GUI-12), and a changed value is highlighted for a second (GUI-13). Layout C (MCU cards in the sidebar, mode tabs in the toolbar), a dark theme and drag and drop are planned (GUI-14 to GUI-16). rani picked these from mockups |
 
 ## 9. Appendix: binary protocol (planned)
 
