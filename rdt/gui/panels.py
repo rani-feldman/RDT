@@ -743,7 +743,7 @@ class Console(QWidget):
 class MemoryView(QWidget):
     """Dump of raw memory, 16 bytes per row with their ASCII. Right-click picks how the cells show the
     bytes (GUI-7): hex bytes by default, unsigned or signed C integers in hex or decimal, characters,
-    floats or doubles. The ASCII column follows the cells: one group per cell, its bytes in the order
+    floats or doubles. The ASCII column follows the cells (GUI-8): one group per cell, its bytes in the order
     of the value, so 30000003 shows as 0... Typing a new value in a cell writes it."""
 
     def __init__(self, main):
