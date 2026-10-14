@@ -101,7 +101,7 @@ Each requirement links to its design section.
 | SYM-5 | An expression through a pointer follows the pointer when the firmware moves it | Done | [D-SYM-5](#d-sym-5-pointers) |
 | SYM-6 | Loading a large ELF is fast after the first time | Done | [D-SYM-6](#d-sym-6-symbol-cache) |
 | SYM-7 | When an ELF is rebuilt, RDT reloads it and finds every watched item again by name (2026-10-05) | Done | [D-SYM-7](#d-sym-7-elf-rebuild-detection) |
-| SYM-8 | Check on connect that each ELF matches the firmware running on its MCU, and check again when the link or the MCU comes back; with no identity variable or build ID, compare a sample of the flash image. Show the result in the GUI, and refuse reads and writes to an MCU that does not match (2026-10-12, updated 2026-10-14) | Done | [D-SYM-8](#d-sym-8-build-identity-check) |
+| SYM-8 | Check on connect that each ELF matches the firmware running on its MCU, and check again when the link or the MCU comes back; with no identity variable or build ID, compare a sample of the flash image. Show the result in the GUI, with a large banner that can't be missed while an MCU does not match, and refuse reads and writes to an MCU that does not match (2026-10-12, updated 2026-10-14) | In review (PR #70) | [D-SYM-8](#d-sym-8-build-identity-check) |
 
 ### 2.6 Memory access
 
@@ -164,7 +164,7 @@ Each requirement links to its design section.
 | GUI-5 | A memory view: hex and ASCII dump of any range, editable | Done | [D-GUI-5](#d-gui-5-memory-view) |
 | GUI-6 | The GUI never blocks on the device | Done | [D-GUI-6](#d-gui-6-device-worker-thread) |
 | GUI-7 | The memory view offers display formats from a right-click menu: a Decimal toggle; Unsigned and Signed submenus with Char, Int, Short and Long; Ascii, Float and Double. The current choice has a check mark, and hex bytes (unsigned Char in hex) stay the default (2026-10-14) | Done | [D-GUI-7](#d-gui-7-memory-display-formats) |
-| GUI-8 | The memory view's ASCII column shows only beside the default hex bytes (unsigned Char in hex); any other display format hides it, and Ascii in the menu shows memory as text (2026-10-14, updated 2026-10-14) | In review (PR #66) | [D-GUI-7](#d-gui-7-memory-display-formats) |
+| GUI-8 | The memory view's ASCII column shows only beside the default hex bytes (unsigned Char in hex); any other display format hides it, and Ascii in the menu shows memory as text (2026-10-14, updated 2026-10-14) | Done | [D-GUI-7](#d-gui-7-memory-display-formats) |
 | GUI-9 | A status box before the Connect button shows the link state and the link, such as a green `Connected · COM3` or a grey `Closed · COM3` (2026-10-14) | Done | [D-GUI-2](#d-gui-2-connection-bar) |
 
 ### 2.12 Live chart
@@ -187,9 +187,12 @@ Each requirement links to its design section.
 
 | ID | Requirement | Status | Design |
 | --- | --- | --- | --- |
-| WSP-1 | One workspace file holds the connection, the SCPI profile, the MCUs and their ELFs, the watch tabs with every item's settings, and the chart layout (2026-10-05) | Done | [D-WSP-1](#d-wsp-1-workspace-file) |
+| WSP-1 | A workspace holds the connection, the SCPI profile, the MCUs and their ELFs, the watch tabs with every item's settings, and the chart layout (2026-10-05); since 2026-10-14 the watch tabs, chart and commands are in separate files the workspace names (WSP-4) | Done | [D-WSP-1](#d-wsp-1-workspace-file) |
 | WSP-2 | Workspaces from older versions still open | Done | [D-WSP-2](#d-wsp-2-older-workspaces) |
 | WSP-3 | The last workspace reopens when the GUI starts (2026-10-12) | Done | [D-WSP-3](#d-wsp-3-reopen-last-workspace) |
+| WSP-4 | The settings are split into separate files: the watched variables and watch tabs in one file, the imported commands in another, both opened with the workspace (2026-10-14) | In review (PR #71) | [D-WSP-4](#d-wsp-4-split-files) |
+| WSP-5 | The interface settings are kept in their own file, per user, not in the workspace (2026-10-14) | In review (PR #71) | [D-WSP-5](#d-wsp-5-interface-settings-file) |
+| WSP-6 | The watch list, the commands and the interface settings can each be imported and exported (2026-10-14) | In review (PR #71) | [D-WSP-6](#d-wsp-6-import-and-export) |
 
 ### 2.15 Command line and API
 
@@ -217,7 +220,7 @@ Console features taken from ComPort-Zone (an open serial terminal); rani approve
 | CON-4 | Search the console transcript (Ctrl+F) with highlighted matches and a counter; Ctrl+K clears it (2026-10-12) | Done | [D-CON-4](#d-con-4-transcript-search) |
 | CON-5 | Log the console session to a text file, every line with date, time and direction (2026-10-12) | Done | [D-CON-5](#d-con-5-session-log) |
 | CON-6 | Convert a transcript selection between hex and text (2026-10-12) | Done | [D-CON-6](#d-con-6-hex-and-text) |
-| CON-7 | A list of the device's known commands, kept in the workspace, imported from and exported to a file, and picked from in the console (2026-10-12) | Done | [D-CON-7](#d-con-7-known-commands) |
+| CON-7 | A list of the device's known commands, kept with the workspace (in its own file since 2026-10-14, WSP-4), imported from and exported to a file, and picked from in the console (2026-10-12) | Done | [D-CON-7](#d-con-7-known-commands) |
 | CON-8 | `rdt send --expect REGEX` checks a reply, with its own exit code (2026-10-12) | Done | [D-CON-8](#d-con-8-checking-a-reply) |
 | CON-9 | `rdt console` can reconnect and show the device info without leaving (2026-10-12) | Done | [D-CON-9](#d-con-9-reconnect-and-info-in-the-console) |
 | CON-10 | Send a serial break on a COM port link (2026-10-12) | Done | [D-CON-10](#d-con-10-serial-break) |
@@ -612,6 +615,7 @@ RDT compares bytes that differ between firmware builds, read from the device and
 - **Results:** `match`, `mismatch`, `unchecked` (nothing to compare, an unknown variable, or a variable with no value in the file, such as one in `.bss`) and `unread` (the MCU did not answer). Only `mismatch` has an effect.
 - **On a mismatch:** every read and write to that MCU is refused with `ImageMismatch` (a `WriteRefused`) naming both values (`device 'rdt-main', ELF 'rdt-mXin'`), including polling and the memory view (rani, 2026-10-14; before that, reads still worked). The GUI has no way around it (rani, 2026-10-14): load the matching ELF or flash the matching firmware, then connect again or use Target > Check ELF identity. The CLI's `--allow-mismatch` and `Target.allow_mismatch(mcu)` from Python still allow access, until the next check.
 - **Image box:** while connected, the toolbar shows an image box next to the connection status (GUI-9): green `Image ✓ verified`, red `Image ✗ mismatch`, `Image: checking`, `Image ? not read` or `Image not checked`, with each MCU's result in its tooltip. It is hidden while not connected.
+- **Mismatch banner:** while any MCU's ELF does not match, a large red banner spans the top of the main window under the toolbar. It reads `⚠ ELF does not match the firmware on <MCU>`, says reads and writes to it are refused, gives the detail (such as the first differing address), and has **Load ELF...** (opens Target > MCUs and ELF files) and **Check again** buttons. It can't be hidden, and it goes away once every MCU matches or the link closes. rani asked for it on 2026-10-14 after missing the status bar line; the status bar line and the Image box stay.
 - **Shown:** after Connect, the GUI status bar says `ELF matches the firmware`, `ELF does NOT match the firmware` (in red) or `ELF not checked (no identity variable or build ID)`, one per MCU when there are several (`identity_summary` in `rdt/gui/app.py`). The console logs every result, unchecked ones too. A build-ID mismatch shows the two hashes as `readelf -n` prints them, skipping the 16-byte note header that every build shares. On the CLI, a mismatch is a warning on stderr, `rdt info` prints each MCU's result, and `rdt watch` prints a `#` line when a rebuilt ELF does not match.
 - **Recommended setup:** link with `-Wl,--build-id` and keep `.note.gnu.build-id` in flash after `.isr_vector`, so every build is checked with no identity variable (example `sim/examples/firmware/link_build_id.ld`; steps in `docs/use-your-own-elf.md`).
 - **Editing:** the GUI's MCU dialog has an Identity variable column. The example workspace and target file check `firmware_name` on MCU `main`.
@@ -864,7 +868,7 @@ Right-click the memory view's dump to choose how its cells show memory (GUI-7).
 - **Layout:** `MemoryView` in `rdt/gui/panels.py` shows 16/size cells per row, each headed by its byte offset, plus the ASCII column for hex bytes (GUI-8). A cell only partly inside the bytes read stays blank. The status line names the format, such as `as Signed Short, decimal`.
 - **ASCII column (GUI-8):** shown only with the default format, the hex bytes. `MemoryView._layout_columns` hides the column for any other format (`format != MemFormat()`), and picking the hex bytes again brings it back. To see memory as text in another layout, pick **Ascii** from the menu. rani asked for this on 2026-10-14 after seeing an ASCII column next to Unsigned Long words. It replaced the first version, where the column stayed for every format and `MemFormat.to_ascii` regrouped each cell's characters in the order of the value.
 - **Writing:** double-click a cell and type a value in the shown format; a hex `0x` prefix is accepted in decimal too. `from_text` turns it into bytes and refuses text that is not a number or does not fit the type, naming the type's range. The cell is written as one element through `Target.write`, so aligned words and read-modify-write apply as usual (D-SCPI-10), and the write is confirmed by read-back.
-- **Saved:** the choice is kept in `gui.ini` (`memory/kind`, `memory/type`, `memory/decimal`) and comes back at the next start.
+- **Saved:** the choice is kept per user in `ui.toml` (`memory/kind`, `memory/type`, `memory/decimal`, D-WSP-5) and comes back at the next start.
 
 #### D-GUI-6 Device worker thread
 
@@ -939,6 +943,8 @@ A workspace (`.rdtw`, TOML, `rdt/workspace.py`) is a target file plus everything
 profile = "fw_profile.toml"   # or an inline [scpi] table
 poll_ms = 500                 # global polling interval; 0 = off
 read_only = false             # true: every item read-only unless it says read_only = false (D-WS-4)
+watch_file    = "bench.watch.toml"     # the watch tabs and chart (D-WSP-4)
+commands_file = "bench.commands.csv"   # the known commands (D-CON-7)
 
 [connection]
 transport = "tcp"             # tcp | udp | serial
@@ -949,7 +955,11 @@ id       = 0
 name     = "main"
 elf      = "build/main.elf"
 identity = "firmware_version" # compared with the ELF on connect (D-SYM-8)
+```
 
+`bench.watch.toml`, next to it:
+
+```toml
 [[tab]]
 name = "Motor"
 
@@ -968,23 +978,49 @@ name = "Motor"
 
 [chart]
 window_s = 30
-
-[[command]]                   # the device's known commands (D-CON-7)
-command     = "MOTor:SPEed?"
-group       = "Motor"
-description = "Motor speed in rpm"
 ```
 
-Every key in a `[[tab.watch]]` except `expr` is optional. Saving rewrites the whole file (`rdt/tomlw.py`), so comments are not kept. Paths are stored relative to the file. On the CLI, `-w` opens a workspace (`-t` is the same option), and `rdt init FILE` saves the current target as a new workspace. [`examples/sim_bench.rdtw`](../examples/sim_bench.rdtw) is a working example for the simulator.
+`bench.commands.csv` is the same CSV as a commands export, with the header `command,name,group,description`, such as `MOTor:SPEed?,,Motor,Motor speed in rpm`.
+
+Every key in a `[[tab.watch]]` except `expr` is optional. Saving rewrites the files (`rdt/tomlw.py`), so comments are not kept. Paths are stored relative to the file. On the CLI, `-w` opens a workspace (`-t` is the same option), and `rdt init FILE` saves the current target as a new workspace. [`examples/sim_bench.rdtw`](../examples/sim_bench.rdtw) is a working example for the simulator.
 
 #### D-WSP-2 Older workspaces
 
 - **Old watch list:** a file with a top-level `[[watch]]` list (from before watch tabs) loads as one tab named `Watch` and is saved with tabs.
+- **Single-file workspace:** a `.rdtw` from before 2026-10-14 with its `[[tab]]`, `[chart]` and `[[command]]` tables inline still opens, and the next save splits it into the separate files (D-WSP-4).
 - **Old buttons:** a file with `[[button]]` tables (command buttons, RM-1) loads with a warning, in the GUI's status bar or on the CLI. The buttons are left out when the file is saved.
 
 #### D-WSP-3 Reopen last workspace
 
-The GUI remembers the last workspace file it opened or saved, in `gui.ini` next to the console history (`%LOCALAPPDATA%\rdt` on Windows), and opens it when `rdt-gui` starts with no file named. A file given on the command line wins. If the remembered file is gone, the GUI starts with a new workspace and says so in the status bar. A target file (`.toml`) opened as a new workspace is not remembered, since it is not a workspace. Code: `MainWindow.remember()` and `reopen_last()` in `rdt/gui/app.py`.
+The GUI remembers the last workspace file it opened or saved, as `session/last_workspace` in `ui.toml` next to the console history (`%LOCALAPPDATA%\rdt` on Windows, D-WSP-5), and opens it when `rdt-gui` starts with no file named. A file given on the command line wins. If the remembered file is gone, the GUI starts with a new workspace and says so in the status bar. A target file (`.toml`) opened as a new workspace is not remembered, since it is not a workspace. Code: `MainWindow.remember()` and `reopen_last()` in `rdt/gui/app.py`.
+
+#### D-WSP-4 Split files
+
+rani asked on 2026-10-14 for the imported commands, the watched variables and watch tabs, and the interface settings to each be in a separate file. A workspace is now up to three files side by side:
+
+- **`bench.rdtw`:** the connection, profile, MCUs, `poll_ms` and `read_only`, plus `watch_file` and `commands_file`, which name the other two relative to the `.rdtw`.
+- **`bench.watch.toml`:** the `[[tab]]` and `[[tab.watch]]` tables and `[chart]` (`read_watch_file` and `write_watch_file` in `rdt/workspace.py`).
+- **`bench.commands.csv`:** the known commands, in the same CSV as the commands export (D-CON-7).
+
+Opening the `.rdtw` loads all three (`Workspace.watch_path`, `Workspace.commands_path`). A file is only made once it has something in it. If a named file is missing, the workspace still opens with a warning and that list is empty. Naming a file and also having the same tables inline is a `ConfigError`. Save As takes the files named after the workspace along to the new name (`bench.watch.toml` becomes `new.watch.toml`); a file with any other name, such as a commands CSV shared between workspaces, stays where it is and keeps being used. Example: [`examples/sim_bench.rdtw`](../examples/sim_bench.rdtw) with `sim_bench.watch.toml`.
+
+#### D-WSP-5 Interface settings file
+
+Interface settings are per user, not per workspace. They are in `ui.toml` next to the console history (`%LOCALAPPDATA%\rdt\ui.toml` on Windows; `RDT_UI_FILE` overrides it), handled by `UiSettings` in `rdt/ui_settings.py`:
+
+- **Settings:** `console/font_size` and `console/wrap` (D-CON-11), and `memory/kind`, `memory/type` and `memory/decimal` (D-GUI-7).
+- **State:** `session/last_workspace` (D-WSP-3). It is not a setting, so it is never exported and an import leaves it alone.
+
+Each change re-reads the file before writing it, so two windows keep each other's changes, and a file that can't be written leaves the settings in memory only. `ui.toml` replaces `gui.ini` and `console.ini`, whose values are copied into it on the first start (`load_ui` in `rdt/gui/app.py`).
+
+#### D-WSP-6 Import and export
+
+- **GUI:** **File > Import** and **File > Export**, each with **Watch list**, **Commands** and **Interface settings**.
+- **Watch list:** an import asks **Add** or **Replace**. Add merges tabs by name, skips items already in a tab and keeps the settings already here; Replace takes the file's tabs and also its chart. A `.rdtw` can be imported as a watch list. Code: `Workspace.import_watches` and `export_watches`.
+- **Commands:** `Workspace.import_commands` and `export_commands`, the same CSV or text import and CSV export as before (D-CON-7).
+- **Interface settings:** an export writes the settings, never the session state. An import applies at once, and settings left out of the file go back to their defaults (`UiSettings.import_file` and `export`).
+- **CLI:** `rdt watchlist import FILE [--replace]` and `rdt watchlist export FILE`; `rdt ui show`, `rdt ui import FILE` and `rdt ui export FILE`; `rdt commands import|export` now go through the `Workspace` methods.
+- **Tests:** `tests/test_split_files.py` and the split-file tests in `tests/test_gui.py`.
 
 ### 4.15 Command line and API
 
@@ -1002,6 +1038,7 @@ The GUI remembers the last workspace file it opened or saved, in `gui.ini` next 
 | `send`, `console` | SCPI by hand |
 | `watch [EXPR...] [--tab NAME] [-i MS] [-n N] [--csv FILE]` | Poll and print one line per sample, optionally logging to CSV |
 | `init`, `list`, `add`, `remove`, `tab` | Create and edit the workspace, no device needed |
+| `watchlist import\|export`, `commands import\|export`, `ui show\|import\|export` | Import and export the watch list, the known commands and the interface settings (D-WSP-6), no device needed |
 
 `-v` logs link events and `-vv` every command and reply. The exit code is 0 on success and 1 on any failure. Full usage is in [CLI.md](CLI.md).
 
@@ -1105,7 +1142,7 @@ Ctrl+F (a shortcut on the console panel) opens a find bar under the transcript, 
 
 A list of the device's commands, so nobody has to remember the exact SCPI spelling. Unlike the removed command buttons (RM-1), an entry is never sent by a click: it goes to the input line to be checked and completed first.
 
-- **Model:** `SavedCommand(command, name, group, description)` in `rdt/console.py`; `Workspace.commands` holds the list, saved as `[[command]]` tables in the `.rdtw` (empty keys left out). It lives in the workspace because the list belongs to one firmware, like the profile (rani, 2026-10-12).
+- **Model:** `SavedCommand(command, name, group, description)` in `rdt/console.py`; `Workspace.commands` holds the list, saved in the workspace's commands CSV (D-WSP-4; before 2026-10-14 as `[[command]]` tables in the `.rdtw`). It belongs to the workspace because the list belongs to one firmware, like the profile (rani, 2026-10-12).
 - **Import:** `read_commands` reads a `.csv` file whose header names the columns `command`, `name` (or `label`), `group` and `description` in any order; without a header the columns are taken in that order. A header with no `command` column is refused. Any other file is plain text, one command per line. Blank lines and lines starting with `#` are skipped, and a UTF-8 BOM (Excel) is accepted. The CSV separator is a comma, semicolon or tab, whichever the first line has most of, and a file that is not UTF-8 is read in the Windows code page (Excel's plain "CSV"). In the GUI the Import and Export buttons call their slots through lambdas, since `clicked` passes a checked flag that would otherwise arrive as the file path. `merge_commands` appends, skipping commands already in the list (ignoring case), or replaces the list, and reports how many were added and skipped.
 - **Export:** `write_commands` writes CSV with a header, UTF-8 with a BOM so Excel opens it.
 - **GUI:** the console's **Commands** button shows `CommandsPanel` beside the transcript: a filter box, a tree by group (descriptions as tooltips), Import, Export and Clear. Double-click puts the command in the input line. Changes mark the workspace changed. The panel, transcript, search and log stay usable while the link is down; only sending is disabled (`Console.set_link_up`).
@@ -1126,7 +1163,7 @@ A list of the device's commands, so nobody has to remember the exact SCPI spelli
 
 #### D-CON-11 Text size and wrap
 
-Ctrl+= (or Ctrl++), Ctrl+- and Ctrl+mouse wheel over the transcript change the console's font size (transcript and input line together) between 6 and 32 points; Ctrl+0 goes back to the system's fixed-width size. The **Wrap** check box switches the transcript between wrapping at the panel's width and no wrapping (the default, so long replies such as hex dumps scroll sideways). Both are kept per user in `console.ini` (a `QSettings` INI file) next to the console history (D-CON-1), not in the workspace.
+Ctrl+= (or Ctrl++), Ctrl+- and Ctrl+mouse wheel over the transcript change the console's font size (transcript and input line together) between 6 and 32 points; Ctrl+0 goes back to the system's fixed-width size. The **Wrap** check box switches the transcript between wrapping at the panel's width and no wrapping (the default, so long replies such as hex dumps scroll sideways). Both are kept per user in `ui.toml` (`console/font_size`, `console/wrap`) next to the console history (D-WSP-5), not in the workspace.
 
 #### D-CON-13 Terminal look
 
@@ -1285,6 +1322,8 @@ The application is built against the simulator. As soon as the firmware has the 
 | 2026-10-14 | With no identity variable or build ID, the ELF check compares a sample of the flash image, so it works with Keil and armlink with no build change. A mismatch refuses reads as well as writes, with no override in the GUI, and the GUI shows an Image box next to the connection status (SYM-8). At rani's request; a Keil pre-build script that wrote a build constant was declined |
 | 2026-10-14 | An address in a SCPI command always has at least 8 hex digits, with leading zeros (`08000000`), because rani's firmware checks that every address is 8 characters (SCPI-4) |
 | 2026-10-14 | The memory view's ASCII column shows only beside the hex bytes and is hidden for every other display format, replacing the per-cell regrouping (GUI-8), at rani's request |
+| 2026-10-14 | An ELF mismatch shows a large red banner across the top of the main window, with Load ELF... and Check again buttons, which can't be hidden while the mismatch lasts (SYM-8), at rani's request after missing the status bar line |
+| 2026-10-14 | The workspace is split into the `.rdtw`, a watch list file and a commands CSV; interface settings move to a per-user `ui.toml` that replaces `gui.ini` and `console.ini`; each of the three can be imported and exported (WSP-4 to WSP-6), at rani's request |
 
 ## 9. Appendix: binary protocol (planned)
 
