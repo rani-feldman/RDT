@@ -120,10 +120,10 @@ class ConnectionBar(QToolBar):
         self.profile = QPushButton()
         self.profile.setToolTip("Edit the SCPI profile: command templates and reply format")
         self.profile.clicked.connect(main.edit_profile)
-        self.connect_button = QPushButton("Connect")
+        # One button shows the link state and connects or disconnects when clicked (GUI-11).
+        self.connect_button = QPushButton("Disconnected")
+        self.connect_button.setFont(mono())
         self.connect_button.clicked.connect(main.toggle_connection)
-        self.state = QLabel()
-        self.state.setFont(mono())
         self.image = QLabel()
         self.image.setFont(mono())
         self.image.setVisible(False)
@@ -151,7 +151,6 @@ class ConnectionBar(QToolBar):
         self._serial = [self.addWidget(self.com), self.addWidget(self.baud)]
         self.addSeparator()
         self.addWidget(self.profile)
-        self.addWidget(self.state)
         self.addWidget(self.connect_button)
         self._image = self.addWidget(self.image)
         self._image.setVisible(False)
@@ -294,14 +293,14 @@ class ErrorBanner(QToolBar):
         self.setVisible(bool(lines))
 
 
-# The connection status box: text, border and background for each link state.
+# The connect button and the image box: text, border and background for each state.
 STATE_COLORS = {
     "up": ("#3ccf7a", "#1f7a46", "#0d1f15"),
     "busy": ("#e0a030", "#8a6418", "#211a0c"),
     "down": ("#e05050", "#8a2a2a", "#210f0f"),
+    "off": ("#7fb0ff", "#3a7bd5", "#101a2b"),       # disconnected
     "closed": ("#9a9a9a", "#3c3c3c", "#141414"),
 }
-BUTTON_COLORS = ("#e0e0e0", "#3a7bd5", "#16191f")   # the Connect button while not connected
 
 
 def plug_icon(color: str) -> QIcon:
@@ -321,7 +320,7 @@ def plug_icon(color: str) -> QIcon:
     return QIcon(pm)
 
 
-LINK_TIPS = {   # the status box's tooltip for each link state (LNK-9)
+LINK_TIPS = {   # the connect button's tooltip for each link state (LNK-9)
     LinkState.UP: "The port is open",
     LinkState.DOWN: "The port broke, such as a USB COM port unplugged; RDT reconnects by itself",
     LinkState.NO_REPLY: "The port is open but the device answered none of the last reads; "
@@ -741,7 +740,7 @@ class MainWindow(QMainWindow):
         self._show_state()
 
     def _link_name(self) -> str:
-        """The link shown in the status box: the COM port, or IP:port for TCP and UDP."""
+        """The link shown on the connect button: the COM port, or IP:port for TCP and UDP."""
         if self.device.target is not None:
             return self.device.target.config.connection.address
         try:
@@ -849,13 +848,13 @@ class MainWindow(QMainWindow):
     def _show_state(self) -> None:
         state = self.device.state
         if self._connecting:
-            word, look, button = "Connecting", "busy", "Cancel"
+            word, look, click = "Connecting", "busy", "Click to cancel"
         elif state == LinkState.UP:
-            word, look, button = "Connected", "up", "Disconnect"
+            word, look, click = "Connected", "up", "Click to disconnect"
         elif state in (LinkState.DOWN, LinkState.NO_REPLY):
-            word, look, button = "Link down", "down", "Disconnect"
+            word, look, click = "Link down", "down", "Click to disconnect"
         else:
-            word, look, button = "Closed", "closed", "Connect"
+            word, look, click = "Disconnected", "off", "Click to connect"
         where = self._link_name()
         text = f"{word} \u00b7 {where}" if where else word
         if text != self._last_state:
@@ -865,15 +864,13 @@ class MainWindow(QMainWindow):
                 self.console.log(text + why, "error" if look == "down" else "note")
             self._last_state = text
         fg, border, bg = STATE_COLORS[look]
-        self.bar.state.setText(text)
-        self.bar.state.setToolTip(LINK_TIPS.get(state, "") if not self._connecting else "")
-        self.bar.state.setStyleSheet(f"color: {fg}; background: {bg}; border: 1px solid {border}; "
-                                     "border-radius: 3px; padding: 2px 8px")
-        b_fg, b_border, b_bg = (fg, border, bg) if look == "up" else BUTTON_COLORS
-        self.bar.connect_button.setText(button)
-        self.bar.connect_button.setIcon(plug_icon(b_fg))
-        self.bar.connect_button.setStyleSheet(f"QPushButton {{ color: {b_fg}; background: {b_bg}; "
-                                              f"border: 1px solid {b_border}; border-radius: 4px; padding: 3px 12px }}")
+        tip = LINK_TIPS.get(state, "") if not self._connecting else ""
+        button = self.bar.connect_button
+        button.setText(text)
+        button.setToolTip(f"{tip}\n{click} (F5)" if tip else f"{click} (F5)")
+        button.setIcon(plug_icon(fg))
+        button.setStyleSheet(f"QPushButton {{ color: {fg}; background: {bg}; border: 1px solid {border}; "
+                             "border-radius: 4px; padding: 3px 12px }")
         up = state == LinkState.UP
         t = self.device.target
         if up and t is not None and not self._connecting and not self.device.busy("identity"):
