@@ -958,7 +958,7 @@ Polling, the chart and the CSV log keep running while a panel is hidden.
 
 #### D-GUI-17 One-row title bar
 
-`rdt/gui/titlebar.py` makes the main window frameless and sets a 34 px row as its menu widget (`titlebar.install`, called before the menus are built; it returns the menu bar inside the row, and `MainWindow.menu_bar` / `menuBar()` give the menus a place). The row holds the 22 px app icon, the menus (10 pt text, set slightly low in the row), and minimise, maximise or restore, and close (red on hover).
+`rdt/gui/titlebar.py` makes the main window frameless and sets a 34 px row as its menu widget (`titlebar.install`, called before the menus are built; it returns the menu bar inside the row, and `MainWindow.menu_bar` / `menuBar()` give the menus a place). The row holds the 22 px app icon, the menus (10 pt text, padded to the row height so it is centred vertically), and minimise, maximise or restore, and close (red on hover).
 
 - **Title text:** none. The window title is still set (`name * - RDT`), so the taskbar and Alt-Tab show it.
 - **Moving and resizing:** pressing an empty part of the row calls the system move, a double click maximises or restores, and the outer 6 px of the window call the system resize (cursor changes at the edges; the top edge is covered by the row).
