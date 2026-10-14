@@ -1036,3 +1036,25 @@ def test_mcu_cards(qtbot, win):
     assert "1 timeout" in motor.link.text() and "#d99a0b" in motor.dot.styleSheet()
     win.show_memory("motorctl")
     assert win.memory.mcu.currentText() == "motorctl"
+
+
+def test_modes(qtbot, win):
+    """The mode tabs lay the window out for one job and keep each mode's layout (GUI-17)."""
+    win.show()
+    assert win.mode == "watch" and win.modes.buttons["watch"].isChecked()
+    win.modes.buttons["scope"].click()
+    assert win.mode == "scope" and win.ui.value("session/mode") == "scope"
+    assert win.docks["Chart"].isVisible() and not win.docks["Target"].isVisible()
+    assert win.centralWidget().isVisible()
+    shortcut = next(a for a in win.findChildren(QAction) if a.shortcut().toString() == "Ctrl+3")
+    shortcut.trigger()
+    assert win.mode == "memory" and win.docks["Memory"].isVisible() and not win.centralWidget().isVisible()
+    win.set_mode("console")
+    assert win.docks["Console"].isVisible() and not win.docks["Chart"].isVisible()
+    win.docks["Console"].hide()          # changed by hand: kept for the next time
+    win.set_mode("watch")
+    assert win.ui.value("session/layout_console") and win.docks["Target"].isVisible()
+    win.set_mode("console")
+    assert not win.docks["Console"].isVisible()
+    win.reset_layout()
+    assert win.docks["Console"].isVisible()

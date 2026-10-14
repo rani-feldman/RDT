@@ -28,6 +28,17 @@ Started with no file, `rdt-gui` reopens the workspace you last opened or saved. 
 
 **ELF identity.** On connect, RDT checks that each MCU runs the firmware its ELF came from: it compares the MCU's identity variable, or the GNU build ID when the linker put it in memory, or else sampled blocks of the read-only sections (code, constants, vector table) on the device with the ELF file. Each MCU's card in the **Target** panel shows the result on its ELF line: `✓ main.elf` (green), `✗ main.elf does not match` (red), `? main.elf: not checked yet` or `? main.elf: not read` (grey); the console says the same. On a mismatch every read and write to that MCU is refused, so a stale ELF can't read or write the wrong address. The red error bar under the toolbar names the MCU and stays until the ELF matches again, with **Load ELF...** (opens Target > MCUs and ELF files) and **Check again**; its tooltip has the detail. There is no way around it in the GUI: load the ELF that matches the firmware, or flash the firmware that matches the ELF. **Target > Check ELF identity** checks again, such as after flashing while the link stays open; it also runs after an ELF is rebuilt and when the link or an MCU comes back after a drop. See [Use your own ELF](use-your-own-elf.md#check-that-the-device-runs-this-elf).
 
+## Modes
+
+The tabs at the left of the toolbar lay the window out for one job (also **View > Watch mode** and so on, Ctrl+1 to Ctrl+4):
+
+- **Watch** (Ctrl+1): the MCU cards on the left, the watch tabs, and the chart, console and memory view below.
+- **Scope** (Ctrl+2): a large chart, with the watch tabs beside it.
+- **Memory** (Ctrl+3): the MCU cards and a large memory view.
+- **Console** (Ctrl+4): the SCPI console alone.
+
+Polling, the chart and the CSV log keep running in every mode. Each mode remembers how you left its panels (sizes, which panels are shown, where they are docked), and RDT reopens in the mode it was closed in; both are kept per user in `ui.toml`. **View > Reset this mode's layout** puts the panels of the mode in front back where they start.
+
 ## Target panel
 
 The **Target** panel on the left shows the workspace and its link, then one **card** per MCU:
