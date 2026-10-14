@@ -13,21 +13,22 @@ DEFAULT_PROFILE = FIRMWARE.parent / "default_profile.toml"
 def test_default_commands_use_bare_hex():
     p = Profile()
     assert p.format_read(1, 0x20000084, 4) == "MEMory:READ? 1,20000084,4"
+    assert p.format_read(0, 0x08000000, 4) == "MEMory:READ? 0,08000000,4"   # leading zero kept (rani)
     assert p.format_write(0, 0x20000000, 0x3FC00000, 4) == "MEMory:WRITE 0,20000000,3FC00000,4"
     assert p.format_read(0, 0x11AABBCCDD, 4) == "MEMory:READ? 0,11AABBCCDD,4"   # rani's example
-    assert p.format_write(0, 0x100, 0xA, 1) == "MEMory:WRITE 0,100,A,1"
+    assert p.format_write(0, 0x100, 0xA, 1) == "MEMory:WRITE 0,00000100,A,1"   # addresses always 8 digits
 
 
 def test_templates_are_user_defined():
     p = Profile(read="read {mcu},{addr},{len}", write="write {mcu},{addr},{value},{size}")
-    assert p.format_read(0, 4096, 16) == "read 0,1000,16"
-    assert p.format_write(2, 4096, 255, 1) == "write 2,1000,FF,1"
+    assert p.format_read(0, 4096, 16) == "read 0,00001000,16"
+    assert p.format_write(2, 4096, 255, 1) == "write 2,00001000,FF,1"
 
 
 def test_a_template_may_pad_but_not_change_the_base():
     p = Profile(read="MEM:RD? {mcu},{addr:08X},{len}", write="MEM:WR {mcu},{addr},{value:04X},{size}")
     assert p.format_read(0, 0x100, 8) == "MEM:RD? 0,00000100,8"
-    assert p.format_write(0, 0x100, 0xA, 2) == "MEM:WR 0,100,000A,2"
+    assert p.format_write(0, 0x100, 0xA, 2) == "MEM:WR 0,00000100,000A,2"
     for template in ("MEM:RD? {mcu},{addr:d},{len}", "MEM:RD? {mcu},{addr:#X},{len}", "MEM:RD? {mcu},{addr:x},{len}"):
         with pytest.raises(ConfigError, match="bare hex"):
             Profile(read=template)
