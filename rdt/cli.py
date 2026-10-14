@@ -949,7 +949,7 @@ def main(argv: list[str] | None = None, out=None) -> int:
                 if args.allow_mismatch:
                     target.allow_mismatch(m)
                 print(f"rdt: warning: {m.identity}" +
-                      ("" if args.allow_mismatch else "; writes to it are refused (--allow-mismatch to write anyway)"),
+                      ("" if args.allow_mismatch else "; reads and writes to it are refused (--allow-mismatch to access it anyway)"),
                       file=sys.stderr)
         try:
             return COMMANDS[args.cmd](target, args, out)

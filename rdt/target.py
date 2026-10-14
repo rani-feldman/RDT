@@ -23,8 +23,8 @@ import tomllib
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from .errors import AccessRefused, ConfigError, RdtError, SymbolError, WriteRefused
-from .memmap import ElfInfo, MemoryMap, build_id_note, elf_bytes, load_elf_sections
+from .errors import AccessRefused, ConfigError, ImageMismatch, RdtError, SymbolError, WriteRefused
+from .memmap import ElfInfo, MemoryMap, build_id_note, elf_bytes, flash_samples, load_elf_sections
 from .profile import Profile, Range
 from .session import LinkState, Session
 from .symbols import Location, Resolver, Row, SymbolTable, describe_address, load_symbols, parse
@@ -321,13 +321,13 @@ class Target:
         except RdtError as e:
             return Identity(m.name, "unchecked", f"identity variable: {e}")
         if area is None:
-            return Identity(m.name, "unchecked", "no identity variable or build ID to compare")
+            return self._flash_identity(m)
         addr, size, what = area
         expected = elf_bytes(m.elf.path, addr, size)
         if expected is None:
             return Identity(m.name, "unchecked", f"{what} has no value in the ELF file (use a const variable)")
         try:
-            actual = self.read(m, addr, size)
+            actual = self._read_unchecked(m, addr, size)
         except RdtError as e:
             return Identity(m.name, "unread", f"{what} could not be read: {e}")
         if actual == expected:
@@ -336,8 +336,32 @@ class Target:
         return Identity(m.name, "mismatch", f"{what} differs from {m.elf.path.name}: "
                                             f"device {_show_bytes(actual, bid)}, ELF {_show_bytes(expected, bid)}")
 
+    def _flash_identity(self, m: Mcu) -> Identity:
+        """Without an identity variable or build ID: compare sampled blocks of the read-only
+        sections (code, constants, vector table) on the device with the ELF file."""
+        if m.elf is None:
+            return Identity(m.name, "unchecked", "no ELF file to compare")
+        samples = flash_samples(m.elf.path)
+        if not samples:
+            return Identity(m.name, "unchecked", f"{m.elf.path.name} has no read-only sections to compare")
+        size = sum(len(b) for _, b in samples)
+        differ = []
+        for addr, expected in samples:
+            try:
+                actual = self._read_unchecked(m, addr, len(expected))
+            except RdtError as e:
+                return Identity(m.name, "unread", f"flash at 0x{addr:08X} could not be read: {e}")
+            if actual != expected:
+                first = next(i for i, (x, y) in enumerate(zip(actual, expected)) if x != y)
+                differ.append(addr + first)
+        what = f"{len(samples)} flash blocks ({size} bytes)"
+        if not differ:
+            return Identity(m.name, "match", f"{what} match {m.elf.path.name}")
+        return Identity(m.name, "mismatch", f"flash differs from {m.elf.path.name}: {len(differ)} of {what} "
+                                            f"differ, first at 0x{differ[0]:08X}")
+
     def allow_mismatch(self, mcu: str | Mcu) -> None:
-        """Let writes through to an MCU whose ELF does not match, until the next check."""
+        """Let reads and writes through to an MCU whose ELF does not match, until the next check."""
         self.mcu(mcu).allow_mismatch = True
 
     def send_break(self, ms: float = 250) -> None:
@@ -381,18 +405,29 @@ class Target:
     def read(self, mcu: str | Mcu, addr: int, size: int) -> bytes:
         m = self.mcu(mcu)
         self._check(m, addr, size, write=False)
+        self._require_image(m)
+        return self.session.read(m.id, addr, size)
+
+    def _read_unchecked(self, m: Mcu, addr: int, size: int) -> bytes:
+        """A read for the identity check itself, which must work while the image does not match."""
+        self._check(m, addr, size, write=False)
         return self.session.read(m.id, addr, size)
 
     def write(self, mcu: str | Mcu, addr: int, data: bytes) -> None:
         """Write raw bytes and confirm them by reading them back."""
         m = self.mcu(mcu)
         self._check(m, addr, len(data), write=True)
-        if m.identity_stale and self.session.is_up:
+        self._require_image(m)
+        self.session.write(m.id, addr, data, m.byte_order)
+
+    def _require_image(self, m: Mcu) -> None:
+        """Refuse reads and writes to an MCU whose ELF does not match its firmware (SYM-8),
+        checking again first when the link or the MCU came back since the last check."""
+        if m.identity_stale and self.session.is_up and not self.is_silent(m):
             self.check_identity(m)
         if m.identity is not None and m.identity.status == "mismatch" and not m.allow_mismatch:
-            raise WriteRefused(f"MCU {m.name}: writes are refused because its ELF does not match the firmware "
-                               f"({m.identity.detail}); load the right ELF, or allow writes anyway")
-        self.session.write(m.id, addr, data, m.byte_order)
+            raise ImageMismatch(f"MCU {m.name}: reads and writes are refused because its ELF does not match "
+                                f"the firmware ({m.identity.detail}); load the right ELF, or allow access anyway")
 
     def _check(self, m: Mcu, addr: int, size: int, write: bool) -> None:
         try:

@@ -758,11 +758,12 @@ def test_elf_identity(qtbot, win, tmp_path, monkeypatch):
     connect(qtbot, win)
     qtbot.waitUntil(lambda: "firmware_name matches" in win.console.output.toPlainText(), timeout=3000)
     assert not win.allow_action.isEnabled()
-    assert "main: ELF matches the firmware; motorctl: ELF not checked" in win.message.text()
-    assert "MCU motorctl: no identity variable or build ID" in win.console.output.toPlainText()
+    assert "main: ELF matches the firmware; motorctl: ELF matches the firmware" in win.message.text()
+    assert "MCU motorctl: 2 flash blocks (88 bytes) match motorctl.elf" in win.console.output.toPlainText()
+    assert win.bar.image.text() == "Image \u2713 verified" and "motorctl: match" in win.bar.image.toolTip()
     win.device.target.mcus["main"].identity_stale = True   # the link came back: checked again by itself
-    qtbot.waitUntil(lambda: win.console.output.toPlainText().count("firmware_name matches") == 2, timeout=3000)
-    assert win.device.target.stale_identities() == []
+    qtbot.waitUntil(lambda: win.device.target.stale_identities() == [], timeout=3000)   # by the GUI or a poll
+    qtbot.waitUntil(lambda: win.bar.image.text() == "Image \u2713 verified", timeout=3000)
     elf = tmp_path / "main.elf"
     elf.write_bytes(win.ws.config.mcus[0].elf.read_bytes().replace(b"rdt-main\0", b"rdt-mXin\0"))
     win.ws.config.mcus[0].elf = elf
@@ -772,12 +773,15 @@ def test_elf_identity(qtbot, win, tmp_path, monkeypatch):
     connect(qtbot, win)
     qtbot.waitUntil(lambda: win.allow_action.isEnabled(), timeout=3000)
     assert "does not match the firmware on main" in win.message.text()
+    qtbot.waitUntil(lambda: win.bar.image.text() == "Image \u2717 mismatch", timeout=3000)
     monkeypatch.setattr(QMessageBox, "question", lambda *a, **k: QMessageBox.Yes)
     win.watch_tree.write("main:motor.target", "1500")
     qtbot.waitUntil(lambda: "does not match" in win.message.text(), timeout=3000)
     win.allow_action.trigger()
     qtbot.waitUntil(lambda: not win.allow_action.isEnabled(), timeout=3000)
-    assert "Writes allowed to main" in win.message.text()
+    assert "Reads and writes allowed to main" in win.message.text()
+    win.disconnect()
+    qtbot.waitUntil(lambda: not win.bar._image.isVisible(), timeout=3000)
 
 
 def test_commands_import_and_export_buttons(qtbot, win, tmp_path, monkeypatch):

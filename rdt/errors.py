@@ -19,6 +19,11 @@ class WriteRefused(RdtError):
     """The workspace's write safety refused a write: read-only, out of limits, or not confirmed."""
 
 
+class ImageMismatch(WriteRefused):
+    """The MCU's ELF does not match the firmware it runs (SYM-8): its reads and writes are refused
+    until the right ELF is loaded or the user allows access anyway."""
+
+
 class LinkError(RdtError):
     """The transport could not be opened, or it broke while in use."""
 
