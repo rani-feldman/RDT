@@ -389,6 +389,26 @@ def identity_summary(results) -> str:
     return "; ".join(f"{r.mcu}: {IDENTITY_WORDS[r.status]}" for r in results)
 
 
+def blank_title_icon(hwnd: int) -> None:
+    """Windows only: make the small icon in the title bar transparent, so only the menu row shows
+    the app icon (GUI-18). The taskbar and Alt-Tab keep the normal icon (the big one)."""
+    try:
+        import ctypes
+        from ctypes import wintypes
+        user32 = ctypes.windll.user32
+        user32.CreateIcon.restype = wintypes.HICON
+        user32.CreateIcon.argtypes = [wintypes.HINSTANCE, ctypes.c_int, ctypes.c_int, ctypes.c_ubyte,
+                                      ctypes.c_ubyte, ctypes.c_char_p, ctypes.c_char_p]
+        user32.SendMessageW.argtypes = [wintypes.HWND, wintypes.UINT, wintypes.WPARAM, wintypes.LPARAM]
+        and_bits = b"\xff" * 32            # 16 x 16, 1 bit per pixel: all 1 = transparent
+        xor_bits = b"\x00" * 32
+        icon = user32.CreateIcon(None, 16, 16, 1, 1, and_bits, xor_bits)
+        if icon:
+            user32.SendMessageW(hwnd, 0x0080, 0, icon)      # WM_SETICON, ICON_SMALL
+    except Exception:
+        pass                                 # cosmetic only
+
+
 class MainWindow(QMainWindow):
     def __init__(self, ws: Workspace | None = None):
         super().__init__()
@@ -861,6 +881,12 @@ class MainWindow(QMainWindow):
             return False
         self.status(f"Exported the interface settings to {Path(path).name}")
         return True
+
+    def showEvent(self, event) -> None:
+        super().showEvent(event)
+        if sys.platform == "win32" and not getattr(self, "_title_icon_hidden", False):
+            self._title_icon_hidden = True
+            blank_title_icon(int(self.winId()))
 
     def closeEvent(self, event) -> None:
         if not self._maybe_save():
