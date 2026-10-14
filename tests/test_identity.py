@@ -7,9 +7,9 @@ from pathlib import Path
 
 import pytest
 
-from rdt import McuConfig, WriteRefused
+from rdt import ImageMismatch, McuConfig, WriteRefused
 from rdt.cli import main
-from rdt.memmap import build_id_note, elf_bytes
+from rdt.memmap import build_id_note, elf_bytes, flash_samples
 from sim import Simulator, TransportConfig, load_config
 
 from host_helpers import FIRMWARE, Relay, make_target
@@ -59,7 +59,8 @@ def test_build_id_note_of_a_host_program():
 
 def test_matching_elf(sim):
     with make_target("tcp", sim.tcp_address, mcus=mcus()) as t:
-        assert [(m.name, m.identity.status) for m in t.mcus.values()] == [("main", "match"), ("motorctl", "unchecked")]
+        assert [(m.name, m.identity.status) for m in t.mcus.values()] == [("main", "match"), ("motorctl", "match")]
+        assert "2 flash blocks (88 bytes) match motorctl.elf" in str(t.mcus["motorctl"].identity)
         assert "firmware_name matches main.elf" in str(t.mcus["main"].identity)
         t.write_value("main:gains[0]", 5)   # writes go through
 
@@ -73,9 +74,11 @@ def test_mismatch_refuses_writes_until_allowed(sim, tmp_path):
             t.write_value("main:gains[0]", 5)
         with pytest.raises(WriteRefused):
             t.write("main", 0x20000000, b"\0")
-        assert t.read_value("main:gains[0]") == 10       # reads still work
+        with pytest.raises(ImageMismatch, match="reads and writes are refused"):
+            t.read_value("main:gains[0]")                # reads are refused too
         t.write_value("@motorctl:0x20000084:u32", 7)    # the other MCU is not blocked
         t.allow_mismatch("main")
+        assert t.read_value("main:gains[0]") == 10
         t.write_value("main:gains[0]", 5)
         t.reconnect()                                    # checked again, and blocked again
         assert t.mcus["main"].identity.status == "mismatch" and not t.mcus["main"].allow_mismatch
@@ -121,12 +124,32 @@ def test_checked_again_after_the_link_comes_back(sim):
             assert t.stale_identities() == []                                 # nothing to check while down
             relay.heal()
             assert t.session.wait_until_up(3)
-            assert t.stale_identities() == ["main"]
+            assert t.stale_identities() == ["main", "motorctl"]
             with pytest.raises(WriteRefused, match="does not match"):
                 t.write_value("main:gains[0]", 5)
-            assert t.stale_identities() == [] and "device 'rdt-new'" in t.mcus["main"].identity.detail
+            assert t.stale_identities() == ["motorctl"] and "device 'rdt-new'" in t.mcus["main"].identity.detail
     finally:
         relay.close()
+
+
+def test_flash_samples_without_an_identity(sim, tmp_path):
+    """No identity variable or build ID: blocks of the read-only sections are compared (SYM-8)."""
+    samples = flash_samples(FIRMWARE / "main.elf")
+    assert [(hex(a), len(b)) for a, b in samples] == [("0x8000000", 80), ("0x8000050", 16), ("0x8000060", 16)]
+    data = bytearray((FIRMWARE / "main.elf").read_bytes())
+    at = data.index(samples[0][1][:16]) + 8                 # a byte of .text in the file
+    data[at] ^= 0xFF
+    elf = tmp_path / "main.elf"
+    elf.write_bytes(bytes(data))
+    with make_target("tcp", sim.tcp_address, mcus=mcus(elf, identity=None)) as t:
+        ident = t.mcus["main"].identity
+        assert ident.status == "mismatch"
+        assert "1 of 3 flash blocks (112 bytes) differ, first at 0x08000008" in ident.detail
+        with pytest.raises(ImageMismatch):
+            t.read("main", 0x20000000, 4)
+    big = flash_samples("/bin/ls")
+    if big:                                                    # a large image: about 4 KB, in words
+        assert 2000 < sum(len(b) for _, b in big) < 8000 and all(a % 4 == 0 and len(b) % 4 == 0 for a, b in big)
 
 
 def test_identity_problems_never_block(sim):

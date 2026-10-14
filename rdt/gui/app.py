@@ -92,6 +92,9 @@ class ConnectionBar(QToolBar):
         self.connect_button.clicked.connect(main.toggle_connection)
         self.state = QLabel()
         self.state.setFont(mono())
+        self.image = QLabel()
+        self.image.setFont(mono())
+        self.image.setVisible(False)
         self.poll = QSpinBox()
         self.poll.setRange(0, 3_600_000)
         self.poll.setSingleStep(100)
@@ -118,6 +121,8 @@ class ConnectionBar(QToolBar):
         self.addWidget(self.profile)
         self.addWidget(self.state)
         self.addWidget(self.connect_button)
+        self._image = self.addWidget(self.image)
+        self._image.setVisible(False)
         self.addSeparator()
         self.addWidget(self.polling)
         self.addWidget(self.poll)
@@ -219,8 +224,28 @@ def plug_icon(color: str) -> QIcon:
     return QIcon(pm)
 
 
+IMAGE_LOOKS = {   # the toolbar's image box (SYM-8): text and STATE_COLORS key, worst status first
+    "mismatch": ("Image \u2717 mismatch", "down"),
+    "checking": ("Image: checking", "busy"),
+    "unread": ("Image ? not read", "busy"),
+    "match": ("Image \u2713 verified", "up"),
+    "unchecked": ("Image not checked", "closed"),
+}
+
+
+def image_state(results, checking: bool) -> str:
+    """The image box's state for the MCUs' identity results: the worst of them."""
+    statuses = {r.status for r in results}
+    if checking:
+        statuses.add("checking")
+    for key in IMAGE_LOOKS:
+        if key in statuses:
+            return key
+    return "unchecked"
+
+
 IDENTITY_WORDS = {"match": "ELF matches the firmware", "mismatch": "ELF does NOT match the firmware",
-                  "unchecked": "ELF not checked (no identity variable or build ID)",
+                  "unchecked": "ELF not checked (nothing to compare)",
                   "unread": "ELF identity could not be read"}
 
 
@@ -243,6 +268,7 @@ class MainWindow(QMainWindow):
         self.device.closed.connect(self._show_state)
         self._connecting = False
         self._last_state: str | None = None
+        self._shown_identities: set[int] = set()
         self.log: CsvLog | None = None
         self._log_link_up = True
 
@@ -319,8 +345,6 @@ class MainWindow(QMainWindow):
         action(m, "&MCUs and ELF files...", self.edit_mcus)
         m.addSeparator()
         action(m, "Check ELF &identity", lambda: self.check_identity())
-        self.allow_action = action(m, "Allow writes despite ELF &mismatch", self.allow_mismatch)
-        self.allow_action.setEnabled(False)
         m = self.menuBar().addMenu("&Watch")
         action(m, "&Add expression...", self.add_expression, "Ctrl+E")
         action(m, "&Poll now", self.read_all, "F6")
@@ -582,7 +606,6 @@ class MainWindow(QMainWindow):
     def disconnect(self) -> None:
         self._connecting = False
         self.device.close(lambda _: self.status("Disconnected"))
-        self.allow_action.setEnabled(False)
         self._show_state()
 
     def reconnect(self) -> None:
@@ -601,18 +624,15 @@ class MainWindow(QMainWindow):
     # --- ELF identity (SYM-8) ------------------------------------------------------------------
 
     def show_identity(self, results) -> None:
-        """Note each MCU's identity check in the console; a mismatch also goes to the status bar
-        and enables Target > Allow writes despite ELF mismatch."""
+        """Note each MCU's identity check in the console; a mismatch also goes to the status bar.
+        There is no way around a mismatch in the GUI: load the ELF that matches the firmware."""
+        self._shown_identities = {id(r) for r in results}
         for r in results:
             self.console.log(str(r), "error" if r.status == "mismatch" else "note")
         bad = [r for r in results if r.status == "mismatch"]
         if bad:
             self.status("ELF does not match the firmware on " + ", ".join(r.mcu for r in bad) +
-                        "; writes to it are refused (Target > Allow writes despite ELF mismatch)", error=True)
-        t = self.device.target
-        self.allow_action.setEnabled(t is not None and any(
-            m.identity is not None and m.identity.status == "mismatch" and not m.allow_mismatch
-            for m in t.mcus.values()))
+                        "; reads and writes to it are refused until its ELF matches", error=True)
 
     def check_identity(self, mcus: list[str] | None = None) -> None:
         """Compare the ELFs with the firmware again, such as after flashing. Also runs by itself
@@ -628,21 +648,6 @@ class MainWindow(QMainWindow):
 
         self.device.submit(lambda t: [r for name in (mcus or list(t.mcus)) for r in t.check_identity(name)],
                            done, lambda e: self.status(describe_error(e), True), key="identity")
-
-    def allow_mismatch(self) -> None:
-        def allow(t):
-            names = [m.name for m in t.mcus.values() if m.identity is not None and m.identity.status == "mismatch"]
-            for n in names:
-                t.allow_mismatch(n)
-            return names
-
-        def done(names):
-            self.allow_action.setEnabled(False)
-            if names:
-                self.status(f"Writes allowed to {', '.join(names)} although its ELF does not match")
-                self.console.log(f"writes allowed despite ELF mismatch: {', '.join(names)}", "note")
-
-        self.device.submit(allow, done)
 
     def _open_failed(self, e: Exception) -> None:
         self._connecting = False
@@ -680,10 +685,35 @@ class MainWindow(QMainWindow):
             stale = t.stale_identities()
             if stale:
                 self.check_identity(stale)
+        self._show_image(up)
         self.memory.setEnabled(up)
         self.console.set_link_up(up)
         for w in (self.bar.transport, self.bar.host, self.bar.port, self.bar.com, self.bar.baud):
             w.setEnabled(self.device.target is None and not self._connecting)
+
+    def _show_image(self, up: bool) -> None:
+        """The toolbar's image box: whether the firmware on the device was checked against the
+        ELF, and the result (SYM-8). Hidden while not connected."""
+        t = self.device.target
+        shown = up and t is not None
+        self.bar._image.setVisible(shown)
+        if not shown:
+            return
+        results = [m.identity for m in t.mcus.values() if m.identity is not None]
+        checking = self.device.busy("identity") or bool(t.stale_identities())
+        key = image_state(results, checking)
+        if any(r.status == "mismatch" and id(r) not in self._shown_identities for r in results):
+            self.show_identity(results)   # found by a check run before a poll, not by this window
+        text, look = IMAGE_LOOKS[key]
+        fg, border, bg = STATE_COLORS[look]
+        self.bar.image.setText(text)
+        self.bar.image.setStyleSheet(f"color: {fg}; background: {bg}; border: 1px solid {border}; "
+                                     "border-radius: 3px; padding: 2px 8px")
+        tip = "\n".join(f"{m.name}: {m.identity.status} \u2014 {m.identity.detail}" if m.identity else
+                        f"{m.name}: not checked yet" for m in t.mcus.values())
+        if key == "mismatch":
+            tip += "\nReads and writes to it are refused until its ELF matches the firmware"
+        self.bar.image.setToolTip(tip)
 
     def _check_elfs(self) -> None:
         if self.device.target is None or self.device.busy("elfs"):
