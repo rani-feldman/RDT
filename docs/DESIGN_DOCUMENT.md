@@ -75,7 +75,7 @@ Each requirement links to its design section.
 | SCPI-8 | A manual SCPI console sends any command and shows the raw reply (2026-10-05) | Done | [D-SCPI-8](#d-scpi-8-scpi-console) |
 | SCPI-9 | The profile can be edited in the GUI, with a preview of the commands and a test read | Done | [D-SCPI-9](#d-scpi-9-profile-editor) |
 | SCPI-10 | Every SCPI read and write covers whole 4-byte aligned words: a 2-byte variable is read as its 4-byte word and the result is trimmed, and a smaller or unaligned write is done as read-modify-write (2026-10-12) | Done | [D-SCPI-10](#d-scpi-10-aligned-words) |
-| SCPI-11 | A read reply is one bare hex value per 4-byte word, comma-separated, lowest address first, the way the firmware prints a `uint32_t`: `30303030,2F30302F,43B40000`. This is the only reply format (2026-10-13); the reply holds nothing else, so there is no reply regex (2026-10-14) | In review (PR #56) | [D-SCPI-11](#d-scpi-11-word-replies) |
+| SCPI-11 | A read reply is one bare hex value per 4-byte word, comma-separated, lowest address first, the way the firmware prints a `uint32_t`: `30303030,2F30302F,43B40000`. This is the only reply format (2026-10-13); the reply holds nothing else, so there is no reply regex (2026-10-14) | Done | [D-SCPI-11](#d-scpi-11-word-replies) |
 
 ### 2.4 Multiple MCUs
 
@@ -101,7 +101,7 @@ Each requirement links to its design section.
 | SYM-5 | An expression through a pointer follows the pointer when the firmware moves it | Done | [D-SYM-5](#d-sym-5-pointers) |
 | SYM-6 | Loading a large ELF is fast after the first time | Done | [D-SYM-6](#d-sym-6-symbol-cache) |
 | SYM-7 | When an ELF is rebuilt, RDT reloads it and finds every watched item again by name (2026-10-05) | Done | [D-SYM-7](#d-sym-7-elf-rebuild-detection) |
-| SYM-8 | Check on connect that each ELF matches the firmware running on its MCU (2026-10-12) | Done | [D-SYM-8](#d-sym-8-build-identity-check) |
+| SYM-8 | Check on connect that each ELF matches the firmware running on its MCU, and check again when the link or the MCU comes back; show the result after Connect (2026-10-12, updated 2026-10-14) | Done | [D-SYM-8](#d-sym-8-build-identity-check) |
 
 ### 2.6 Memory access
 
@@ -608,10 +608,11 @@ Reading DWARF takes a while for a large firmware, so the symbol table is cached 
 RDT compares a few bytes that differ between firmware builds, read from the device and from the ELF file. `Target.check_identity()` in `rdt/target.py` does it; helpers `elf_bytes` and `build_id_note` are in `rdt/memmap.py`.
 
 - **What is compared:** each MCU's `identity` setting names a constant variable, such as a version string or a build-ID array (`identity = "firmware_name"` in `[[mcu]]`). Its bytes are taken from the ELF file's section data at the variable's address and read from the device. Without the setting, RDT uses the GNU build ID (`.note.gnu.build-id`) when the linker placed it in the firmware's memory (an allocated section). Without either, the MCU is not checked. This replaces the earlier plan of a CRC over an address range: a constant variable needs no new firmware command (FW-10).
-- **When:** on connect, on `.reconnect` (the firmware may have been flashed), after an ELF is rebuilt and reloaded (D-SYM-7), and from Target > Check ELF identity.
+- **When:** on connect, on `.reconnect` (the firmware may have been flashed), after an ELF is rebuilt and reloaded (D-SYM-7), and from Target > Check ELF identity. Also when the link comes back after a drop, or an MCU answers again after being silent, since the firmware may have been flashed meanwhile (a reset drops a USB COM port): `Target` marks that MCU's identity stale, the GUI checks it again as soon as the link is up, and `Target.write` checks a stale MCU before writing. MCUs with nothing to compare are not marked.
 - **Results:** `match`, `mismatch`, `unchecked` (nothing to compare, an unknown variable, or a variable with no value in the file, such as one in `.bss`) and `unread` (the MCU did not answer). Only `mismatch` has an effect.
 - **On a mismatch:** every write to that MCU, typed or raw, is refused with `WriteRefused` naming both values (`device 'rdt-main', ELF 'rdt-mXin'`). Reads still work. The user can allow writes anyway: Target > Allow writes despite ELF mismatch in the GUI, `--allow-mismatch` on the CLI, `Target.allow_mismatch(mcu)` from Python. The permission lasts until the next check.
-- **Shown:** in the GUI, each result is a console line and a mismatch also goes to the status bar in red. On the CLI, a mismatch is a warning on stderr, `rdt info` prints each MCU's result, and `rdt watch` prints a `#` line when a rebuilt ELF does not match.
+- **Shown:** after Connect, the GUI status bar says `ELF matches the firmware`, `ELF does NOT match the firmware` (in red) or `ELF not checked (no identity variable or build ID)`, one per MCU when there are several (`identity_summary` in `rdt/gui/app.py`). The console logs every result, unchecked ones too. A build-ID mismatch shows the two hashes as `readelf -n` prints them, skipping the 16-byte note header that every build shares. On the CLI, a mismatch is a warning on stderr, `rdt info` prints each MCU's result, and `rdt watch` prints a `#` line when a rebuilt ELF does not match.
+- **Recommended setup:** link with `-Wl,--build-id` and keep `.note.gnu.build-id` in flash after `.isr_vector`, so every build is checked with no identity variable (example `sim/examples/firmware/link_build_id.ld`; steps in `docs/use-your-own-elf.md`).
 - **Editing:** the GUI's MCU dialog has an Identity variable column. The example workspace and target file check `firmware_name` on MCU `main`.
 
 ### 4.6 Memory access
@@ -1278,6 +1279,7 @@ The application is built against the simulator. As soon as the firmware has the 
 | 2026-10-14 | The memory view's ASCII column follows the chosen display format, each cell's bytes shown in the order of the value (GUI-8), at rani's request |
 | 2026-10-14 | RDT sends no query of its own: the error query after a timeout, `rdt errors` and `.err` are removed (RM-7), and so is the `*IDN?` probe on connect (RM-8). Connected means the port or socket opened, and only a broken port or socket takes the link down (LNK-7). The GUI shows the link in a status box such as `Connected · COM3` (GUI-9). At rani's request, replacing the 2026-10-11 error-query hint |
 | 2026-10-14 | The profile's `reply_regex` is removed, since a read reply is only comma-separated words (SCPI-11, RM-9), at rani's request |
+| 2026-10-14 | The ELF identity is checked again when the link or a silent MCU comes back, and the result shows in the status bar after Connect, with a recommended build-ID linker setup (SYM-8), at rani's request to check the ELF is not outdated |
 
 ## 9. Appendix: binary protocol (planned)
 
