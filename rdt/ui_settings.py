@@ -35,6 +35,7 @@ SETTINGS: dict[str, type] = {
     "memory/kind": str,
     "memory/type": str,
     "memory/decimal": bool,
+    "ui/theme": str,          # system, light or dark (GUI-14)
 }
 STATE: dict[str, type] = {
     "session/last_workspace": str,   # not a setting: never exported, kept on import

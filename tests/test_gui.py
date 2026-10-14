@@ -964,3 +964,16 @@ def test_link_down_when_the_device_stops_answering(qtbot, win, sim):
     win.read_all()
     qtbot.waitUntil(lambda: win.bar.connect_button.text() == "Connected · " + where, timeout=8000)
     qtbot.waitUntil(lambda: win.bar.image.text() == "Image ✓ verified", timeout=5000)
+
+
+def test_dark_theme_is_remembered(qtbot, win):
+    from PySide6.QtWidgets import QApplication
+    from rdt.gui.style import is_dark
+    system = QApplication.palette().base().color().name()
+    win.theme_actions["dark"].trigger()
+    assert is_dark() and win.ui.value("ui/theme") == "dark" and win.theme_actions["dark"].isChecked()
+    assert type(win).__name__ and win.chart.axis_text == "#c8ccd2"
+    win.set_theme("light")
+    assert not is_dark() and win.chart.axis_text == "#404040"
+    win.set_theme("system")
+    assert QApplication.palette().base().color().name() == system and win.ui.value("ui/theme") == "system"
