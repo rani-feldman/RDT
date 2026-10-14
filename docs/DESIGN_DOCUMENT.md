@@ -59,7 +59,7 @@ Each requirement links to its design section.
 | LNK-4 | More channels can be added later as plug-in transports, with nothing above the transport changing | Done | [D-LNK-4](#d-lnk-4-plug-in-transports) |
 | LNK-5 | On link loss RDT reconnects on its own; values grey out and writes are refused while the link is down (2026-10-05) | Done | [D-LNK-5](#d-lnk-5-auto-reconnect) |
 | LNK-6 | Other tools may use the firmware's SCPI port over LAN at the same time as RDT (2026-10-05) | Done | [D-LNK-6](#d-lnk-6-sharing-the-link-with-other-tools) |
-| LNK-7 | On connect and every reconnect, check that the device answers | Done | [D-LNK-7](#d-lnk-7-probe-on-connect) |
+| LNK-7 | Connected means the COM port or socket opened; RDT sends nothing to the device on connect or reconnect (no `*IDN?`), and the link goes down only when the port or socket breaks (2026-10-14) | Done | [D-LNK-7](#d-lnk-7-connect-without-a-probe) |
 | LNK-8 | The GUI lists each COM port with its description, such as `COM3 - GAC serial port (COM3)` (2026-10-13) | Done | [D-LNK-1](#d-lnk-1-com-port) |
 
 ### 2.3 SCPI commands
@@ -70,7 +70,7 @@ Each requirement links to its design section.
 | SCPI-2 | Memory is read with one command, `read mcu,startAddress,size`; one reply carries up to a configurable maximum response size (2026-10-05) | Done | [D-SCPI-2](#d-scpi-2-block-read) |
 | SCPI-3 | Memory is written one value per command, `write mcu,address,value,size`, with the value as a raw hex integer (2026-10-05) | Done | [D-SCPI-3](#d-scpi-3-single-value-write) |
 | SCPI-4 | Addresses and values in commands are bare upper-case hex with no prefix: address 0x11AABBCCDD is sent as `11AABBCCDD` (2026-10-12) | Done | [D-SCPI-4](#d-scpi-4-bare-hex) |
-| SCPI-5 | A failed command sends no reply and its error goes only to the error queue; RDT copes with that (2026-10-11) | Done | [D-SCPI-5](#d-scpi-5-failed-commands-send-no-reply) |
+| SCPI-5 | A failed command sends no reply and its error goes only to the error queue; RDT treats it as a timeout and never reads the error queue on its own (2026-10-11, error query removed 2026-10-14) | Done | [D-SCPI-5](#d-scpi-5-failed-commands-send-no-reply) |
 | SCPI-6 | Every write is confirmed by reading the value back | Done | [D-SCPI-6](#d-scpi-6-write-confirmation) |
 | SCPI-8 | A manual SCPI console sends any command and shows the raw reply (2026-10-05) | Done | [D-SCPI-8](#d-scpi-8-scpi-console) |
 | SCPI-9 | The profile can be edited in the GUI, with a preview of the commands and a test read | Done | [D-SCPI-9](#d-scpi-9-profile-editor) |
@@ -165,6 +165,7 @@ Each requirement links to its design section.
 | GUI-6 | The GUI never blocks on the device | Done | [D-GUI-6](#d-gui-6-device-worker-thread) |
 | GUI-7 | The memory view offers display formats from a right-click menu: a Decimal toggle; Unsigned and Signed submenus with Char, Int, Short and Long; Ascii, Float and Double. The current choice has a check mark, and hex bytes (unsigned Char in hex) stay the default (2026-10-14) | Done | [D-GUI-7](#d-gui-7-memory-display-formats) |
 | GUI-8 | The memory view's ASCII column follows the chosen display format: each cell's bytes show as one group in the order of the value (2026-10-14) | Done | [D-GUI-7](#d-gui-7-memory-display-formats) |
+| GUI-9 | A status box before the Connect button shows the link state and the link, such as a green `Connected · COM3` or a grey `Closed · COM3` (2026-10-14) | Done | [D-GUI-2](#d-gui-2-connection-bar) |
 
 ### 2.12 Live chart
 
@@ -236,6 +237,8 @@ Console features taken from ComPort-Zone (an open serial terminal); rani approve
 | RM-4 | Binary protocol, a faster alternative to SCPI | Planned | [Appendix](#9-appendix-binary-protocol-planned) |
 | RM-5 | Not taken from ComPort-Zone (2026-10-12): command files (scripts), running a file of commands, sending several pasted lines and several console tabs, all declined by rani; its control panel (covered by watch tabs) was not proposed | Removed | none |
 | RM-6 | Size query: RDT asking the firmware for its largest read (`MEMory:MAX?`) on connect. Built, then removed by rani on 2026-10-12; the maximum response size is set only in the SCPI configuration | Removed | [D-SCPI-2](#d-scpi-2-block-read) |
+| RM-7 | Error query: RDT reading `SYSTem:ERRor?` once after a timeout as a hint, the profile key `error_query`, `rdt errors` and the console's `.err`. Built 2026-10-11, removed by rani on 2026-10-14; `SYST:ERR?` can still be typed by hand | Removed | [D-SCPI-5](#d-scpi-5-failed-commands-send-no-reply) |
+| RM-8 | Probe on connect: `*IDN?` (profile key `probe`) sent on connect and every reconnect, and the device identity in the GUI and `rdt info`. Removed by rani on 2026-10-14 | Removed | [D-LNK-7](#d-lnk-7-connect-without-a-probe) |
 
 Requirements on the firmware itself (FW-1 to FW-10) are in [section 5](#5-firmware-specification).
 
@@ -350,10 +353,10 @@ Every transport subclasses `Transport` in `rdt/transport/base.py`: `open()`, `cl
 
 #### D-LNK-5 Auto-reconnect
 
-The session (`rdt/session.py`) has three link states: up, down and closed. The link goes down when the connection breaks, or when a command times out and the error query gets no reply either.
+The session (`rdt/session.py`) has three link states: up, down and closed. The link goes down only when the COM port or socket breaks. A device that stops answering gives read timeouts, not link down, over UDP too (D-LNK-7).
 
 - **While the link is down:** every access fails at once with `LinkDown`, so writes are refused. The GUI shows `link down` in grey with the last values kept, and the CSV log and the chart mark the gap.
-- **Reconnecting:** a background thread reconnects with growing delays of 0.25, 0.5, 1, 2, 4 and then 5 s, and sends the probe each time (D-LNK-7).
+- **Reconnecting:** a background thread reconnects with growing delays of 0.25, 0.5, 1, 2, 4 and then 5 s, until the port or socket opens again (D-LNK-7).
 - **After reconnecting:** polling resumes at the next due time, and the CSV log records `link up`.
 
 `watch`, `console` and the GUI reconnect on their own. The other CLI commands are one-shot and fail at once.
@@ -365,13 +368,16 @@ Other tools may use the firmware's SCPI port over LAN while RDT is connected.
 - **Own connection:** each tool has its own TCP connection, and the firmware answers on the connection that asked (FW-6). Over UDP it replies to the sender's address and port.
 - **Stray replies:** before each command the session drops anything still waiting in the input, so a late reply to an earlier command is never taken for the current one. Every read reply is checked against the requested size; one that doesn't fit is discarded and the read is sent again.
 - **Busy device:** a read that times out is sent again with a growing delay, starting at 50 ms and doubling, up to `retries` extra attempts (2 by default).
-- **Shared error queue:** another tool's errors can appear in RDT's error query, and another tool can read RDT's error first. RDT therefore never depends on the error queue: errors are only a hint (D-SCPI-5), and writes are confirmed by read-back (D-SCPI-6).
+- **Shared error queue:** the firmware's error queue is shared by every tool on the link, so RDT never reads it on its own (D-SCPI-5). Writes are confirmed by read-back instead (D-SCPI-6).
 
 A simulator test runs a second SCPI client against the device while RDT polls.
 
-#### D-LNK-7 Probe on connect
+#### D-LNK-7 Connect without a probe
 
-The profile's `probe` (default `*IDN?`) is sent on connect and on every reconnect. A device that doesn't answer it fails the connect, or keeps the link down while reconnecting. An empty `probe` skips the check. `rdt info` shows the reply.
+rani set this on 2026-10-14: RDT sends nothing to the device to check it. Connect and every reconnect only open the COM port or socket, and the link is up once it is open. Over UDP that means the socket opened, since nothing is received until a command is sent.
+
+- **Link down:** only when the port or socket breaks (D-LNK-5). A device that stops answering gives read timeouts (`CommandTimeout`), and its values show the error, but the link stays up.
+- **Removed:** the profile's `probe` key (default `*IDN?`), `Target.idn`, the device identity after "Connected" in the GUI, and the Device line of `rdt info` (RM-8). A profile that still has `probe` loads with it ignored.
 
 ### 4.3 SCPI commands
 
@@ -389,14 +395,12 @@ align        = 4               # every read and write covers whole aligned words
 reply_regex  = ""              # optional; group "data" (or group 1) holds the reply words
 byte_order   = "little"        # only for an MCU without an ELF
 max_response = 1024            # bytes of data one read reply can carry
-error_query  = "SYSTem:ERRor?"
-probe        = "*IDN?"         # sent on connect and reconnect
 terminator   = "\n"
 timeout_ms   = 500
 retries      = 2               # extra attempts after a read times out
 ```
 
-Placeholders: `{mcu}`, `{addr}`, `{len}`, `{value}` and `{size}`. `{addr}` and `{value}` are always bare upper-case hex (D-SCPI-4); `{mcu}`, `{len}` and `{size}` are decimal. The profile checks itself when loaded: an unknown placeholder, a format spec on `{addr}` or `{value}` that changes the base, a bad `max_write` or `align` or a non-positive timeout is a `ConfigError`. The GUI's profile editor also refuses a template that can't work, such as a read without `{len}`. A profile may also list `[[ranges]]` for every MCU, or for one MCU with `mcu = "name"` (D-MEM-2).
+Placeholders: `{mcu}`, `{addr}`, `{len}`, `{value}` and `{size}`. `{addr}` and `{value}` are always bare upper-case hex (D-SCPI-4); `{mcu}`, `{len}` and `{size}` are decimal. The profile checks itself when loaded: an unknown placeholder, a format spec on `{addr}` or `{value}` that changes the base, a bad `max_write` or `align` or a non-positive timeout is a `ConfigError`. The GUI's profile editor also refuses a template that can't work, such as a read without `{len}`. A profile may also list `[[ranges]]` for every MCU, or for one MCU with `mcu = "name"` (D-MEM-2). The retired keys `error_query` and `probe` (RM-7, RM-8) are ignored when an older profile still has them.
 
 #### D-SCPI-2 Block read
 
@@ -418,12 +422,13 @@ rani set this on 2026-10-12: addresses and values in commands are hex with no pr
 
 The firmware sends nothing back when a command fails; the error goes only to the error queue. So in RDT a failure looks like a timeout:
 
-1. After a read times out, the session sends the profile's `error_query` once.
-2. If the queue has an error, it is attached to the timeout as a hint (`CommandTimeout.hint`) and shown to the user. The queue is shared with other tools (D-LNK-6), so the hint is never trusted for anything else.
-3. If the error query gets no reply either, the device is not answering: the link is marked down and RDT reconnects (D-LNK-5).
-4. Otherwise the read is sent again with a growing delay, up to `retries` times.
+1. A read that times out is sent again with a growing delay, up to `retries` times, and then fails with `CommandTimeout`.
+2. RDT never sends `SYSTem:ERRor?` on its own: no hint after a timeout or a failed write (rani, 2026-10-14). The queue is shared with other tools (D-LNK-6), so its entries could not be trusted anyway.
+3. A timeout never takes the link down (D-LNK-7).
 
-A `-240` error in the queue marks a secondary MCU silent (D-MCU-6). In the console, a query with no reply shows `(no reply; error queue: ...)`.
+A `-240` error reply marks a secondary MCU silent (D-MCU-6). In the console, a query with no reply shows `(no reply)`; to see why, type `SYST:ERR?` by hand.
+
+The error query that read the queue once after a timeout, its `error_query` profile key, `rdt errors` and the console's `.err` were removed on 2026-10-14 (RM-7).
 
 #### D-SCPI-6 Write confirmation
 
@@ -432,7 +437,7 @@ A write gets no reply whether it succeeds or fails, so `Session.write` reads the
 #### D-SCPI-8 SCPI console
 
 - **GUI:** a console panel (`rdt/gui/panels.py`) sends any typed command and shows the raw reply, with Up and Down for history. A command whose header ends in `?` waits for a reply. There is no error-queue button (removed 2026-10-12 at rani's request); typing `SYST:ERR?` reads one entry.
-- **CLI:** `rdt console` offers the same, plus `.read EXPR`, `.write EXPR VALUE`, `.err` and `.quit`. `rdt send COMMAND` sends one command, and `rdt errors` empties the error queue.
+- **CLI:** `rdt console` offers the same, plus `.read EXPR`, `.write EXPR VALUE` and `.quit`. `rdt send COMMAND` sends one command; `rdt send SYST:ERR?` reads one entry of the error queue.
 - **Logging:** `-vv` on the CLI logs every command and reply, so the commands the scheduler actually sends can be checked.
 - **More:** saved history, autocomplete, timestamps and colours, search, a session log and hex/text conversion are in [4.17 Console](#417-console).
 
@@ -525,7 +530,7 @@ The profile's `timeout_ms` applies to every MCU, and an MCU's own `timeout_ms` o
 
 When a secondary MCU stops answering, the main MCU sends no reply and puts `-240,"MCU not responding"` in the error queue (FW-5).
 
-- **Marking it silent:** the session marks an MCU silent when the error query after a timeout returns `-240`. Because another LAN client may read that error first, it also marks it silent after three timeouts in a row while MCU 0 still answers the error query.
+- **Marking it silent:** the session marks a secondary MCU silent on a `-240` error reply, or after three timeouts in a row. RDT does not read the error queue (D-SCPI-5).
 - **While silent:** its reads fail at once with `McuSilent` and its writes are refused, so the GUI greys out only that MCU's values. The other MCUs keep working.
 - **Recovery:** the silent MCU is tried again every 2 s, and the first answer clears the state.
 
@@ -822,7 +827,7 @@ The poll collects what every tab has due, not only the tab in front. Each expres
 
 - **Transport:** `tcp` or `udp` with an IP address and port, or `serial` with a COM port and baud rate.
 - **Profile:** a button that opens the profile editor and shows the profile's name.
-- **Connect / Disconnect** (F5), with a state light: green while the link is up, red while it is down and RDT is reconnecting, grey when not connected.
+- **Connect / Disconnect** (F5), with a status box before it (GUI-9) that shows `<state> · <link>`, the link being the COM port or IP:port: green `Connected · COM3` with a Disconnect button, grey `Closed · COM3` with a Connect button (blue border, plug icon), red `Link down` while RDT reconnects, and amber `Connecting`. Connected means the port or socket opened (D-LNK-7). The colours are `STATE_COLORS` in `rdt/gui/app.py`.
 - **Poll:** the global interval (D-POLL-1).
 - **Log CSV** (Ctrl+L): starts and stops the CSV log (D-CSV-1).
 
@@ -987,12 +992,12 @@ The GUI remembers the last workspace file it opened or saved, in `gui.ini` next 
 
 | Command | What it does |
 | --- | --- |
-| `info` | Device identity, max response size, each MCU's memory map |
+| `info` | Max response size, each MCU's memory map |
 | `symbols MCU [PATTERN]`, `ptype EXPR` | Variables and type layouts, no device needed |
 | `read [EXPR...] [--tab NAME]` | Read values; with no names, the workspace's items |
 | `write EXPR VALUE [-y]` | Write one value and confirm it, with the workspace's scaling and write safety |
 | `dump`, `poke` | Raw memory dump and write |
-| `send`, `errors`, `console` | SCPI by hand |
+| `send`, `console` | SCPI by hand |
 | `watch [EXPR...] [--tab NAME] [-i MS] [-n N] [--csv FILE]` | Poll and print one line per sample, optionally logging to CSV |
 | `init`, `list`, `add`, `remove`, `tab` | Create and edit the workspace, no device needed |
 
@@ -1029,7 +1034,7 @@ Every failure is an `rdt.RdtError` subclass (`rdt/errors.py`) with a message tha
 | `AccessRefused` | The address is outside known memory, or the write is to a read-only section |
 | `WriteRefused` | The workspace's write safety refused the write |
 | `SymbolError` | A name, member or index doesn't resolve |
-| `CommandTimeout` | No reply; carries `.hint` from the error query |
+| `CommandTimeout` | No reply after the retries |
 | `WriteNotConfirmed` | The read-back after a write doesn't match |
 | `McuSilent` | A secondary MCU is not responding |
 | `LinkDown` | The link is down |
@@ -1110,7 +1115,7 @@ A list of the device's commands, so nobody has to remember the exact SCPI spelli
 
 #### D-CON-9 Reconnect and info in the console
 
-`rdt console` takes `.reconnect`, which calls `Target.reconnect()` (close the session and connect again, with the probe), and `.info`, which prints the same as `rdt info`. The GUI has Connect and Disconnect already.
+`rdt console` takes `.reconnect`, which calls `Target.reconnect()` (close the session and open the port or socket again), and `.info`, which prints the same as `rdt info`. The GUI has Connect and Disconnect already.
 
 #### D-CON-10 Serial break
 
@@ -1271,6 +1276,7 @@ The application is built against the simulator. As soon as the firmware has the 
 | 2026-10-13 | Console: the list of matches opens while typing, and Tab or Enter takes the highlighted command (CON-15); COM ports are listed with their descriptions (LNK-8), at rani's request |
 | 2026-10-14 | The memory view gets right-click display formats: signed and unsigned Char, Short, Int and Long in hex or decimal, Ascii, Float and Double, with hex bytes as the default (GUI-7), at rani's request |
 | 2026-10-14 | The memory view's ASCII column follows the chosen display format, each cell's bytes shown in the order of the value (GUI-8), at rani's request |
+| 2026-10-14 | RDT sends no query of its own: the error query after a timeout, `rdt errors` and `.err` are removed (RM-7), and so is the `*IDN?` probe on connect (RM-8). Connected means the port or socket opened, and only a broken port or socket takes the link down (LNK-7). The GUI shows the link in a status box such as `Connected · COM3` (GUI-9). At rani's request, replacing the 2026-10-11 error-query hint |
 
 ## 9. Appendix: binary protocol (planned)
 
