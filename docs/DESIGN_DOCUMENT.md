@@ -69,7 +69,7 @@ Each requirement links to its design section.
 | SCPI-1 | No SCPI command is hard-coded; the user defines the read and write commands and the reply format in an SCPI profile (2026-10-05) | Done | [D-SCPI-1](#d-scpi-1-scpi-profile) |
 | SCPI-2 | Memory is read with one command, `read mcu,startAddress,size`; one reply carries up to a configurable maximum response size (2026-10-05) | Done | [D-SCPI-2](#d-scpi-2-block-read) |
 | SCPI-3 | Memory is written one value per command, `write mcu,address,value,size`, with the value as a raw hex integer (2026-10-05) | Done | [D-SCPI-3](#d-scpi-3-single-value-write) |
-| SCPI-4 | Addresses and values in commands are bare upper-case hex with no prefix: address 0x11AABBCCDD is sent as `11AABBCCDD` (2026-10-12). An address always has at least 8 digits, with leading zeros, so 0x08000000 is sent as `08000000` (2026-10-14) | In review (PR #64) | [D-SCPI-4](#d-scpi-4-bare-hex) |
+| SCPI-4 | Addresses and values in commands are bare upper-case hex with no prefix: address 0x11AABBCCDD is sent as `11AABBCCDD` (2026-10-12). An address always has at least 8 digits, with leading zeros, so 0x08000000 is sent as `08000000` (2026-10-14) | Done | [D-SCPI-4](#d-scpi-4-bare-hex) |
 | SCPI-5 | A failed command sends no reply and its error goes only to the error queue; RDT treats it as a timeout and never reads the error queue on its own (2026-10-11, error query removed 2026-10-14) | Done | [D-SCPI-5](#d-scpi-5-failed-commands-send-no-reply) |
 | SCPI-6 | Every write is confirmed by reading the value back | Done | [D-SCPI-6](#d-scpi-6-write-confirmation) |
 | SCPI-8 | A manual SCPI console sends any command and shows the raw reply (2026-10-05) | Done | [D-SCPI-8](#d-scpi-8-scpi-console) |
