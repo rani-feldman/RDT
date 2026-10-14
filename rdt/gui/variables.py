@@ -3,9 +3,9 @@
 from __future__ import annotations
 
 import time
+from dataclasses import dataclass, field
 
 import shiboken6
-from dataclasses import dataclass, field
 
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtGui import QAction, QBrush, QColor
@@ -851,9 +851,10 @@ class SymbolBrowser(QWidget):
 
     add_requested = Signal(str)
 
-    def __init__(self, main):
+    def __init__(self, main, mcu: str | None = None):
         super().__init__()
         self.main = main
+        self.fixed = mcu     # one MCU's variables only, as in its card (GUI-16)
         layout = QVBoxLayout(self)
         layout.setContentsMargins(4, 4, 4, 4)
         top = QHBoxLayout()
@@ -887,7 +888,11 @@ class SymbolBrowser(QWidget):
         self.mcu.blockSignals(True)
         self.mcu.clear()
         for m in ws.config.mcus:
-            self.mcu.addItem(m.name, m.elf)
+            if self.fixed is None or m.name == self.fixed:
+                self.mcu.addItem(m.name, m.elf)
+        self.mcu.setVisible(self.fixed is None)
+        if self.fixed is not None:
+            self.search.setPlaceholderText(f"Find in {self.fixed}, such as motor*")
         self.mcu.blockSignals(False)
         self.refresh()
 

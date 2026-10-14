@@ -30,11 +30,12 @@ from ..target import ConnectionConfig, McuConfig, TargetConfig
 from ..ui_settings import SETTINGS, UiSettings, workspace_dir
 from ..workspace import Workspace, default_target
 from .chart import ChartPanel
+from .cards import McuCards
 from .device import Device, describe_error
 from .dnd import DropTarget
 from .panels import CONSOLE_KEYS, Console, McuDialog, MemoryView, ProfileDialog, mono
 from .style import THEMES, apply_theme, is_dark
-from .variables import SymbolBrowser, WatchTabs, WatchTree
+from .variables import WatchTabs, WatchTree
 
 FILTER = "RDT workspace (*.rdtw);;Target file (*.toml);;All files (*)"
 WATCH_FILTER = "Watch list (*.watch.toml *.toml);;RDT workspace (*.rdtw);;All files (*)"
@@ -136,9 +137,6 @@ class ConnectionBar(QToolBar):
         self.connect_button = QPushButton("Disconnected")
         self.connect_button.setFont(mono())
         self.connect_button.clicked.connect(main.toggle_connection)
-        self.image = QLabel()
-        self.image.setFont(mono())
-        self.image.setVisible(False)
         self.poll = QSpinBox()
         self.poll.setRange(0, 3_600_000)
         self.poll.setSingleStep(100)
@@ -164,8 +162,6 @@ class ConnectionBar(QToolBar):
         self.addSeparator()
         self.addWidget(self.profile)
         self.addWidget(self.connect_button)
-        self._image = self.addWidget(self.image)
-        self._image.setVisible(False)
         self.addSeparator()
         self.addWidget(self.polling)
         self.addWidget(self.poll)
@@ -305,7 +301,7 @@ class ErrorBanner(QToolBar):
         self.setVisible(bool(lines))
 
 
-# The connect button and the image box: text, border and background for each state.
+# The connect button: text, border and background for each state.
 STATE_COLORS = {
     "up": ("#3ccf7a", "#1f7a46", "#0d1f15"),
     "busy": ("#e0a030", "#8a6418", "#211a0c"),
@@ -339,26 +335,6 @@ LINK_TIPS = {   # the connect button's tooltip for each link state (LNK-9)
                         "writes are refused until it answers again",
     LinkState.CLOSED: "Not connected",
 }
-
-IMAGE_LOOKS = {   # the toolbar's image box (SYM-8): text and STATE_COLORS key, worst status first
-    "mismatch": ("Image \u2717 mismatch", "down"),
-    "checking": ("Image: checking", "busy"),
-    "unread": ("Image ? not read", "busy"),
-    "match": ("Image \u2713 verified", "up"),
-    "unchecked": ("Image not checked", "closed"),
-}
-
-
-def image_state(results, checking: bool) -> str:
-    """The image box's state for the MCUs' identity results: the worst of them."""
-    statuses = {r.status for r in results}
-    if checking:
-        statuses.add("checking")
-    for key in IMAGE_LOOKS:
-        if key in statuses:
-            return key
-    return "unchecked"
-
 
 IDENTITY_WORDS = {"match": "ELF matches the firmware", "mismatch": "ELF does NOT match the firmware",
                   "unchecked": "ELF not checked (nothing to compare)",
@@ -402,7 +378,7 @@ class MainWindow(QMainWindow):
         for w in (self.chart.plot.viewport(), self.chart.list.viewport()):
             DropTarget(w, self.drop_on_chart)
         self.setCentralWidget(self.watch_tabs)
-        self.symbols = SymbolBrowser(self)
+        self.symbols = McuCards(self)
         self.symbols.add_requested.connect(lambda expr: self.watch_tabs.add_watch(expr))
         self.console = Console(self)
         self.memory = MemoryView(self)
@@ -412,7 +388,7 @@ class MainWindow(QMainWindow):
         self.banner = ErrorBanner(self)
         self.addToolBar(self.banner)
         self.docks = {}
-        for title, widget, area in (("Variables", self.symbols, Qt.LeftDockWidgetArea),
+        for title, widget, area in (("Target", self.symbols, Qt.LeftDockWidgetArea),
                                     ("Chart", self.chart, Qt.BottomDockWidgetArea),
                                     ("Console", self.console, Qt.BottomDockWidgetArea),
                                     ("Memory", self.memory, Qt.BottomDockWidgetArea)):
@@ -421,11 +397,12 @@ class MainWindow(QMainWindow):
             dock.setWidget(widget)
             self.addDockWidget(area, dock)
             self.docks[title] = dock
+        self.setCorner(Qt.BottomLeftCorner, Qt.LeftDockWidgetArea)   # the MCU cards run full height
         self.tabifyDockWidget(self.docks["Chart"], self.docks["Console"])
         self.tabifyDockWidget(self.docks["Console"], self.docks["Memory"])
         self.docks["Chart"].raise_()
         self.resizeDocks([self.docks["Chart"]], [300], Qt.Vertical)
-        self.resizeDocks([self.docks["Variables"]], [250], Qt.Horizontal)
+        self.resizeDocks([self.docks["Target"]], [300], Qt.Horizontal)
         self._menus()
         self.set_theme()
         self.message = QLabel()
@@ -624,6 +601,7 @@ class MainWindow(QMainWindow):
         name = apply_theme(name)
         self.theme_actions[name].setChecked(True)
         self.chart.set_dark(is_dark())
+        self.symbols.restyle()
 
     def settings(self) -> UiSettings:
         """Per-user interface settings (ui.toml), next to the console history."""
@@ -856,7 +834,7 @@ class MainWindow(QMainWindow):
 
     def show_identity(self, results) -> None:
         """Note each MCU's identity check in the console; a mismatch also shows in the error bar
-        (see _show_image). There is no way around a mismatch in the GUI: load the matching ELF."""
+        (see _show_mismatch). There is no way around a mismatch in the GUI: load the matching ELF."""
         self._shown_identities = {id(r) for r in results}
         for r in results:
             self.console.log(str(r), "error" if r.status == "mismatch" else "note")
@@ -914,7 +892,8 @@ class MainWindow(QMainWindow):
             stale = t.stale_identities()
             if stale:
                 self.check_identity(stale)
-        self._show_image(up)
+        self._show_mismatch(up)
+        self.symbols.show_health(t, state if t is not None else None)
         self.memory.setEnabled(up)
         # With no reply the port is still open, so the console can send, such as to see whether
         # the device answers anything.
@@ -922,31 +901,17 @@ class MainWindow(QMainWindow):
         for w in (self.bar.transport, self.bar.host, self.bar.port, self.bar.com, self.bar.baud):
             w.setEnabled(self.device.target is None and not self._connecting)
 
-    def _show_image(self, up: bool) -> None:
-        """The toolbar's image box: whether the firmware on the device was checked against the
-        ELF, and the result (SYM-8). Hidden while not connected."""
+    def _show_mismatch(self, up: bool) -> None:
+        """An ELF that does not match its firmware shows in the error bar (SYM-8); each MCU's
+        result shows on its card (GUI-16)."""
         t = self.device.target
-        shown = up and t is not None
-        self.bar._image.setVisible(shown)
-        if not shown:
+        if not up or t is None:
             self.banner.show_mismatch([])
             return
         results = [m.identity for m in t.mcus.values() if m.identity is not None]
         self.banner.show_mismatch(results)
-        checking = self.device.busy("identity") or bool(t.stale_identities())
-        key = image_state(results, checking)
         if any(r.status == "mismatch" and id(r) not in self._shown_identities for r in results):
             self.show_identity(results)   # found by a check run before a poll, not by this window
-        text, look = IMAGE_LOOKS[key]
-        fg, border, bg = STATE_COLORS[look]
-        self.bar.image.setText(text)
-        self.bar.image.setStyleSheet(f"color: {fg}; background: {bg}; border: 1px solid {border}; "
-                                     "border-radius: 3px; padding: 2px 8px")
-        tip = "\n".join(f"{m.name}: {m.identity.status} \u2014 {m.identity.detail}" if m.identity else
-                        f"{m.name}: not checked yet" for m in t.mcus.values())
-        if key == "mismatch":
-            tip += "\nReads and writes to it are refused until its ELF matches the firmware"
-        self.bar.image.setToolTip(tip)
 
     def _check_elfs(self) -> None:
         if self.device.target is None or self.device.busy("elfs"):
@@ -1021,6 +986,12 @@ class MainWindow(QMainWindow):
         self.chart.add(path, unit)
         self.docks["Chart"].show()
         self.docks["Chart"].raise_()
+
+    def show_memory(self, mcu: str) -> None:
+        """The memory view, on one MCU."""
+        self.memory.mcu.setCurrentText(mcu)
+        self.docks["Memory"].show()
+        self.docks["Memory"].raise_()
 
     def drop_on_chart(self, exprs: list[str]) -> None:
         """Expressions dragged onto the chart (GUI-15). One not watched yet goes to the tab in

@@ -59,6 +59,10 @@ def connect(qtbot, win):
     qtbot.waitUntil(lambda: win.device.target is not None, timeout=5000)
 
 
+def card(win, mcu):
+    return win.symbols.cards[mcu]
+
+
 def value(win, path):
     for _, st in win.watch_tabs.states():
         node = st.nodes.get(path)
@@ -149,8 +153,8 @@ def test_inline_edit_writes(qtbot, win):
 
 
 def test_symbol_browser_adds_and_save_round_trips(qtbot, win, tmp_path):
-    sb = win.symbols
-    sb.mcu.setCurrentText("main")
+    sb = win.symbols.browser("main")
+    assert sb.mcu.isHidden() and not sb.isHidden() and card(win, "motorctl").browser.isHidden()
     sb.search.setText("rx*")
     assert sb.list.topLevelItemCount() == 1
     sb.list.topLevelItem(0).setSelected(True)
@@ -809,11 +813,11 @@ def test_elf_identity(qtbot, win, tmp_path, monkeypatch):
     assert not any("mismatch" in a.text() for a in win.findChildren(QAction))   # no way around it in the GUI
     assert "main: ELF matches the firmware; motorctl: ELF matches the firmware" in win.message.text()
     assert "MCU motorctl: 2 flash blocks (88 bytes) match motorctl.elf" in win.console.output.toPlainText()
-    assert win.bar.image.text() == "Image \u2713 verified" and "motorctl: match" in win.bar.image.toolTip()
+    assert "\u2713 main.elf" in card(win, "main").elf.text() and "\u2713 motorctl.elf" in card(win, "motorctl").elf.text()
     assert win.banner.isHidden()
     win.device.target.mcus["main"].identity_stale = True   # the link came back: checked again by itself
     qtbot.waitUntil(lambda: win.device.target.stale_identities() == [], timeout=3000)   # by the GUI or a poll
-    qtbot.waitUntil(lambda: win.bar.image.text() == "Image \u2713 verified", timeout=3000)
+    qtbot.waitUntil(lambda: "\u2713 main.elf" in card(win, "main").elf.text(), timeout=3000)
     elf = tmp_path / "main.elf"
     elf.write_bytes(win.ws.config.mcus[0].elf.read_bytes().replace(b"rdt-main\0", b"rdt-mXin\0"))
     win.ws.config.mcus[0].elf = elf
@@ -822,7 +826,7 @@ def test_elf_identity(qtbot, win, tmp_path, monkeypatch):
     qtbot.waitUntil(lambda: win.device.target is None, timeout=3000)
     connect(qtbot, win)
     qtbot.waitUntil(lambda: "does not match the firmware on main" in win.banner.text.text(), timeout=3000)
-    qtbot.waitUntil(lambda: win.bar.image.text() == "Image \u2717 mismatch", timeout=3000)
+    qtbot.waitUntil(lambda: "\u2717 main.elf does not match" in card(win, "main").elf.text(), timeout=3000)
     assert not win.banner.isHidden() and not win.banner.load_button.isHidden()
     assert "rdt-mXin" in win.banner.toolTip() and not win.banner.toggleViewAction().isVisible()
     assert "does not match" not in win.message.text()   # one error bar, nothing red at the bottom
@@ -831,7 +835,7 @@ def test_elf_identity(qtbot, win, tmp_path, monkeypatch):
     qtbot.waitUntil(lambda: "write main:motor.target" in win.banner.error, timeout=3000)
     assert win.banner.text.text().count("\n") == 1 and not win.banner.close_button.isHidden()
     win.disconnect()
-    qtbot.waitUntil(lambda: not win.bar._image.isVisible(), timeout=3000)
+    qtbot.waitUntil(lambda: "not connected" in card(win, "main").link.text(), timeout=3000)
     qtbot.waitUntil(win.banner.isHidden, timeout=3000)   # "Disconnected" clears the write error
 
 
@@ -950,20 +954,20 @@ def test_old_ini_settings_move_to_ui_toml(qtbot, tmp_path):
 
 def test_link_down_when_the_device_stops_answering(qtbot, win, sim):
     """A hung board keeps its COM port open: after a few reads with no reply the box turns red
-    and the image box goes, and the first reply brings both back (LNK-9)."""
+    and the MCU cards say link down, and the first reply brings both back (LNK-9)."""
     connect(qtbot, win)
-    qtbot.waitUntil(lambda: win.bar.image.text() == "Image ✓ verified", timeout=3000)
+    qtbot.waitUntil(lambda: "✓ main.elf" in card(win, "main").elf.text(), timeout=3000)
     sim.device.frozen = True
     win.read_all()
     where = win.ws.config.connection.address
     qtbot.waitUntil(lambda: win.bar.connect_button.text() == "Link down · " + where, timeout=8000)
     assert "answered none" in win.bar.connect_button.toolTip()
-    assert not win.bar._image.isVisible()
+    assert "link down" in card(win, "main").link.text()
     assert "did not answer the last" in win.console.output.toPlainText()
     sim.device.frozen = False
     win.read_all()
     qtbot.waitUntil(lambda: win.bar.connect_button.text() == "Connected · " + where, timeout=8000)
-    qtbot.waitUntil(lambda: win.bar.image.text() == "Image ✓ verified", timeout=5000)
+    qtbot.waitUntil(lambda: "✓ main.elf" in card(win, "main").elf.text(), timeout=5000)
 
 
 def test_dark_theme_is_remembered(qtbot, win):
@@ -983,7 +987,7 @@ def test_drag_and_drop_to_tabs_and_chart(qtbot, win):
     from PySide6.QtCore import QEvent, QPoint, QPointF
     from PySide6.QtGui import QDragEnterEvent, QDropEvent
     from rdt.gui.dnd import MIME, exprs_from
-    sym = win.symbols.list
+    sym = win.symbols.browser("main").list
     items = [sym.topLevelItem(i) for i in range(sym.topLevelItemCount())]
     gains = next(i for i in items if i.text(0) == "gains")
     data = sym.mimeData([gains])
@@ -1009,3 +1013,26 @@ def test_drag_and_drop_to_tabs_and_chart(qtbot, win):
     drop(win.chart.plot.viewport(), data)     # an array is not a number
     qtbot.waitUntil(lambda: not win.chart_pending, timeout=5000)
     assert "main:gains" not in win.chart.series
+
+
+def test_mcu_cards(qtbot, win):
+    """The Target panel: one card per MCU with its tag, link and ELF, one open at a time (GUI-16)."""
+    main, motor = card(win, "main"), card(win, "motorctl")
+    assert main.tag.text() == "MAIN" and motor.tag.text() == "MOTO"
+    assert "not connected" in main.link.text() and "main.elf" in main.elf.text()
+    win.symbols.toggle("motorctl")
+    assert main.browser.isHidden() and not motor.browser.isHidden()
+    win.symbols.toggle("motorctl")
+    assert motor.browser.isHidden()
+    main._toggle_ranges()
+    names = [main.ranges.topLevelItem(i).text(0) for i in range(main.ranges.topLevelItemCount())]
+    assert "GPIOA" in names and any(n.startswith(".") for n in names)   # a range and ELF sections
+    connect(qtbot, win)
+    qtbot.waitUntil(lambda: " ms" in main.link.text() or "answering" in main.link.text(), timeout=5000)
+    st = win.device.target.session.mcu_status(1)
+    st.timeouts.append(time.monotonic())
+    motor._look = None
+    win._show_state()
+    assert "1 timeout" in motor.link.text() and "#d99a0b" in motor.dot.styleSheet()
+    win.show_memory("motorctl")
+    assert win.memory.mcu.currentText() == "motorctl"
