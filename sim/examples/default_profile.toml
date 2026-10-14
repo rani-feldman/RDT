@@ -10,6 +10,5 @@ max_write    = 4
 align        = 4               # every read and write is whole 4-byte aligned words (1, 2, 4 or 8)
 byte_order   = "little"
 max_response = 1024            # largest read reply, in bytes; RDT never asks the device for it
-error_query  = "SYSTem:ERRor?"
 terminator   = "\n"
 timeout_ms   = 500
