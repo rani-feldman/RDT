@@ -164,7 +164,7 @@ Each requirement links to its design section.
 | GUI-5 | A memory view: hex and ASCII dump of any range, editable | Done | [D-GUI-5](#d-gui-5-memory-view) |
 | GUI-6 | The GUI never blocks on the device | Done | [D-GUI-6](#d-gui-6-device-worker-thread) |
 | GUI-7 | The memory view offers display formats from a right-click menu: a Decimal toggle; Unsigned and Signed submenus with Char, Int, Short and Long; Ascii, Float and Double. The current choice has a check mark, and hex bytes (unsigned Char in hex) stay the default (2026-10-14) | Done | [D-GUI-7](#d-gui-7-memory-display-formats) |
-| GUI-8 | The memory view's ASCII column follows the chosen display format: each cell's bytes show as one group in the order of the value (2026-10-14) | Done | [D-GUI-7](#d-gui-7-memory-display-formats) |
+| GUI-8 | The memory view's ASCII column shows only beside the default hex bytes (unsigned Char in hex); any other display format hides it, and Ascii in the menu shows memory as text (2026-10-14, updated 2026-10-14) | In review (PR #66) | [D-GUI-7](#d-gui-7-memory-display-formats) |
 | GUI-9 | A status box before the Connect button shows the link state and the link, such as a green `Connected · COM3` or a grey `Closed · COM3` (2026-10-14) | Done | [D-GUI-2](#d-gui-2-connection-bar) |
 
 ### 2.12 Live chart
@@ -861,8 +861,8 @@ Right-click the memory view's dump to choose how its cells show memory (GUI-7).
 
 - **Menu:** a **Decimal** toggle (only for the integer formats), an **Unsigned** and a **Signed** submenu with **Char**, **Int**, **Short** and **Long**, then **Ascii**, **Float** and **Double**. The current choice has a check mark. The default is unsigned Char in hex, the plain hex bytes of D-GUI-5.
 - **Formats:** `MemFormat(kind, type, decimal)` in `rdt/memfmt.py`, which has no Qt so the tests use it directly. Element sizes follow ARM C: Char 1 byte, Short 2, Int 4, Long 4; Ascii 1, Float 4, Double 8. `to_text` shows one cell in the MCU's byte order (D-SCPI-11); integers show in upper-case hex, or in decimal when Decimal is on.
-- **Layout:** `MemoryView` in `rdt/gui/panels.py` shows 16/size cells per row, each headed by its byte offset, plus the ASCII column. A cell only partly inside the bytes read stays blank. The status line names the format, such as `as Signed Short, decimal`.
-- **ASCII column (GUI-8):** follows the chosen format. `MemFormat.to_ascii` gives each cell's bytes as one group in the order of the value, most significant byte first, so they line up with the cell's hex digits: an Unsigned Long cell `30000003` reads `0...`. Groups are separated by a space when cells are wider than a byte, and cells not read stay blank here too. For hex bytes and Ascii the column is the same as before.
+- **Layout:** `MemoryView` in `rdt/gui/panels.py` shows 16/size cells per row, each headed by its byte offset, plus the ASCII column for hex bytes (GUI-8). A cell only partly inside the bytes read stays blank. The status line names the format, such as `as Signed Short, decimal`.
+- **ASCII column (GUI-8):** shown only with the default format, the hex bytes. `MemoryView._layout_columns` hides the column for any other format (`format != MemFormat()`), and picking the hex bytes again brings it back. To see memory as text in another layout, pick **Ascii** from the menu. rani asked for this on 2026-10-14 after seeing an ASCII column next to Unsigned Long words. It replaced the first version, where the column stayed for every format and `MemFormat.to_ascii` regrouped each cell's characters in the order of the value.
 - **Writing:** double-click a cell and type a value in the shown format; a hex `0x` prefix is accepted in decimal too. `from_text` turns it into bytes and refuses text that is not a number or does not fit the type, naming the type's range. The cell is written as one element through `Target.write`, so aligned words and read-modify-write apply as usual (D-SCPI-10), and the write is confirmed by read-back.
 - **Saved:** the choice is kept in `gui.ini` (`memory/kind`, `memory/type`, `memory/decimal`) and comes back at the next start.
 
@@ -1284,6 +1284,7 @@ The application is built against the simulator. As soon as the firmware has the 
 | 2026-10-14 | The ELF identity is checked again when the link or a silent MCU comes back, and the result shows in the status bar after Connect, with a recommended build-ID linker setup (SYM-8), at rani's request to check the ELF is not outdated |
 | 2026-10-14 | With no identity variable or build ID, the ELF check compares a sample of the flash image, so it works with Keil and armlink with no build change. A mismatch refuses reads as well as writes, with no override in the GUI, and the GUI shows an Image box next to the connection status (SYM-8). At rani's request; a Keil pre-build script that wrote a build constant was declined |
 | 2026-10-14 | An address in a SCPI command always has at least 8 hex digits, with leading zeros (`08000000`), because rani's firmware checks that every address is 8 characters (SCPI-4) |
+| 2026-10-14 | The memory view's ASCII column shows only beside the hex bytes and is hidden for every other display format, replacing the per-cell regrouping (GUI-8), at rani's request |
 
 ## 9. Appendix: binary protocol (planned)
 
