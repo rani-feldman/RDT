@@ -168,7 +168,7 @@ Each requirement links to its design section.
 | GUI-8 | The memory view's ASCII column shows only beside the default hex bytes (unsigned Char in hex); any other display format hides it, and Ascii in the menu shows memory as text (2026-10-14, updated 2026-10-14) | Done | [D-GUI-7](#d-gui-7-memory-display-formats) |
 | GUI-9 | Show the link state and the link, such as a green `Connected · COM3` (2026-10-14; since GUI-11 shown on the connect button itself) | Done | [D-GUI-2](#d-gui-2-connection-bar) |
 | GUI-10 | Every error shows in one slim red bar under the toolbar: an ELF that does not match its firmware and the latest failed connect, read, write or poll. The status bar shows only ordinary messages (2026-10-14) | Done | [D-GUI-10](#d-gui-10-error-bar) |
-| GUI-11 | The status box and the Connect / Disconnect button become one button that shows the link state and the link, and a click connects, disconnects or cancels: green `Connected · COM3`, blue `Disconnected · COM3`, red `Link down · COM3`, amber `Connecting · COM3` (2026-10-14) | In review (PR #80) | [D-GUI-2](#d-gui-2-connection-bar) |
+| GUI-11 | The status box and the Connect / Disconnect button become one button that shows the link state and the link, and a click connects, disconnects or cancels: green `Connected · COM3`, blue `Disconnected · COM3`, red `Link down · COM3`, amber `Connecting · COM3` (2026-10-14) | Done | [D-GUI-2](#d-gui-2-connection-bar) |
 
 ### 2.12 Live chart
 
