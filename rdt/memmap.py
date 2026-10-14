@@ -169,10 +169,22 @@ FLASH_SAMPLE_BLOCK = 64     # bytes per sampled block
 FLASH_SAMPLE_SPREAD = 32    # blocks spread evenly over all read-only sections, besides each one's ends
 
 
+def _runs_where_flashed(elf, sec) -> bool:
+    """False for a section that runs from another address than it is flashed at, such as code
+    a Keil scatter file places in ITCM or RAM: the startup code copies it there from flash, so
+    its ELF address holds nothing until then and may be changed after. Its load segment's
+    physical address (where it sits in the HEX) differs from the virtual one (where it runs)."""
+    for seg in elf.iter_segments():
+        if seg["p_type"] == "PT_LOAD" and seg["p_vaddr"] <= sec["sh_addr"] < seg["p_vaddr"] + max(seg["p_memsz"], 1):
+            return seg["p_paddr"] == seg["p_vaddr"]
+    return True
+
+
 def flash_samples(path: str | Path, block: int = FLASH_SAMPLE_BLOCK,
                   spread: int = FLASH_SAMPLE_SPREAD) -> list[tuple[int, bytes]]:
     """Blocks of the firmware image to compare with the device: the start and end of every
-    read-only section the ELF holds bytes for (code, constants, the vector table), plus
+    read-only section the ELF holds bytes for (code, constants, the vector table) and that runs
+    from where it is flashed (not code copied to ITCM or RAM at startup), plus
     ``spread`` blocks spread evenly over all of them. Returns (address, bytes in the ELF) in
     address order, overlapping blocks merged, each trimmed to whole 4-byte words."""
     from elftools.common.exceptions import ELFError
@@ -181,9 +193,10 @@ def flash_samples(path: str | Path, block: int = FLASH_SAMPLE_BLOCK,
 
     try:
         with open(path, "rb") as f:
-            secs = [(sec["sh_addr"], sec.data()) for sec in ELFFile(f).iter_sections()
+            elf = ELFFile(f)
+            secs = [(sec["sh_addr"], sec.data()) for sec in elf.iter_sections()
                     if sec["sh_flags"] & SH_FLAGS.SHF_ALLOC and not sec["sh_flags"] & SH_FLAGS.SHF_WRITE
-                    and sec["sh_type"] != "SHT_NOBITS" and sec["sh_size"]]
+                    and sec["sh_type"] != "SHT_NOBITS" and sec["sh_size"] and _runs_where_flashed(elf, sec)]
     except OSError as e:
         raise ConfigError(f"cannot read ELF {path}: {e.strerror}") from None
     except ELFError as e:
