@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import time
+
+import shiboken6
 from dataclasses import dataclass, field
 
 from PySide6.QtCore import Qt, Signal
@@ -19,6 +21,7 @@ from ..stats import StatsBook, numeric
 from ..symbols import Location, load_symbols
 from ..workspace import Reading, Shown, Tab, Watch, Workspace
 from .device import describe_error
+from .style import FLASH_S, TAG_ROLE, TagDelegate, flash_color, mcu_tag, split_expr
 
 COL_NAME, COL_VALUE, COL_TYPE, COL_ADDR, COL_RATE, COL_MIN, COL_MAX, COL_MEAN, COL_COUNT = range(9)
 STATS_COLUMNS = (COL_MIN, COL_MAX, COL_MEAN, COL_COUNT)
@@ -80,7 +83,9 @@ class WatchTree(QTreeWidget):
         self.itemDoubleClicked.connect(self._double_clicked)
         self.itemChanged.connect(self._item_changed)
         self.itemExpanded.connect(self._expanded)
+        self.setItemDelegateForColumn(COL_NAME, TagDelegate(self))
         self.states: dict[str, _ItemState] = {}
+        self.flashing: dict[str, tuple[QTreeWidgetItem, float]] = {}   # path: (row, when to stop)
         self.stats = StatsBook()
         self._editing: tuple[str, str] | None = None   # (expr of the item, path) being edited
 
@@ -94,6 +99,7 @@ class WatchTree(QTreeWidget):
         self.blockSignals(True)
         self.clear()
         self.states.clear()
+        self.flashing.clear()
         for w in self.tab.watches:
             self._add_row(w)
         self.blockSignals(False)
@@ -123,6 +129,8 @@ class WatchTree(QTreeWidget):
             return
         self.ws.remove(expr, self.tab.name)
         self.stats.reset(expr)
+        for path in st.nodes:
+            self.flashing.pop(path, None)
         self.takeTopLevelItem(self.indexOfTopLevelItem(st.item))
         self.changed.emit()
 
@@ -143,7 +151,11 @@ class WatchTree(QTreeWidget):
 
     def _decorate(self, st: _ItemState) -> None:
         w = st.watch
-        tips = []
+        mcu, rest = split_expr(w.expr)
+        tag = mcu_tag(self.ws.config.mcus, mcu)
+        st.item.setData(COL_NAME, TAG_ROLE, tag)
+        st.item.setText(COL_NAME, rest if tag else w.expr)
+        tips = [w.expr] if tag else []
         if self.ws.read_only_reason(w.expr):
             tips.append("read-only")
         if w.min is not None or w.max is not None:
@@ -155,6 +167,11 @@ class WatchTree(QTreeWidget):
         if st.note:
             tips.append(st.note)
         st.item.setToolTip(COL_NAME, "; ".join(tips))
+
+    def retag(self) -> None:
+        """Show each row's MCU tag again, after the MCUs' names, short names or colours changed."""
+        for st in self.states.values():
+            self._decorate(st)
 
     # --- polling -----------------------------------------------------------------------------
 
@@ -231,6 +248,7 @@ class WatchTree(QTreeWidget):
             del stack[r.depth:]
             stack.append(item)
             seen.add(r.path)
+            prev = st.shown.get(r.path)
             st.shown[r.path] = r
             if r.text is None:
                 n = item.childCount()
@@ -240,6 +258,8 @@ class WatchTree(QTreeWidget):
             else:
                 item.setText(COL_VALUE, r.text)
                 self._show_stats(item, self.stats.add(r.path, r.value))
+                if prev is not None and prev.text is not None and prev.text != r.text:
+                    self._flash(r.path, item)
             item.setText(COL_TYPE, r.type_name)
             item.setText(COL_ADDR, f"0x{r.addr:08X}" if r.raw is not None or r.text is None else "")
             brush = GREY if (self._read_only(r.path) or not r.scalar) and r.text is not None else QBrush()
@@ -247,10 +267,24 @@ class WatchTree(QTreeWidget):
         for path in [p for p in st.nodes if p not in seen]:
             node = st.nodes.pop(path)
             st.shown.pop(path, None)
+            self.flashing.pop(path, None)
             if node is not st.item and node.parent() is not None:
                 node.parent().removeChild(node)
         rate = f"{1 / st.period:.1f}/s" if st.period and st.watch.interval_ms(self.ws.poll_ms) else ""
         st.item.setText(COL_RATE, rate)
+
+    def _flash(self, path: str, item: QTreeWidgetItem) -> None:
+        """Highlight a value that changed since the last read, for FLASH_S seconds (GUI-13)."""
+        item.setBackground(COL_VALUE, flash_color())
+        self.flashing[path] = (item, time.monotonic() + FLASH_S)
+
+    def fade(self, now: float) -> None:
+        """Take the highlight off values that changed more than FLASH_S seconds ago."""
+        for path, (item, until) in list(self.flashing.items()):
+            if now >= until:
+                del self.flashing[path]
+                if shiboken6.isValid(item):
+                    item.setBackground(COL_VALUE, QBrush())
 
     @staticmethod
     def _show_stats(item: QTreeWidgetItem, st) -> None:
@@ -663,10 +697,12 @@ class WatchTabs(QTabWidget):
         """Read every item that is due in any tab, all in one poll. Called by the main window's
         poll timer. While a poll is still running nothing new starts, so a slow link falls behind
         instead of queueing reads."""
+        now = time.monotonic() if now is None else now
+        for tree in self.trees:
+            tree.fade(now)
         device = self.main.device
         if device.target is None or device.busy(POLL_KEY):
             return
-        now = time.monotonic() if now is None else now
         due: dict[str, Watch] = {}
         cells: dict[str, int] = {}
         for tree in self.trees:

@@ -22,7 +22,7 @@ Started with no file, `rdt-gui` reopens the workspace you last opened or saved. 
 - **Poll now** (F6, also **Watch > Poll now**): read every watched item once, in every tab, including manual items, whether polling is on or off.
 - **Log CSV** (Ctrl+L): log every watched value to a CSV file. See [CSV log](#csv-log).
 
-**Target > MCUs and ELF files** sets each MCU's id, name, ELF file, timeout and identity variable. MCU 0 is the main MCU and is required.
+**Target > MCUs and ELF files** sets each MCU's id, name, short name, colour, ELF file, timeout and identity variable. MCU 0 is the main MCU and is required. The **short name** (1 to 6 letters, digits or underscores, such as `CM7`) and the **colour** make the MCU's tag in the watch tree; double-click the colour cell to choose one. Left empty, the short name is the part of the name after its last underscore, cut to four characters (`Control_CM7` is `CM7`, `main` is `MAIN`), and the colour is picked by the MCU's id. Short names must be unique.
 
 **Errors.** Every error shows in one slim red bar under the toolbar: a failed connect, read, write or poll, and an ELF that does not match the firmware. A failed action stays until you close it (✕), another error replaces it, or a later action goes through; the ELF line stays until the ELF matches. The status bar at the bottom only shows ordinary messages.
 
@@ -47,6 +47,9 @@ The centre of the window holds the watch tabs. Each tab is its own watch list wi
 ### Watch tree
 
 The watch tree of each tab shows each watched item with its value, type, address and the rate it is actually read at:
+
+- Each row starts with its MCU's **tag**, a coloured pill with the MCU's short name, followed by the name without the MCU, so `Control_CM7:motor.speed` shows as **CM7** `motor.speed`. Hover over the name for the full expression.
+- A value that **changed** since the last read is highlighted in yellow for a second.
 
 - Structs and arrays open to every field and cell. A struct is read in one block. **A collapsed struct or array is not read**, so close what you aren't looking at to keep the link free. Arrays show 100 cells at a time; right-click and choose **Show 100 more cells** for the next page.
 - Enums show as `NAME (n)`, bit fields are extracted, `char` arrays show as strings, and pointers show their target's name. Right-click a pointer and choose **Watch what it points to** to follow it.
