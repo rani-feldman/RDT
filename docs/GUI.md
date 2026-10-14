@@ -16,7 +16,7 @@ Started with no file, `rdt-gui` reopens the workspace you last opened or saved. 
 
 - **Transport**: `tcp` or `udp` with the device's IP address and port, or `serial` with a COM port and baud rate. The COM port list shows each port with its description, such as `COM3 - GAC serial port (COM3)`; you can also type a port name.
 - **Profile**: opens the SCPI profile editor (below). The button shows the profile's name and, when it comes from a file of its own, the file.
-- **Connect button** (F5). One button shows the link state and the link, the COM port or IP:port, and clicking it connects or disconnects: green `Connected · COM3` while the link is up, amber `Connecting · COM3` (click to cancel), red `Link down · COM3` when the port broke (RDT reconnects by itself) or when the device answered none of the last three reads while the port stays open, and blue `Disconnected · COM3` when not connected. Hover over the button for which one it is. Connected means the COM port or socket opened; RDT sends nothing to the device to check it (no `*IDN?`). A port that disappears, such as an unplugged USB COM port, shows as link down within a second even with polling off; a board that hangs with its port still open is only noticed by the next reads, so with polling off press Poll now (F6). While the link is down the image box is hidden and writes are refused; when it comes back the ELFs are checked against the firmware again. The memory view and sending from the console are disabled unless the link is up (the transcript, search, log and command list still work), and the connection fields can only be changed while disconnected.
+- **Connect button** (F5). One button shows the link state and the link, the COM port or IP:port, and clicking it connects or disconnects: green `Connected · COM3` while the link is up, amber `Connecting · COM3` (click to cancel), red `Link down · COM3` when the port broke (RDT reconnects by itself) or when the device answered none of the last three reads while the port stays open, and blue `Disconnected · COM3` when not connected. Hover over the button for which one it is. Connected means the COM port or socket opened; RDT sends nothing to the device to check it (no `*IDN?`). A port that disappears, such as an unplugged USB COM port, shows as link down within a second even with polling off; a board that hangs with its port still open is only noticed by the next reads, so with polling off press Poll now (F6). While the link is down the MCU cards say `link down` and writes are refused; when it comes back the ELFs are checked against the firmware again. The memory view and sending from the console are disabled unless the link is up (the transcript, search, log and command list still work), and the connection fields can only be changed while disconnected.
 - **Poll** (F7, also **Watch > Poll automatically**): untick it to turn all polling off, including items with their own interval. The interval is kept and polling picks up where it was when you tick it again. Polling is on when RDT starts; the setting is not saved in the workspace.
 - The interval next to it is the global polling interval. `Off` (0) stops the global polling only; items set to their own interval still poll.
 - **Poll now** (F6, also **Watch > Poll now**): read every watched item once, in every tab, including manual items, whether polling is on or off.
@@ -26,11 +26,32 @@ Started with no file, `rdt-gui` reopens the workspace you last opened or saved. 
 
 **Errors.** Every error shows in one slim red bar under the toolbar: a failed connect, read, write or poll, and an ELF that does not match the firmware. A failed action stays until you close it (✕), another error replaces it, or a later action goes through; the ELF line stays until the ELF matches. The status bar at the bottom only shows ordinary messages.
 
-**ELF identity.** On connect, RDT checks that each MCU runs the firmware its ELF came from: it compares the MCU's identity variable, or the GNU build ID when the linker put it in memory, or else sampled blocks of the read-only sections (code, constants, vector table) on the device with the ELF file. The **image box** in the toolbar, next to the connection status, shows the result: `Image ✓ verified` (green), `Image ✗ mismatch` (red), `Image: checking`, `Image ? not read` or `Image not checked`; its tooltip has each MCU's detail, and the console says the same. On a mismatch every read and write to that MCU is refused, so a stale ELF can't read or write the wrong address. The red error bar under the toolbar names the MCU and stays until the ELF matches again, with **Load ELF...** (opens Target > MCUs and ELF files) and **Check again**; its tooltip has the detail. There is no way around it in the GUI: load the ELF that matches the firmware, or flash the firmware that matches the ELF. **Target > Check ELF identity** checks again, such as after flashing while the link stays open; it also runs after an ELF is rebuilt and when the link or an MCU comes back after a drop. See [Use your own ELF](use-your-own-elf.md#check-that-the-device-runs-this-elf).
+**ELF identity.** On connect, RDT checks that each MCU runs the firmware its ELF came from: it compares the MCU's identity variable, or the GNU build ID when the linker put it in memory, or else sampled blocks of the read-only sections (code, constants, vector table) on the device with the ELF file. Each MCU's card in the **Target** panel shows the result on its ELF line: `✓ main.elf` (green), `✗ main.elf does not match` (red), `? main.elf: not checked yet` or `? main.elf: not read` (grey); the console says the same. On a mismatch every read and write to that MCU is refused, so a stale ELF can't read or write the wrong address. The red error bar under the toolbar names the MCU and stays until the ELF matches again, with **Load ELF...** (opens Target > MCUs and ELF files) and **Check again**; its tooltip has the detail. There is no way around it in the GUI: load the ELF that matches the firmware, or flash the firmware that matches the ELF. **Target > Check ELF identity** checks again, such as after flashing while the link stays open; it also runs after an ELF is rebuilt and when the link or an MCU comes back after a drop. See [Use your own ELF](use-your-own-elf.md#check-that-the-device-runs-this-elf).
+
+## Modes
+
+The tabs at the left of the toolbar lay the window out for one job (also **View > Watch mode** and so on, Ctrl+1 to Ctrl+4):
+
+- **Watch** (Ctrl+1): the MCU cards on the left, the watch tabs, and the chart, console and memory view below.
+- **Scope** (Ctrl+2): a large chart, with the watch tabs beside it.
+- **Memory** (Ctrl+3): the MCU cards and a large memory view.
+- **Console** (Ctrl+4): the SCPI console alone.
+
+Polling, the chart and the CSV log keep running in every mode. Each mode remembers how you left its panels (sizes, which panels are shown, where they are docked), and RDT reopens in the mode it was closed in; both are kept per user in `ui.toml`. **View > Reset this mode's layout** puts the panels of the mode in front back where they start.
+
+## Target panel
+
+The **Target** panel on the left shows the workspace and its link, then one **card** per MCU:
+
+- The MCU's **tag** (short name and colour, see Target > MCUs and ELF files), its name and id, and a dot with its overall state: green when it answers and its ELF matches, amber when it is slow or a read timed out in the last minute, red when its ELF does not match the firmware or the link is down, grey when not connected, silent or not checked.
+- **Link**: how long the MCU takes to answer a read (`✓ 38 ms`), with the number of reads that timed out in the last minute (`412 ms · 3 timeouts`), `silent: not answering`, `link down` or `not connected`.
+- **ELF**: the ELF file and whether it matches the firmware (see [ELF identity](#connection-bar)).
+- **Variables ▸** (or a click on the card's title) opens the card on the MCU's variables; one card is open at a time. **Memory ranges ▸** lists the memory RDT may read on that MCU: the ELF's sections and the workspace's ranges, with their start, size and kind.
+- Right-click a card for **Check ELF again**, **MCUs and ELF files...** and **Open in the memory view**.
 
 ## Variable view
 
-The **Variables** panel lists an MCU's globals from its ELF. Type in the search box to filter (`motor*`, `*count`), then double-click a variable or select several and press **Add to watch list**; they go to the watch tab in front. **Watch > Add expression** (Ctrl+E) takes any expression the CLI takes, such as `main:motor.speed`, `main:gains[2]`, `main:*ptr` or `@main:0x20000000:u32`.
+The open card lists its MCU's globals from its ELF. Type in the search box to filter (`motor*`, `*count`), then double-click a variable or select several and press **Add to watch list**; they go to the watch tab in front. You can also **drag** them: drop on a watch tab to add them there (hold the drag over a tab's title to switch to that tab first), or on the chart to watch and chart them in one go. Rows of a watch tree drag the same way: onto another tab (the item is shared, as with **Also show in tab**) or onto the chart. A dropped value is charted after its first read; one that is not a number is not charted and the status bar says so. **Watch > Add expression** (Ctrl+E) takes any expression the CLI takes, such as `main:motor.speed`, `main:gains[2]`, `main:*ptr` or `@main:0x20000000:u32`.
 
 ### Watch tabs
 
@@ -128,6 +149,10 @@ The console is a dark terminal. Each line shows its time, a tag (`TX` sent, `RX`
 - **Hex and text.** Select part of the transcript and right-click: **Selection as hex** shows its bytes (`Hi` is `48 69`), and **Hex selection as text** turns hex such as `48656C6C6F`, `48 65 6C` or `0x48,0x65` back into text (`Hello`), with any non-printable byte as `\xNN`. The result opens in a small window with **Copy**.
 - **Log to file.** Asks for a text file and appends every console line to it, with its date and time and a mark: `>` sent, `<` reply, `!` error, `#` note. Click again to stop. The file is appended to, never overwritten. This is separate from the CSV value log.
 
+## Theme
+
+**View > Theme** chooses the window's colours: **Dark**, **Light**, or **System** (the default), which follows Windows. The chart follows the theme; the SCPI console is always the dark terminal. The choice is kept per user in `ui.toml` and comes back on the next start.
+
 ## Keyboard shortcuts
 
 **Help > Keyboard shortcuts** (F1) lists every shortcut in the menus and the console in one table.
@@ -146,6 +171,6 @@ Pressing OK stores the edited profile inside the workspace (no longer pointing a
 
 - **Watch list...** Export writes the watch tabs and chart to a watch list file. Import reads one (or the tabs of another `.rdtw`) and asks whether to add its tabs to yours (a tab with the same name gets the items it lacks; an item you already watch keeps its settings) or replace your tabs and chart.
 - **Commands...** The known commands as a commands file (`.toml`) or CSV, the same as the console's **Commands** panel buttons.
-- **Interface settings...** The console's text size and wrapping and the memory view's display format. These are per user, not per workspace, and kept in `ui.toml` next to the console history (`%LOCALAPPDATA%\rdt\ui.toml`). Import shows the new settings at once; a setting the file leaves out goes back to its default. The first start of this version moves the settings from the older `gui.ini` and `console.ini` into `ui.toml`.
+- **Interface settings...** The theme, the console's text size and wrapping and the memory view's display format. These are per user, not per workspace, and kept in `ui.toml` next to the console history (`%LOCALAPPDATA%\rdt\ui.toml`). Import shows the new settings at once; a setting the file leaves out goes back to its default. The first start of this version moves the settings from the older `gui.ini` and `console.ini` into `ui.toml`.
 
 Opening a plain target file (`.toml`) starts a new workspace from it, so Save asks where to put the `.rdtw` rather than overwriting the target file. A workspace from before watch tabs opens with its watch list in one tab, `Watch`. Command buttons are no longer part of RDT: a workspace that has them still opens, the status bar says they were dropped, and they are left out when it is saved. Type such commands in the SCPI console instead. The title shows `*` while there are unsaved changes, and closing the window asks whether to save them.

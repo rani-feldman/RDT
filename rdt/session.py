@@ -26,7 +26,7 @@ from __future__ import annotations
 import logging
 import threading
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from enum import Enum
 from typing import Callable
 
@@ -54,6 +54,14 @@ class McuStatus:
     silent: bool = False
     timeouts_in_row: int = 0
     last_probe: float = 0.0
+    reply_ms: float | None = None     # how long the MCU takes to answer a read, smoothed (GUI-14)
+    timeouts: list[float] = field(default_factory=list)   # when reads timed out, the last minute
+
+    def recent_timeouts(self, now: float | None = None) -> int:
+        """Reads that got no reply in the last minute."""
+        now = time.monotonic() if now is None else now
+        self.timeouts[:] = [t for t in self.timeouts if now - t < 60.0]
+        return len(self.timeouts)
 
 
 Listener = Callable[[str, dict], None]
@@ -284,6 +292,7 @@ class Session:
                     time.sleep(delay)
                     delay *= 2
                 try:
+                    sent = time.monotonic()
                     data = self.protocol.read_mem(mcu, addr, size, self.timeout_s(mcu),
                                                   self.byte_order_of(mcu))
                 except BadReply as e:
@@ -298,9 +307,13 @@ class Session:
                         raise self._mark_silent(mcu, str(e.error)) from None
                     raise
                 if data is not None:
+                    ms = (time.monotonic() - sent) * 1000.0
+                    st.reply_ms = ms if st.reply_ms is None else 0.8 * st.reply_ms + 0.2 * ms
                     self._device_answered()
                     self._mcu_answered(mcu)
                     return data
+                st.timeouts.append(time.monotonic())
+                del st.timeouts[:-100]
                 if mcu != 0:
                     st.timeouts_in_row += 1
                     if st.timeouts_in_row >= self.SILENT_AFTER:
