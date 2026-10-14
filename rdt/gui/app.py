@@ -1240,6 +1240,13 @@ def main(argv: list[str] | None = None) -> int:
     app = QApplication.instance() or QApplication([sys.argv[0]])
     app.setApplicationName("RDT")
     app.setOrganizationName("RDT")
+    if sys.platform == "win32":           # own taskbar identity, not python.exe's
+        try:
+            import ctypes
+            ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID("RDT.RemoteDebuggerTool")
+        except Exception:
+            pass
+    app.setWindowIcon(QIcon(str(Path(__file__).parent / "assets" / "rdt.png")))
     win = MainWindow()
     if argv:
         win.open_path(argv[0])
