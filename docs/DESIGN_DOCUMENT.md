@@ -101,7 +101,7 @@ Each requirement links to its design section.
 | SYM-5 | An expression through a pointer follows the pointer when the firmware moves it | Done | [D-SYM-5](#d-sym-5-pointers) |
 | SYM-6 | Loading a large ELF is fast after the first time | Done | [D-SYM-6](#d-sym-6-symbol-cache) |
 | SYM-7 | When an ELF is rebuilt, RDT reloads it and finds every watched item again by name (2026-10-05) | Done | [D-SYM-7](#d-sym-7-elf-rebuild-detection) |
-| SYM-8 | Check on connect that each ELF matches the firmware running on its MCU, and check again when the link or the MCU comes back; with no identity variable or build ID, compare a sample of the flash image. Show the result in the GUI, with a large banner that can't be missed while an MCU does not match, and refuse reads and writes to an MCU that does not match (2026-10-12, updated 2026-10-14) | In review (PR #70) | [D-SYM-8](#d-sym-8-build-identity-check) |
+| SYM-8 | Check on connect that each ELF matches the firmware running on its MCU, and check again when the link or the MCU comes back; with no identity variable or build ID, compare a sample of the flash image. Show the result in the GUI, with a large banner that can't be missed while an MCU does not match, and refuse reads and writes to an MCU that does not match (2026-10-12, updated 2026-10-14) | Done | [D-SYM-8](#d-sym-8-build-identity-check) |
 
 ### 2.6 Memory access
 
