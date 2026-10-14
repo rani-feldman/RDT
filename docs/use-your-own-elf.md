@@ -91,7 +91,7 @@ If the firmware has a build ID or an identity variable (below), RDT compares tha
 
 **When RDT checks:**
 
-- On Connect. The toolbar's image box, next to the connection status, shows `Image ✓ verified` (green), `Image ✗ mismatch` (red), `Image: checking`, `Image ? not read` (the MCU did not answer) or `Image not checked` (nothing to compare); its tooltip has each MCU's result. The status bar and the console say the same, with the detail: the first flash address that differs, or both build IDs.
+- On Connect. The toolbar's image box, next to the connection status, shows `Image ✓ verified` (green), `Image ✗ mismatch` (red), `Image: checking`, `Image ? not read` (the MCU did not answer) or `Image not checked` (nothing to compare); its tooltip has each MCU's result. A mismatch also shows in the red error bar under the toolbar, and the console says the same, with the detail: the first flash address that differs, or both build IDs.
 - When the link comes back after a drop, such as a reset over a native USB port, and before the next write if the link dropped meanwhile.
 - When the GUI loads a rebuilt ELF.
 - From **Target > Check ELF identity**. Use it after flashing over ST-LINK while the COM port stays open, since then the link never drops and RDT can't tell the firmware changed.
