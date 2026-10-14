@@ -281,10 +281,10 @@ class Target:
     # --- ELF identity (SYM-8) -----------------------------------------------------------------
 
     def _link_event(self, event: str, info: dict) -> None:
-        """The firmware may have been flashed while the link was down or the MCU was silent (a
-        reset drops a USB COM port), so its identity is checked again before the next write. An
+        """The firmware may have been flashed while the link was down, the device gave no reply,
+        or the MCU was silent (a reset drops a USB COM port), so its identity is checked again before the next write. An
         MCU with nothing to compare is left alone."""
-        if event == "link" and info["state"] is LinkState.DOWN:
+        if event == "link" and info["state"] in (LinkState.DOWN, LinkState.NO_REPLY):
             gone = list(self.mcus.values())
         elif event == "mcu" and info["silent"]:
             gone = [m for m in self.mcus.values() if m.id == info["mcu"]]

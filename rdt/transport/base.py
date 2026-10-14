@@ -40,6 +40,10 @@ class Transport(ABC):
     def write(self, data: bytes) -> None:
         """Send ``data``. Raises ``LinkError`` if the link broke."""
 
+    def check(self) -> None:
+        """Raise ``LinkError`` if the port or socket broke, without sending or taking any bytes.
+        Called about once a second while the link is idle. UDP has nothing to check."""
+
     def send_break(self, duration: float) -> None:
         """Hold the line in the break state for ``duration`` seconds. Only a COM port can."""
         raise LinkError(f"{self.description}: a break can only be sent on a COM port")

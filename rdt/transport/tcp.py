@@ -51,6 +51,22 @@ class TcpTransport(Transport):
             self.close()
             raise _broken(self.description, e) from None
 
+    def check(self) -> None:
+        """Peek without waiting: a closed connection reads as end of file, a reset as an error."""
+        if self._sock is None:
+            raise LinkError(f"{self.description}: not open")
+        try:
+            self._sock.settimeout(0.0)
+            data = self._sock.recv(1, socket.MSG_PEEK)
+        except (socket.timeout, BlockingIOError):
+            return
+        except OSError as e:
+            self.close()
+            raise _broken(self.description, e) from None
+        if not data:
+            self.close()
+            raise LinkError(f"{self.description}: the device closed the connection")
+
     def _recv(self, timeout: float) -> bytes:
         if self._sock is None:
             raise LinkError(f"{self.description}: not open")

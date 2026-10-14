@@ -323,7 +323,7 @@ def test_udp_device_that_never_answers_times_out(sim):
             assert t.link_state is LinkState.UP   # RDT sends nothing on connect, so the socket is enough
             with pytest.raises(CommandTimeout):
                 t.read_value("@main:0x20000010:u32")
-            assert t.link_state is LinkState.UP
+            assert t.link_state is LinkState.NO_REPLY   # no reply, but the socket stays open (LNK-9)
 
 
 # --- UDP --------------------------------------------------------------------------------------
@@ -395,3 +395,89 @@ def test_another_scpi_client_on_the_same_device(sim):
         stop.set()
         th.join(timeout=3)
     assert other["replies"] > 0 and other["wrong"] == 0
+
+
+# --- a device that stops answering, or a port that breaks while idle (LNK-9) -----------------
+
+def test_device_that_stops_answering_shows_no_reply(sim, device):
+    profile = Profile(timeout_ms=50, retries=0)
+    with make_target("tcp", sim.tcp_address, profile) as t:
+        states = []
+        t.session.add_listener(lambda ev, info: ev == "link" and states.append(info["state"]))
+        assert t.read_value("@main:0x20000010:u32") == 0x12345678
+        device.frozen = True
+        for _ in range(2):
+            with pytest.raises(CommandTimeout):
+                t.read_value("@main:0x20000010:u32")
+        assert t.link_state is LinkState.UP          # one or two failed reads can be a bad command
+        with pytest.raises(CommandTimeout):
+            t.read_value("@motorctl:0x20000084:u32")  # no reply from any MCU counts
+        assert t.link_state is LinkState.NO_REPLY
+        assert "did not answer the last 3 reads" in t.session.down_reason
+        with pytest.raises(LinkDown, match="write refused"):
+            t.write_value("@main:0x20000024:u32", 1)
+        device.frozen = False
+        assert t.read_value("@main:0x20000010:u32") == 0x12345678   # the first reply brings it back
+        assert t.link_state is LinkState.UP
+        assert states == [LinkState.NO_REPLY, LinkState.UP]
+
+
+def test_an_answer_from_any_mcu_keeps_the_link_up(sim, device):
+    profile = Profile(timeout_ms=50, retries=0, ranges=[Range("ghost", 0x30000000, 16)])
+    with make_target("tcp", sim.tcp_address, profile) as t:
+        for _ in range(5):
+            with pytest.raises(CommandTimeout):
+                t.read("main", 0x30000000, 4)          # a bad address: no reply, as for any error
+            assert t.read_value("@motorctl:0x20000084:u32") == 500
+        assert t.link_state is LinkState.UP
+
+
+def test_freeze_command_in_the_simulator(sim, device):
+    profile = Profile(timeout_ms=50, retries=0)
+    with make_target("tcp", sim.tcp_address, profile) as t:
+        t.command("SIM:FREE 0.5")
+        for _ in range(3):
+            with pytest.raises(CommandTimeout):
+                t.read_value("@main:0x20000010:u32")
+        assert t.link_state is LinkState.NO_REPLY
+        time.sleep(0.5)
+        assert t.read_value("@main:0x20000010:u32") == 0x12345678
+        assert t.link_state is LinkState.UP
+
+
+def test_idle_link_goes_down_when_the_connection_breaks(sim):
+    """With polling off nothing is sent, yet a broken port or socket still shows as link down."""
+    relay = Relay(sim.tcp_address)
+    try:
+        t = make_target("tcp", relay.address, auto_reconnect=False)
+        t.session.WATCH_S = 0.05
+        with t:
+            relay.cut()
+            deadline = time.monotonic() + 2
+            while t.link_state is LinkState.UP and time.monotonic() < deadline:
+                time.sleep(0.02)
+            assert t.link_state is LinkState.DOWN
+    finally:
+        relay.close()
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="pseudo-terminals are Linux only")
+def test_idle_serial_link_goes_down_when_the_port_disappears():
+    import os
+    import pty
+
+    from rdt.errors import LinkError
+    from rdt.transport.serial import SerialTransport
+
+    # A USB COM port that is unplugged: the next status query fails with EIO.
+    master, slave = pty.openpty()
+    t = SerialTransport(os.ttyname(slave))
+    t.open()
+    t.check()
+    os.close(master)
+    os.close(slave)
+    try:
+        with pytest.raises(LinkError):
+            t.check()
+    finally:
+        t.close()

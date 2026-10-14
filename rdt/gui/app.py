@@ -321,6 +321,14 @@ def plug_icon(color: str) -> QIcon:
     return QIcon(pm)
 
 
+LINK_TIPS = {   # the status box's tooltip for each link state (LNK-9)
+    LinkState.UP: "The port is open",
+    LinkState.DOWN: "The port broke, such as a USB COM port unplugged; RDT reconnects by itself",
+    LinkState.NO_REPLY: "The port is open but the device answered none of the last reads; "
+                        "writes are refused until it answers again",
+    LinkState.CLOSED: "Not connected",
+}
+
 IMAGE_LOOKS = {   # the toolbar's image box (SYM-8): text and STATE_COLORS key, worst status first
     "mismatch": ("Image \u2717 mismatch", "down"),
     "checking": ("Image: checking", "busy"),
@@ -844,7 +852,7 @@ class MainWindow(QMainWindow):
             word, look, button = "Connecting", "busy", "Cancel"
         elif state == LinkState.UP:
             word, look, button = "Connected", "up", "Disconnect"
-        elif state == LinkState.DOWN:
+        elif state in (LinkState.DOWN, LinkState.NO_REPLY):
             word, look, button = "Link down", "down", "Disconnect"
         else:
             word, look, button = "Closed", "closed", "Connect"
@@ -852,10 +860,13 @@ class MainWindow(QMainWindow):
         text = f"{word} \u00b7 {where}" if where else word
         if text != self._last_state:
             if self._last_state is not None:
-                self.console.log(text, "error" if state == LinkState.DOWN else "note")
+                why = f" ({self.device.target.session.down_reason})" \
+                    if look == "down" and self.device.target is not None else ""
+                self.console.log(text + why, "error" if look == "down" else "note")
             self._last_state = text
         fg, border, bg = STATE_COLORS[look]
         self.bar.state.setText(text)
+        self.bar.state.setToolTip(LINK_TIPS.get(state, "") if not self._connecting else "")
         self.bar.state.setStyleSheet(f"color: {fg}; background: {bg}; border: 1px solid {border}; "
                                      "border-radius: 3px; padding: 2px 8px")
         b_fg, b_border, b_bg = (fg, border, bg) if look == "up" else BUTTON_COLORS
@@ -871,7 +882,9 @@ class MainWindow(QMainWindow):
                 self.check_identity(stale)
         self._show_image(up)
         self.memory.setEnabled(up)
-        self.console.set_link_up(up)
+        # With no reply the port is still open, so the console can send, such as to see whether
+        # the device answers anything.
+        self.console.set_link_up(up or state == LinkState.NO_REPLY)
         for w in (self.bar.transport, self.bar.host, self.bar.port, self.bar.com, self.bar.baud):
             w.setEnabled(self.device.target is None and not self._connecting)
 

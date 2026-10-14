@@ -901,3 +901,21 @@ def test_old_ini_settings_move_to_ui_toml(qtbot, tmp_path):
     assert w.ui.values == {"session/last_workspace": str(tmp_path / "x.rdtw"), "memory/kind": "signed",
                            "memory/decimal": True, "console/font_size": 13, "console/wrap": True}
     assert (tmp_path / "ui.toml").is_file() and w.console.font_size() == 13
+
+
+def test_link_down_when_the_device_stops_answering(qtbot, win, sim):
+    """A hung board keeps its COM port open: after a few reads with no reply the box turns red
+    and the image box goes, and the first reply brings both back (LNK-9)."""
+    connect(qtbot, win)
+    qtbot.waitUntil(lambda: win.bar.image.text() == "Image ✓ verified", timeout=3000)
+    sim.device.frozen = True
+    win.read_all()
+    where = win.ws.config.connection.address
+    qtbot.waitUntil(lambda: win.bar.state.text() == "Link down · " + where, timeout=8000)
+    assert "answered none" in win.bar.state.toolTip()
+    assert not win.bar._image.isVisible()
+    assert "did not answer the last" in win.console.output.toPlainText()
+    sim.device.frozen = False
+    win.read_all()
+    qtbot.waitUntil(lambda: win.bar.state.text() == "Connected · " + where, timeout=8000)
+    qtbot.waitUntil(lambda: win.bar.image.text() == "Image ✓ verified", timeout=5000)
