@@ -171,9 +171,10 @@ Each requirement links to its design section.
 | GUI-11 | The status box and the Connect / Disconnect button become one button that shows the link state and the link, and a click connects, disconnects or cancels: green `Connected · COM3`, blue `Disconnected · COM3`, red `Link down · COM3`, amber `Connecting · COM3` (2026-10-14) | Done | [D-GUI-2](#d-gui-2-connection-bar) |
 | GUI-12 | Each MCU has an optional short name and tag colour, and each watch row shows its MCU as a coloured tag with the short name before the expression (2026-10-14) | Done | [D-GUI-12](#d-gui-12-mcu-tags) |
 | GUI-13 | A watched value that changed since the previous read is highlighted for a moment (2026-10-14) | Done | [D-GUI-13](#d-gui-13-change-highlight) |
-| GUI-14 | Layout C: a Target panel with one card per MCU (link and ELF state, variables, memory ranges) replaces the Variables panel and the toolbar image box, and Watch, Scope, Memory and Console mode tabs in the toolbar each keep their own layout (2026-10-14) | Done | [D-GUI-14](#d-gui-14-layout-c) |
+| GUI-14 | Layout C: a Target panel with one card per MCU (link and ELF state, variables, memory ranges) replaces the Variables panel and the toolbar image box, and four toolbar buttons, Watch, Scope, Memory and Console, each show or hide their own panel, with the layout saved (2026-10-14; the buttons changed from mode tabs on 2026-10-14) | In review (PR #100) | [D-GUI-14](#d-gui-14-layout-c) |
 | GUI-15 | A dark theme: View > Theme offers System, Light or Dark, saved per user (2026-10-14) | Done | [D-GUI-15](#d-gui-15-dark-theme) |
 | GUI-16 | Drag variables and watch rows onto a watch tab, a tab's title or the chart (2026-10-14) | Done | [D-GUI-16](#d-gui-16-drag-and-drop) |
+| GUI-17 | One title bar row: the app icon, the menus and the minimise, maximise and close buttons in a single line, with no title text and no standard Windows title bar above it (rani, 2026-10-14) | Done | [D-GUI-17](#d-gui-17-one-row-title-bar) |
 
 ### 2.12 Live chart
 
@@ -921,7 +922,7 @@ A value whose text differs from the previous read gets a yellow background (`#ff
 
 #### D-GUI-14 Layout C
 
-rani chose layout C from the mockups on 2026-10-14 (thread "UI improvement ideas"): the MCU cards on the left and mode tabs in the toolbar.
+rani chose layout C from the mockups on 2026-10-14 (thread "UI improvement ideas"): the MCU cards on the left and panel buttons in the toolbar.
 
 **MCU cards.** The **Target** panel (`McuCards` and `McuCard` in `rdt/gui/cards.py`) has one card per MCU. It replaces the Variables panel (D-GUI-3) and the toolbar image box (D-SYM-8). The left dock owns the bottom-left corner.
 
@@ -931,14 +932,16 @@ rani chose layout C from the mockups on 2026-10-14 (thread "UI improvement ideas
 - **Open card:** one card is open at a time, showing **Variables** (a `SymbolBrowser` fixed to that MCU) and **Memory ranges** (its ELF sections plus `[[mcu.ranges]]`).
 - **Right-click:** **Check ELF again**, **MCUs and ELF files** and **Open in the memory view**.
 
-**Modes.** `ModeBar`, at the left of the toolbar, has **Watch**, **Scope**, **Memory** and **Console** tabs, also in the View menu with Ctrl+1 to Ctrl+4. `MainWindow.set_mode` switches; `_default_layout` gives each mode's starting layout:
+**Panel buttons.** `ModeBar`, at the left of the toolbar, has four buttons, **Watch**, **Scope**, **Memory** and **Console**. They first switched the window between four layouts (modes); rani then asked on 2026-10-14 for each to show or hide its own panel instead. `MainWindow.toggle_panel` does it, also from **View > Show or hide Watch** and so on (Ctrl+1 to Ctrl+4):
 
-- **Watch:** the MCU cards on the left, the watch tabs in the middle, and Chart, Console and Memory tabbed below.
-- **Scope:** the chart docked on the left at about 70% of the width, beside the watch tabs.
-- **Memory:** the MCU cards and the Memory dock; the central area is hidden.
-- **Console:** the console alone; the central area is hidden.
+- **Watch** is the watch tabs (the central area), **Scope** the chart, **Memory** the memory view and **Console** the console.
+- A button is pressed while its panel is shown. If the panel is behind another tab, the first press brings it to the front and the next press hides it (`_in_front`).
+- The panels start with the **Target** cards on the left, the watch tabs in the middle, and Chart, Console and Memory tabbed below. Every panel can be dragged to dock elsewhere, stacked as a tab, floated or resized.
+- **View > Target** shows or hides the MCU cards.
+- **View > Save layout** (Ctrl+Shift+S) saves the layout at once. It is also saved on every button press and when RDT closes: `QMainWindow.saveState` as `session/layout` in `ui.toml`, and whether the watch tabs are shown as `session/watch_shown`. Both are state, so they are never exported (D-WSP-5).
+- **View > Reset layout** shows every panel again, where they start.
 
-Each mode's layout is saved with `QMainWindow.saveState` as `session/layout_<mode>` in `ui.toml`, and the last mode as `session/mode`; both are state, so they are never exported (D-WSP-5). **View > Reset this mode's layout** goes back to the default. Polling, the chart and the CSV log keep running in every mode.
+Polling, the chart and the CSV log keep running while a panel is hidden.
 
 #### D-GUI-15 Dark theme
 
@@ -952,6 +955,14 @@ Each mode's layout is saved with `QMainWindow.saveState` as `session/layout_<mod
 - **Watch tree:** dropping adds the items not already in that tab, shared the same way as **Also show in tab** (one item, shared settings).
 - **Tab titles:** holding a drag over a tab's title switches to that tab.
 - **Chart:** dropping on the plot or the signal list first watches the item in the front tab if it is not watched yet; after its first read it is charted if it is numeric, otherwise a status message says why not (`MainWindow.drop_on_chart`, `_chart_dropped`).
+
+#### D-GUI-17 One-row title bar
+
+`rdt/gui/titlebar.py` makes the main window frameless and sets a 38 px row as its menu widget (`titlebar.install`, called before the menus are built; it returns the menu bar inside the row, and `MainWindow.menu_bar` / `menuBar()` give the menus a place). The row holds the 22 px app icon, the menus (13 pt text), and minimise, maximise or restore, and close (red on hover).
+
+- **Title text:** none. The window title is still set (`name * - RDT`), so the taskbar and Alt-Tab show it.
+- **Moving and resizing:** pressing an empty part of the row calls the system move, a double click maximises or restores, and the outer 6 px of the window call the system resize (cursor changes at the edges; the top edge is covered by the row).
+- **Opt out:** `RDT_NATIVE_TITLEBAR=1` keeps the standard Windows title bar.
 
 ### 4.12 Live chart
 
@@ -1100,7 +1111,7 @@ Opening the `.rdtw` loads all three (`Workspace.watch_path`, `Workspace.commands
 Interface settings are per user, not per workspace. They are in `ui.toml` next to the console history (`%LOCALAPPDATA%\rdt\ui.toml` on Windows; `RDT_UI_FILE` overrides it), handled by `UiSettings` in `rdt/ui_settings.py`:
 
 - **Settings:** `console/font_size` and `console/wrap` (D-CON-11), `memory/kind`, `memory/type` and `memory/decimal` (D-GUI-7), and `ui/theme` (D-GUI-15).
-- **State:** `session/last_workspace` (D-WSP-3), `session/mode` and `session/layout_<mode>` (D-GUI-14). They are not settings, so they are never exported and an import leaves them alone.
+- **State:** `session/last_workspace` (D-WSP-3), `session/layout` and `session/watch_shown` (D-GUI-14). They are not settings, so they are never exported and an import leaves them alone.
 
 Each change re-reads the file before writing it, so two windows keep each other's changes, and a file that can't be written leaves the settings in memory only. `ui.toml` replaces `gui.ini` and `console.ini`, whose values are copied into it on the first start (`load_ui` in `rdt/gui/app.py`).
 
@@ -1421,6 +1432,7 @@ The application is built against the simulator. As soon as the firmware has the 
 | 2026-10-14 | The known commands are kept in a TOML file the `.rdtw` names (`bench.commands.toml`, `[[command]]` tables) instead of CSV; an old CSV commands file still loads and becomes TOML on the next save; export writes TOML by default, CSV on request (WSP-4, D-CON-7), at rani's request |
 | 2026-10-14 | A workspace's `.watch.toml` and `.commands.toml` are always saved beside its `.rdtw`; workspaces live by default in `%LOCALAPPDATA%\rdt` (Open and Save as start there), and the default target is `./rdt.toml`, else `%LOCALAPPDATA%\rdt\rdt.toml` (WSP-4), at rani's request |
 | 2026-10-14 | Each MCU gets an optional short name and colour, shown as a tag on its watch rows (GUI-12), and a changed value is highlighted for a second (GUI-13). Then layout C: MCU cards replacing the Variables panel and image box, and Watch, Scope, Memory and Console modes with their own layouts (GUI-14), a dark theme (GUI-15) and drag and drop (GUI-16). rani picked these from mockups |
+| 2026-10-14 | The toolbar's Watch, Scope, Memory and Console buttons no longer switch between four layouts; each shows or hides its own panel (a panel behind another tab comes to the front first). The layout is saved on every press and on close, with View > Save layout (Ctrl+Shift+S), View > Reset layout and View > Target (GUI-14), at rani's request |
 
 ## 9. Appendix: binary protocol (planned)
 
