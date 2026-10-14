@@ -171,9 +171,9 @@ Each requirement links to its design section.
 | GUI-11 | The status box and the Connect / Disconnect button become one button that shows the link state and the link, and a click connects, disconnects or cancels: green `Connected · COM3`, blue `Disconnected · COM3`, red `Link down · COM3`, amber `Connecting · COM3` (2026-10-14) | Done | [D-GUI-2](#d-gui-2-connection-bar) |
 | GUI-12 | Each MCU has an optional short name and tag colour, and each watch row shows its MCU as a coloured tag with the short name before the expression (2026-10-14) | Done | [D-GUI-12](#d-gui-12-mcu-tags) |
 | GUI-13 | A watched value that changed since the previous read is highlighted for a moment (2026-10-14) | Done | [D-GUI-13](#d-gui-13-change-highlight) |
-| GUI-14 | Layout C: MCU cards in the left sidebar replace the image box and the Variables panel, and Watch, Scope, Memory and Console mode tabs sit in the toolbar (2026-10-14) | Planned | [D-GUI-14](#d-gui-14-planned-layout-c-dark-theme-and-drag-and-drop) |
-| GUI-15 | A dark theme (2026-10-14) | Planned | [D-GUI-14](#d-gui-14-planned-layout-c-dark-theme-and-drag-and-drop) |
-| GUI-16 | Drag and drop (2026-10-14) | Planned | [D-GUI-14](#d-gui-14-planned-layout-c-dark-theme-and-drag-and-drop) |
+| GUI-14 | Layout C: a Target panel with one card per MCU (link and ELF state, variables, memory ranges) replaces the Variables panel and the toolbar image box, and Watch, Scope, Memory and Console mode tabs in the toolbar each keep their own layout (2026-10-14) | In review (PR to come) | [D-GUI-14](#d-gui-14-layout-c) |
+| GUI-15 | A dark theme: View > Theme offers System, Light or Dark, saved per user (2026-10-14) | In review (PR to come) | [D-GUI-15](#d-gui-15-dark-theme) |
+| GUI-16 | Drag variables and watch rows onto a watch tab, a tab's title or the chart (2026-10-14) | In review (PR to come) | [D-GUI-16](#d-gui-16-drag-and-drop) |
 
 ### 2.12 Live chart
 
@@ -635,7 +635,7 @@ RDT compares bytes that differ between firmware builds, read from the device and
 - **When:** on connect, on `.reconnect` (the firmware may have been flashed), after an ELF is rebuilt and reloaded (D-SYM-7), and from Target > Check ELF identity. Also when the link comes back after a drop, or an MCU answers again after being silent, since the firmware may have been flashed meanwhile (a reset drops a USB COM port): `Target` marks that MCU's identity stale, the GUI checks it again as soon as the link is up, and `Target.write` checks a stale MCU before writing. MCUs with nothing to compare are not marked.
 - **Results:** `match`, `mismatch`, `unchecked` (nothing to compare, an unknown variable, or a variable with no value in the file, such as one in `.bss`) and `unread` (the MCU did not answer). Only `mismatch` has an effect.
 - **On a mismatch:** every read and write to that MCU is refused with `ImageMismatch` (a `WriteRefused`) naming both values (`device 'rdt-main', ELF 'rdt-mXin'`), including polling and the memory view (rani, 2026-10-14; before that, reads still worked). The GUI has no way around it (rani, 2026-10-14): load the matching ELF or flash the matching firmware, then connect again or use Target > Check ELF identity. The CLI's `--allow-mismatch` and `Target.allow_mismatch(mcu)` from Python still allow access, until the next check.
-- **Image box:** while connected, the toolbar shows an image box next to the connect button (GUI-9, GUI-11): green `Image ✓ verified`, red `Image ✗ mismatch`, `Image: checking`, `Image ? not read` or `Image not checked`, with each MCU's result in its tooltip. It is hidden while not connected.
+- **Image box:** (replaced by the MCU cards' ELF line, D-GUI-14) while connected, the toolbar shows an image box next to the connect button (GUI-9, GUI-11): green `Image ✓ verified`, red `Image ✗ mismatch`, `Image: checking`, `Image ? not read` or `Image not checked`, with each MCU's result in its tooltip. It is hidden while not connected.
 - **Error bar:** while any MCU's ELF does not match, the red error bar under the toolbar (D-GUI-10) shows `⚠ ELF does not match the firmware on <MCU>; reads and writes to it are refused`, with the detail (such as the first differing address) in its tooltip and **Load ELF...** (opens Target > MCUs and ELF files) and **Check again** buttons. That line can't be closed; it goes away once every MCU matches or the link closes. rani first asked for a large banner (PR #70) after missing the red status bar line, then on 2026-10-14 for a slim bar that holds every error (PR #73).
 - **Shown:** after Connect, the GUI status bar says `ELF matches the firmware`, `ELF does NOT match the firmware` or `ELF not checked (no identity variable or build ID)`, one per MCU when there are several (`identity_summary` in `rdt/gui/app.py`). The console logs every result, unchecked ones too. A build-ID mismatch shows the two hashes as `readelf -n` prints them, skipping the 16-byte note header that every build shares. On the CLI, a mismatch is a warning on stderr, `rdt info` prints each MCU's result, and `rdt watch` prints a `#` line when a rebuilt ELF does not match.
 - **Recommended setup:** link with `-Wl,--build-id` and keep `.note.gnu.build-id` in flash after `.isr_vector`, so every build is checked with no identity variable (example `sim/examples/firmware/link_build_id.ld`; steps in `docs/use-your-own-elf.md`).
@@ -862,6 +862,8 @@ The connection fields can be edited only while disconnected. The console and the
 
 #### D-GUI-3 Variable browser
 
+Since GUI-14 the variable list sits inside each MCU's card (D-GUI-14).
+
 The **Variables** panel lists the chosen MCU's globals from its ELF, filtered by the search box (`motor*`, `*count`). A double-click, or **Add to watch list**, adds the selected variables to the tab in front. **Watch > Add expression** (Ctrl+E) takes any expression the CLI takes.
 
 #### D-GUI-4 Watch tree
@@ -917,13 +919,39 @@ rani picked this from mockups on 2026-10-14 (thread "UI improvement ideas"), so 
 
 A value whose text differs from the previous read gets a yellow background (`#fff1a8`, or `#5a4c12` on a dark palette) for `FLASH_S` = 1 s. The first read of an item is not highlighted, nor is an error. `WatchTree._fill` compares with the value shown before and calls `_flash`; `fade`, called from `WatchTabs.tick`, takes the highlight off once its time is up.
 
-#### D-GUI-14 Planned: layout C, dark theme and drag and drop
+#### D-GUI-14 Layout C
 
-rani chose layout C from the mockups on 2026-10-14; these follow in later PRs.
+rani chose layout C from the mockups on 2026-10-14 (thread "UI improvement ideas"): the MCU cards on the left and mode tabs in the toolbar.
 
-- **Layout C (GUI-14):** MCU cards in the left sidebar, replacing the image box and the Variables panel, and **Watch**, **Scope**, **Memory** and **Console** mode tabs in the toolbar.
-- **Dark theme (GUI-15).**
-- **Drag and drop (GUI-16).**
+**MCU cards.** The **Target** panel (`McuCards` and `McuCard` in `rdt/gui/cards.py`) has one card per MCU. It replaces the Variables panel (D-GUI-3) and the toolbar image box (D-SYM-8). The left dock owns the bottom-left corner.
+
+- **Header:** the MCU's tag (D-GUI-12), name and id, and a state dot: green when it answers and its ELF matches; amber when slow (a timeout in the last minute, or a reply slower than half its timeout); red for an ELF mismatch or a link down; grey when not connected, silent or not checked.
+- **Link line:** the smoothed reply time in ms and the timeouts in the last minute (`McuStatus.reply_ms`, `timeouts` and `recent_timeouts()` in the session; `reply_ms` is smoothed as 0.8 old + 0.2 new).
+- **ELF line:** the result of the identity check (D-SYM-8). A mismatch still shows on the red error bar (D-GUI-10).
+- **Open card:** one card is open at a time, showing **Variables** (a `SymbolBrowser` fixed to that MCU) and **Memory ranges** (its ELF sections plus `[[mcu.ranges]]`).
+- **Right-click:** **Check ELF again**, **MCUs and ELF files** and **Open in the memory view**.
+
+**Modes.** `ModeBar`, at the left of the toolbar, has **Watch**, **Scope**, **Memory** and **Console** tabs, also in the View menu with Ctrl+1 to Ctrl+4. `MainWindow.set_mode` switches; `_default_layout` gives each mode's starting layout:
+
+- **Watch:** the MCU cards on the left, the watch tabs in the middle, and Chart, Console and Memory tabbed below.
+- **Scope:** the chart docked on the left at about 70% of the width, beside the watch tabs.
+- **Memory:** the MCU cards and the Memory dock; the central area is hidden.
+- **Console:** the console alone; the central area is hidden.
+
+Each mode's layout is saved with `QMainWindow.saveState` as `session/layout_<mode>` in `ui.toml`, and the last mode as `session/mode`; both are state, so they are never exported (D-WSP-5). **View > Reset this mode's layout** goes back to the default. Polling, the chart and the CSV log keep running in every mode.
+
+#### D-GUI-15 Dark theme
+
+**View > Theme** offers **System** (the default: Qt's own style), **Light** (Fusion with its standard palette) and **Dark** (Fusion with the `DARK` palette), applied by `apply_theme` in `rdt/gui/style.py`. The choice is saved per user as `ui/theme` in `ui.toml` and exported with the interface settings (D-WSP-5). The chart follows the theme (`ChartPanel.set_dark`); the console keeps its dark terminal look.
+
+#### D-GUI-16 Drag and drop
+
+`rdt/gui/dnd.py` carries expressions as the MIME type `application/x-rdt-expressions`.
+
+- **Sources:** `DragTree`, used by the Variables list and the watch tree's rows.
+- **Watch tree:** dropping adds the items not already in that tab, shared the same way as **Also show in tab** (one item, shared settings).
+- **Tab titles:** holding a drag over a tab's title switches to that tab.
+- **Chart:** dropping on the plot or the signal list first watches the item in the front tab if it is not watched yet; after its first read it is charted if it is numeric, otherwise a status message says why not (`MainWindow.drop_on_chart`, `_chart_dropped`).
 
 ### 4.12 Live chart
 
@@ -1071,8 +1099,8 @@ Opening the `.rdtw` loads all three (`Workspace.watch_path`, `Workspace.commands
 
 Interface settings are per user, not per workspace. They are in `ui.toml` next to the console history (`%LOCALAPPDATA%\rdt\ui.toml` on Windows; `RDT_UI_FILE` overrides it), handled by `UiSettings` in `rdt/ui_settings.py`:
 
-- **Settings:** `console/font_size` and `console/wrap` (D-CON-11), and `memory/kind`, `memory/type` and `memory/decimal` (D-GUI-7).
-- **State:** `session/last_workspace` (D-WSP-3). It is not a setting, so it is never exported and an import leaves it alone.
+- **Settings:** `console/font_size` and `console/wrap` (D-CON-11), `memory/kind`, `memory/type` and `memory/decimal` (D-GUI-7), and `ui/theme` (D-GUI-15).
+- **State:** `session/last_workspace` (D-WSP-3), `session/mode` and `session/layout_<mode>` (D-GUI-14). They are not settings, so they are never exported and an import leaves them alone.
 
 Each change re-reads the file before writing it, so two windows keep each other's changes, and a file that can't be written leaves the settings in memory only. `ui.toml` replaces `gui.ini` and `console.ini`, whose values are copied into it on the first start (`load_ui` in `rdt/gui/app.py`).
 
@@ -1392,7 +1420,7 @@ The application is built against the simulator. As soon as the firmware has the 
 | 2026-10-14 | The status box and the Connect / Disconnect button become one button showing the link state; a click connects, disconnects or cancels, and disconnected shows blue instead of grey `Closed` (GUI-11). rani picked this from mockups |
 | 2026-10-14 | The known commands are kept in a TOML file the `.rdtw` names (`bench.commands.toml`, `[[command]]` tables) instead of CSV; an old CSV commands file still loads and becomes TOML on the next save; export writes TOML by default, CSV on request (WSP-4, D-CON-7), at rani's request |
 | 2026-10-14 | A workspace's `.watch.toml` and `.commands.toml` are always saved beside its `.rdtw`; workspaces live by default in `%LOCALAPPDATA%\rdt` (Open and Save as start there), and the default target is `./rdt.toml`, else `%LOCALAPPDATA%\rdt\rdt.toml` (WSP-4), at rani's request |
-| 2026-10-14 | Each MCU gets an optional short name and colour, shown as a tag on its watch rows (GUI-12), and a changed value is highlighted for a second (GUI-13). Layout C (MCU cards in the sidebar, mode tabs in the toolbar), a dark theme and drag and drop are planned (GUI-14 to GUI-16). rani picked these from mockups |
+| 2026-10-14 | Each MCU gets an optional short name and colour, shown as a tag on its watch rows (GUI-12), and a changed value is highlighted for a second (GUI-13). Then layout C: MCU cards replacing the Variables panel and image box, and Watch, Scope, Memory and Console modes with their own layouts (GUI-14), a dark theme (GUI-15) and drag and drop (GUI-16). rani picked these from mockups |
 
 ## 9. Appendix: binary protocol (planned)
 
