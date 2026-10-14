@@ -737,8 +737,8 @@ class Console(QWidget):
 class MemoryView(QWidget):
     """Dump of raw memory, 16 bytes per row with their ASCII. Right-click picks how the cells show the
     bytes (GUI-7): hex bytes by default, unsigned or signed C integers in hex or decimal, characters,
-    floats or doubles. The ASCII column follows the cells (GUI-8): one group per cell, its bytes in the order
-    of the value, so 30000003 shows as 0... Typing a new value in a cell writes it."""
+    floats or doubles. The ASCII column is shown only beside the hex bytes, the default view (GUI-8).
+    Typing a new value in a cell writes it."""
 
     def __init__(self, main):
         super().__init__()
@@ -809,6 +809,7 @@ class MemoryView(QWidget):
         size = self.format.size
         self.table.setColumnCount(BYTES_PER_ROW // size + 1)
         self.table.setHorizontalHeaderLabels([f"{i * size:X}" for i in range(BYTES_PER_ROW // size)] + ["ASCII"])
+        self.table.setColumnHidden(BYTES_PER_ROW // size, self.format != MemFormat())   # only beside hex bytes
 
     def _menu(self, pos) -> None:
         fmt = self.format

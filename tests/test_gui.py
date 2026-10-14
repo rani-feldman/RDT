@@ -191,10 +191,12 @@ def test_console_and_memory(qtbot, win):
     assert cell.text() == str(int.from_bytes(mem.data[:2], "little", signed=True))
     cell.setText("-2")
     qtbot.waitUntil(lambda: mem.data[:2] == b"\xfe\xff", timeout=3000)
-    ascii_col = mem.table.item(0, 8).text()          # one group of 2 per short, in value order
-    assert ascii_col[2 * 3:2 * 3 + 2] == MemFormat("signed", "Short").to_ascii(mem.data[:2], "little")
+    assert mem.table.isColumnHidden(8)               # ASCII column only beside hex bytes
     mem.set_format(MemFormat("float"))
     assert mem.table.columnCount() == 5
+    mem.set_format(MemFormat())
+    assert not mem.table.isColumnHidden(16)
+    mem.set_format(MemFormat("float"))
     assert mem.main.settings().value("memory/kind") == "float"
 
 
