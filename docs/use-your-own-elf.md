@@ -96,7 +96,7 @@ If the firmware has a build ID or an identity variable (below), RDT compares tha
 - When the GUI loads a rebuilt ELF.
 - From **Target > Check ELF identity**. Use it after flashing over ST-LINK while the COM port stays open, since then the link never drops and RDT can't tell the firmware changed.
 
-On a mismatch, every read and write to that MCU is refused, including polling and the memory view, until you load the right ELF or choose **Target > Allow access despite ELF mismatch** (`--allow-mismatch` on the command line). The console still sends commands you type.
+On a mismatch, every read and write to that MCU is refused, including polling and the memory view, until you load the matching ELF (or flash the matching firmware) and connect or check again. The GUI has no way around it; on the command line, `--allow-mismatch` lets a single command through. The console still sends commands you type.
 
 ## Other MCUs
 

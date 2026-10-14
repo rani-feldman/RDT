@@ -14,6 +14,7 @@ pytest.importorskip("pytestqt")
 
 from PySide6.QtCore import Qt  # noqa: E402
 from PySide6.QtWidgets import QInputDialog, QMessageBox  # noqa: E402
+from PySide6.QtGui import QAction  # noqa: E402
 
 from rdt.gui.app import MainWindow  # noqa: E402
 from rdt.gui.panels import McuDialog, ProfileDialog  # noqa: E402
@@ -757,7 +758,7 @@ def test_reopen_last_workspace(qtbot, win, bench, tmp_path):
 def test_elf_identity(qtbot, win, tmp_path, monkeypatch):
     connect(qtbot, win)
     qtbot.waitUntil(lambda: "firmware_name matches" in win.console.output.toPlainText(), timeout=3000)
-    assert not win.allow_action.isEnabled()
+    assert not any("mismatch" in a.text() for a in win.findChildren(QAction))   # no way around it in the GUI
     assert "main: ELF matches the firmware; motorctl: ELF matches the firmware" in win.message.text()
     assert "MCU motorctl: 2 flash blocks (88 bytes) match motorctl.elf" in win.console.output.toPlainText()
     assert win.bar.image.text() == "Image \u2713 verified" and "motorctl: match" in win.bar.image.toolTip()
@@ -771,15 +772,12 @@ def test_elf_identity(qtbot, win, tmp_path, monkeypatch):
     win.disconnect()
     qtbot.waitUntil(lambda: win.device.target is None, timeout=3000)
     connect(qtbot, win)
-    qtbot.waitUntil(lambda: win.allow_action.isEnabled(), timeout=3000)
+    qtbot.waitUntil(lambda: "does not match the firmware on main" in win.message.text(), timeout=3000)
     assert "does not match the firmware on main" in win.message.text()
     qtbot.waitUntil(lambda: win.bar.image.text() == "Image \u2717 mismatch", timeout=3000)
     monkeypatch.setattr(QMessageBox, "question", lambda *a, **k: QMessageBox.Yes)
     win.watch_tree.write("main:motor.target", "1500")
     qtbot.waitUntil(lambda: "does not match" in win.message.text(), timeout=3000)
-    win.allow_action.trigger()
-    qtbot.waitUntil(lambda: not win.allow_action.isEnabled(), timeout=3000)
-    assert "Reads and writes allowed to main" in win.message.text()
     win.disconnect()
     qtbot.waitUntil(lambda: not win.bar._image.isVisible(), timeout=3000)
 
