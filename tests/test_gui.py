@@ -72,9 +72,14 @@ def wait_value(qtbot, win, path, check, timeout=5000):
 
 def test_connect_and_poll(qtbot, win):
     assert win.windowTitle() == "bench.rdtw - RDT"
+    # one button shows the state and connects or disconnects (GUI-11)
+    where = win.ws.config.connection.address
+    qtbot.waitUntil(lambda: win.bar.connect_button.text() == "Disconnected \u00b7 " + where, timeout=3000)
+    assert "Click to connect" in win.bar.connect_button.toolTip()
     assert win.bar.port.value() == int(win.ws.config.connection.address.rsplit(":", 1)[1])
     connect(qtbot, win)
-    assert win.bar.state.text() == "Connected \u00b7 " + win.ws.config.connection.address
+    assert win.bar.connect_button.text() == "Connected \u00b7 " + win.ws.config.connection.address
+    assert "Click to disconnect" in win.bar.connect_button.toolTip()
     wait_value(qtbot, win, "main:motor.current_ma", lambda v: v.endswith(" A"))
     wait_value(qtbot, win, "main:motor.mode", lambda v: "MODE_" in v)
     wait_value(qtbot, win, "main:tick_count", lambda v: v.startswith("0x"))
@@ -576,7 +581,7 @@ def test_link_down_greys_panels(qtbot, win, sim):
     from PySide6.QtTest import QTest
     assert win.console.output.input_enabled
     win.disconnect()
-    qtbot.waitUntil(lambda: win.bar.connect_button.text() == "Connect", timeout=3000)
+    qtbot.waitUntil(lambda: win.bar.connect_button.text().startswith("Disconnected"), timeout=3000)
     con = win.console
     assert not con.output.input_enabled and con.output.hint == "not connected"
     QTest.keyClicks(con.output, "abc")                 # nothing can be typed while disconnected
@@ -911,11 +916,11 @@ def test_link_down_when_the_device_stops_answering(qtbot, win, sim):
     sim.device.frozen = True
     win.read_all()
     where = win.ws.config.connection.address
-    qtbot.waitUntil(lambda: win.bar.state.text() == "Link down · " + where, timeout=8000)
-    assert "answered none" in win.bar.state.toolTip()
+    qtbot.waitUntil(lambda: win.bar.connect_button.text() == "Link down · " + where, timeout=8000)
+    assert "answered none" in win.bar.connect_button.toolTip()
     assert not win.bar._image.isVisible()
     assert "did not answer the last" in win.console.output.toPlainText()
     sim.device.frozen = False
     win.read_all()
-    qtbot.waitUntil(lambda: win.bar.state.text() == "Connected · " + where, timeout=8000)
+    qtbot.waitUntil(lambda: win.bar.connect_button.text() == "Connected · " + where, timeout=8000)
     qtbot.waitUntil(lambda: win.bar.image.text() == "Image ✓ verified", timeout=5000)
