@@ -470,3 +470,16 @@ def test_memory_range_kind_is_saved(tmp_path):
     assert text.count("kind") == 1 and '"memory"' in text   # peripheral is the default
     back = Workspace.load(tmp_path / "b.rdtw").config.mcus[0].ranges
     assert [(r.name, r.kind, r.size) for r in back] == [("DTCM", "memory", 0x20000), ("GPIOA", "peripheral", 0x400)]
+
+
+def test_mcu_short_names_and_colours():
+    from rdt.target import McuConfig, TargetConfig, mcu_color, mcu_short
+    assert mcu_short(McuConfig(1, "Control_CM7")) == "CM7"
+    assert mcu_short(McuConfig(0, "main")) == "MAIN"
+    assert mcu_short(McuConfig(0, "Interface", short="IF")) == "IF"
+    assert mcu_color(McuConfig(2, "x")) == "#1f9a9a" and mcu_color(McuConfig(2, "x", color="#000000")) == "#000000"
+    cfg = TargetConfig.from_dict({"mcu": [{"id": 0, "name": "main", "short": "M0", "color": "#ABCDEF"}]})
+    assert (cfg.mcus[0].short, cfg.mcus[0].color) == ("M0", "#abcdef")
+    for bad in ({"short": "too long name"}, {"color": "red"}):
+        with pytest.raises(ConfigError):
+            TargetConfig.from_dict({"mcu": [{"id": 0, "name": "main", **bad}]})

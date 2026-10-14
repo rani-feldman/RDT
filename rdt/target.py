@@ -54,6 +54,38 @@ class McuConfig:
     byte_order: str | None = None     # default: from the ELF, else the profile's
     ranges: list[Range] = field(default_factory=list)
     identity: str | None = None       # a constant variable that tells firmware builds apart (SYM-8)
+    short: str | None = None          # short name on GUI tags and chips, such as CM7 (GUI-12)
+    color: str | None = None          # tag colour, "#rrggbb" (GUI-12)
+
+
+MCU_COLORS = ("#7b61d6", "#d9822b", "#1f9a9a", "#3d7be0", "#c2185b", "#5d8a2f", "#8d6e63", "#607d8b")
+_SHORT = re.compile(r"[A-Za-z0-9_]{1,6}")
+_COLOR = re.compile(r"#[0-9A-Fa-f]{6}")
+
+
+def mcu_short(m: McuConfig) -> str:
+    """The MCU's short name: its own, else the last part of its name after an underscore
+    (Control_CM7 is CM7), else its name, cut to four characters, in capitals."""
+    if m.short:
+        return m.short
+    return m.name.rsplit("_", 1)[-1][:4].upper() or m.name[:4].upper()
+
+
+def mcu_color(m: McuConfig) -> str:
+    """The MCU's tag colour: its own, else one picked by its id."""
+    return m.color or MCU_COLORS[m.id % len(MCU_COLORS)]
+
+
+def check_short(text: str) -> str:
+    if not _SHORT.fullmatch(text):
+        raise ConfigError(f"short name {text!r}: use 1 to 6 letters, digits or underscores, such as CM7")
+    return text
+
+
+def check_color(text: str) -> str:
+    if not _COLOR.fullmatch(text):
+        raise ConfigError(f"colour {text!r}: use #rrggbb, such as #d9822b")
+    return text.lower()
 
 
 @dataclass
@@ -120,6 +152,8 @@ class TargetConfig:
                 byte_order=t.get("byte_order"),
                 ranges=[Range.from_dict(r) for r in t.get("ranges", [])],
                 identity=str(t["identity"]) if t.get("identity") else None,
+                short=check_short(str(t["short"])) if t.get("short") else None,
+                color=check_color(str(t["color"])) if t.get("color") else None,
             ))
         return cls(connection, profile, mcus, profile_path)
 

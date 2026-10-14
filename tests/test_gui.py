@@ -1,5 +1,6 @@
 """GUI tests: the main window against the simulated device, run offscreen with pytest-qt."""
 
+import dataclasses
 import os
 import re
 import shutil
@@ -553,10 +554,49 @@ def test_mcu_dialog(qtbot, win):
     qtbot.addWidget(dlg)
     assert [m.name for m in dlg.result_mcus()] == ["main", "motorctl"]
     assert dlg.result_mcus()[0].ranges   # GPIOA kept
-    assert dlg.table.item(0, 4).text() == "firmware_name" and dlg.result_mcus()[0].identity == "firmware_name"
+    assert dlg.table.item(0, 6).text() == "firmware_name" and dlg.result_mcus()[0].identity == "firmware_name"
+    dlg.table.item(1, 2).setText("MC")
+    dlg.table.item(1, 3).setText("#D9822B")
+    m = dlg.result_mcus()[1]
+    assert (m.short, m.color) == ("MC", "#d9822b")
+    dlg.table.item(1, 2).setText("MAIN")
+    with pytest.raises(Exception, match="short names must be unique"):
+        dlg.result_mcus()
+    dlg.table.item(1, 2).setText("bad name")
+    with pytest.raises(Exception, match="short name"):
+        dlg.result_mcus()
+    dlg.table.item(1, 2).setText("")
     dlg.table.item(0, 1).setText("motorctl")
     with pytest.raises(Exception, match="unique"):
         dlg.result_mcus()
+
+
+def test_watch_rows_show_mcu_tags_and_flash_changes(qtbot, win, tmp_path):
+    from rdt.gui.style import TAG_ROLE
+    from rdt.gui.variables import COL_NAME
+    tree = win.watch_tree
+    item = tree.states["main:motor.speed"].item
+    assert item.text(COL_NAME) == "motor.speed" and item.toolTip(COL_NAME).startswith("main:motor.speed")
+    assert item.data(COL_NAME, TAG_ROLE) == ("MAIN", "#7b61d6")
+    win.ws.config.mcus[0].short, win.ws.config.mcus[0].color = "M", "#123456"
+    tree.retag()
+    assert item.data(COL_NAME, TAG_ROLE) == ("M", "#123456")
+    path = tmp_path / "tags.rdtw"
+    win.ws.save(path)
+    text = path.read_text()
+    assert re.search(r'short\s*= "M"', text) and re.search(r'color\s*= "#123456"', text)
+    assert Workspace.load(path).config.mcus[0].short == "M"
+    connect(qtbot, win)
+    wait_value(qtbot, win, "main:motor.speed", lambda v: v.endswith("rpm"))
+    st = tree.states["main:motor.speed"]
+    row = st.shown["main:motor.speed"]
+    tree._fill(st, [row])
+    assert not tree.flashing   # the same value again
+    tree._fill(st, [dataclasses.replace(row, text="1234.5 rpm")])
+    assert "main:motor.speed" in tree.flashing
+    assert item.background(COL_VALUE).color().isValid() and item.background(COL_VALUE).style() != Qt.NoBrush
+    tree.fade(time.monotonic() + 5)
+    assert not tree.flashing and item.background(COL_VALUE).style() == Qt.NoBrush
 
 
 def test_elf_rebuild_remaps(qtbot, win, tmp_path):
