@@ -52,6 +52,13 @@ class MemFormat:
             return str(v)
         return f"{'-' if v < 0 else ''}{abs(v):0{2 * self.size}X}"
 
+    def to_ascii(self, raw: bytes, order: str) -> str:
+        """The ASCII column for one cell: its bytes as characters, in the order the value is read
+        (most significant byte first), so they line up with the hex digits of the cell."""
+        if self.size > 1 and order == "little":
+            raw = raw[::-1]
+        return "".join(chr(b) if 32 <= b < 127 else "." for b in raw)
+
     def from_text(self, text: str, order: str) -> bytes:
         """The bytes (memory order) for a typed cell; raises ValueError with a message for the user."""
         text = text.strip()

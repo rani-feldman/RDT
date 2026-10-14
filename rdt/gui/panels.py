@@ -743,7 +743,8 @@ class Console(QWidget):
 class MemoryView(QWidget):
     """Dump of raw memory, 16 bytes per row with their ASCII. Right-click picks how the cells show the
     bytes (GUI-7): hex bytes by default, unsigned or signed C integers in hex or decimal, characters,
-    floats or doubles. Typing a new value in a cell writes it."""
+    floats or doubles. The ASCII column follows the cells: one group per cell, its bytes in the order
+    of the value, so 30000003 shows as 0... Typing a new value in a cell writes it."""
 
     def __init__(self, main):
         super().__init__()
@@ -886,9 +887,6 @@ class MemoryView(QWidget):
         self.table.setVerticalHeaderLabels([f"{start + r * BYTES_PER_ROW:08X}" for r in range(rows)])
         for r in range(rows):
             text = []
-            for c in range(BYTES_PER_ROW):
-                i = start + r * BYTES_PER_ROW + c - base
-                text.append((chr(data[i]) if 32 <= data[i] < 127 else ".") if 0 <= i < len(data) else " ")
             for c in range(cells):
                 i = start + r * BYTES_PER_ROW + c * size - base
                 item = self.table.item(r, c)
@@ -899,10 +897,12 @@ class MemoryView(QWidget):
                 if 0 <= i and i + size <= len(data):     # a cell only partly read stays blank
                     item.setText(fmt.to_text(data[i:i + size], order))
                     item.setFlags(Qt.ItemIsSelectable | Qt.ItemIsEnabled | Qt.ItemIsEditable)
+                    text.append(fmt.to_ascii(data[i:i + size], order))
                 else:
                     item.setText("")
                     item.setFlags(Qt.NoItemFlags)
-            ascii_item = QTableWidgetItem("".join(text))
+                    text.append(" " * size)
+            ascii_item = QTableWidgetItem((" " if size > 1 else "").join(text))
             ascii_item.setFlags(Qt.ItemIsSelectable | Qt.ItemIsEnabled)
             self.table.setItem(r, cells, ascii_item)
         self.table.blockSignals(False)
