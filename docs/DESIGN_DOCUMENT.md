@@ -60,6 +60,7 @@ Each requirement links to its design section.
 | LNK-5 | On link loss RDT reconnects on its own; values grey out and writes are refused while the link is down (2026-10-05) | Done | [D-LNK-5](#d-lnk-5-auto-reconnect) |
 | LNK-6 | Other tools may use the firmware's SCPI port over LAN at the same time as RDT (2026-10-05) | Done | [D-LNK-6](#d-lnk-6-sharing-the-link-with-other-tools) |
 | LNK-7 | On connect and every reconnect, check that the device answers | Done | [D-LNK-7](#d-lnk-7-probe-on-connect) |
+| LNK-8 | The GUI lists each COM port with its description, such as `COM3 - GAC serial port (COM3)` (2026-10-13) | Done | [D-LNK-1](#d-lnk-1-com-port) |
 
 ### 2.3 SCPI commands
 
@@ -221,6 +222,7 @@ Console features taken from ComPort-Zone (an open serial terminal); rani approve
 | CON-12 | The GUI lists every keyboard shortcut in one window (2026-10-12) | Done | [D-CON-12](#d-con-12-keyboard-shortcuts) |
 | CON-13 | The GUI console looks like a terminal: dark, each line with its time and a TX, RX, ERR or SYS tag, and the prompt as its last line, with no separate line or button for sending (2026-10-12) | Done | [D-CON-13](#d-con-13-terminal-look) |
 | CON-14 | Commands are typed on the console's next free line, inside the transcript, and the best suggestion from the history or the known commands shows while typing, without pressing Tab (2026-10-12) | Done | [D-CON-14](#d-con-14-typing-in-the-transcript) |
+| CON-15 | The list of matching commands opens as soon as something is typed, without Tab; Tab or Enter takes the highlighted command (2026-10-13) | Done | [D-CON-2](#d-con-2-autocomplete) |
 
 ### 2.18 Removed and not in v1
 
@@ -330,7 +332,7 @@ port      = "COM5"
 baud      = 115200
 ```
 
-On the CLI: `--serial COM5 --baud 115200`. In the GUI the connection bar lists the COM ports and offers common baud rates. A COM port can be opened by one program only, so it is never shared (D-LNK-6).
+On the CLI: `--serial COM5 --baud 115200`. In the GUI the connection bar lists the COM ports and offers common baud rates. Each port shows with its description from pyserial, such as `COM3 - GAC serial port (COM3)` (LNK-8, rani, 2026-10-13); only the port name is saved and used to connect, and a port typed by hand still works (`serial_ports`, `port_label` and `port_name` in `rdt/gui/app.py`). A COM port can be opened by one program only, so it is never shared (D-LNK-6).
 
 #### D-LNK-2 TCP
 
@@ -1052,7 +1054,10 @@ The console code that is not Qt lives in `rdt/console.py`, so the GUI console (`
 
 Suggestions come from the history and the workspace's known commands (D-CON-7) only, as rani asked on 2026-10-12: a suggestion is always a command really sent before or one imported for this device. `completions(text, history, profile, extra, common=False)` returns up to 20, without duplicates (case-insensitive): those starting with `text` first, then those containing it, each group ordered history (newest first) then known commands. (With a profile and `common=True` it can also offer the profile's command heads and the IEEE 488.2 common commands; neither console uses that any more.)
 
-- **GUI:** while typing, the best suggestion shows in grey after the cursor (D-CON-14); Right takes it. Tab (Ctrl+Space too) completes, whether or not a suggestion shows: one match is filled in at once; with several, the part they all start with is filled in and a `QCompleter` popup lists them at the cursor; it refreshes as you type, and Tab or Enter takes the highlighted one.
+- **GUI:** while typing, the best suggestion shows in grey after the cursor (D-CON-14); Right takes it.
+- **Match list (CON-15, rani, 2026-10-13):** a `QCompleter` list of the matching commands opens at the cursor as soon as something is typed, without Tab, and refreshes as you type. It does not open for a whole command that matches only itself. The grey suggestion still shows while the list is open, and Right still takes it.
+- **Keys with the list open:** Tab or Enter takes the highlighted command; Tab with nothing highlighted takes the first; Enter with nothing highlighted sends what is typed; Esc closes the list. `Terminal.keyPressEvent` hands Tab, Enter and Esc to `Console._popup_key` while the list is open, so the list, not the terminal, gets them. Before this, the terminal took Tab itself, so a command picked with the arrows was not taken.
+- **Keys with the list closed:** Tab (Ctrl+Space too) completes: one match is filled in at once; with several, the part they all start with is filled in and the list opens.
 - **CLI:** Tab, through readline, completing the whole line (the completer delimiters are cleared, since SCPI headers hold `:`, `?` and `*`). The console's own `.` commands are offered as well.
 
 #### D-CON-3 Timestamps and colours
@@ -1116,7 +1121,7 @@ The transcript and the prompt are one editable `QPlainTextEdit`, `Terminal` in `
 
 - **Typing:** a key that edits the text, or a paste, goes to the end of the prompt line, wherever the cursor was (clicking in the transcript to select and copy still works). Backspace and Left stop at the input's start, and Home goes there. A paste becomes one line. While the link is down nothing can be typed.
 - **New lines:** a reply or note is inserted above the prompt line, so what you are typing stays, and the view follows the prompt while the cursor is on it. Enter turns the typed line into a `TX` line above, and the prompt is free again on the next line.
-- **Suggestion while typing:** after every edit the console takes the first suggestion (D-CON-2, history newest first, then known commands) that starts with the typed text, ignoring case, and the terminal paints the rest of it in grey after the cursor. Right (or End) at the end of the line takes it; Tab instead completes (D-CON-2), so with several matches it lists them all rather than taking the one shown; Esc hides it. On an empty prompt the grey text is a hint ("type a command — ↑ recalls history, → takes the suggestion, Tab lists matches", or "not connected").
+- **Suggestion while typing:** after every edit the console takes the first suggestion (D-CON-2, history newest first, then known commands) that starts with the typed text, ignoring case, and the terminal paints the rest of it in grey after the cursor. Right (or End) at the end of the line takes it; the list of matches is open at the same time (D-CON-2), and Tab or Enter takes the command highlighted there instead; Esc closes the list, or hides the suggestion when no list is open. On an empty prompt the grey text is a hint ("type a command — ↑ recalls history, → takes the suggestion, Tab lists matches", or "not connected").
 - **Keys:** Up and Down walk the history (D-CON-1); Ctrl+C copies a selection; the console's Ctrl+F, Ctrl+K and zoom shortcuts work as before.
 
 #### D-CON-12 Keyboard shortcuts
@@ -1250,6 +1255,7 @@ The application is built against the simulator. As soon as the firmware has the 
 | 2026-10-12 | Every SCPI read and write covers whole 4-byte aligned words (`align`); reads are trimmed, and smaller or unaligned writes are read-modify-write, which rani chose over refusing them (SCPI-10) |
 | 2026-10-13 | A **Poll now** button and a **Poll** on/off checkbox in the GUI; turning polling off stops every item, including those with their own interval, and is not saved in the workspace (POLL-5, POLL-6) |
 | 2026-10-13 | Read replies are comma-separated 4-byte words in bare hex (`30303030,2F30302F`), decoded in each MCU's byte order; the run-of-bytes reply is removed, at rani's request after connecting to the real target (SCPI-11) |
+| 2026-10-13 | Console: the list of matches opens while typing, and Tab or Enter takes the highlighted command (CON-15); COM ports are listed with their descriptions (LNK-8), at rani's request |
 
 ## 9. Appendix: binary protocol (planned)
 
