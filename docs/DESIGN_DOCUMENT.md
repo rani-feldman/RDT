@@ -174,6 +174,7 @@ Each requirement links to its design section.
 | GUI-14 | Layout C: a Target panel with one card per MCU (link and ELF state, variables, memory ranges) replaces the Variables panel and the toolbar image box, and Watch, Scope, Memory and Console mode tabs in the toolbar each keep their own layout (2026-10-14) | Done | [D-GUI-14](#d-gui-14-layout-c) |
 | GUI-15 | A dark theme: View > Theme offers System, Light or Dark, saved per user (2026-10-14) | Done | [D-GUI-15](#d-gui-15-dark-theme) |
 | GUI-16 | Drag variables and watch rows onto a watch tab, a tab's title or the chart (2026-10-14) | Done | [D-GUI-16](#d-gui-16-drag-and-drop) |
+| GUI-17 | The title bar shows no text, and the app icon sits in the menu row just before File (rani, 2026-10-14) | Done | [D-GUI-17](#d-gui-17-icon-in-the-menu-row) |
 
 ### 2.12 Live chart
 
@@ -952,6 +953,10 @@ Each mode's layout is saved with `QMainWindow.saveState` as `session/layout_<mod
 - **Watch tree:** dropping adds the items not already in that tab, shared the same way as **Also show in tab** (one item, shared settings).
 - **Tab titles:** holding a drag over a tab's title switches to that tab.
 - **Chart:** dropping on the plot or the signal list first watches the item in the front tab if it is not watched yet; after its first read it is charted if it is numeric, otherwise a status message says why not (`MainWindow.drop_on_chart`, `_chart_dropped`).
+
+#### D-GUI-17 Icon in the menu row
+
+`MainWindow._menu_icon` puts the app icon (`rdt/gui/assets/rdt.png`, 22 px) in the left corner of the menu bar, before File. The window title is a single space, so the title bar shows only the system icon and buttons; the workspace name and the unsaved mark (`name * - RDT`) are kept in `MainWindow.doc_title`.
 
 ### 4.12 Live chart
 
