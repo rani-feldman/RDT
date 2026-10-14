@@ -469,6 +469,10 @@ class MainWindow(QMainWindow):
 
     # --- menus -------------------------------------------------------------------------------
 
+    def menuBar(self):
+        """The menu bar inside the title bar row; QMainWindow.menuBar() would replace the row."""
+        return self.menu_bar
+
     def _menus(self) -> None:
         def action(menu, text, slot, shortcut=None):
             a = QAction(text, self)
