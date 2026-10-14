@@ -164,7 +164,7 @@ Each requirement links to its design section.
 | GUI-5 | A memory view: hex and ASCII dump of any range, editable | Done | [D-GUI-5](#d-gui-5-memory-view) |
 | GUI-6 | The GUI never blocks on the device | Done | [D-GUI-6](#d-gui-6-device-worker-thread) |
 | GUI-7 | The memory view offers display formats from a right-click menu: a Decimal toggle; Unsigned and Signed submenus with Char, Int, Short and Long; Ascii, Float and Double. The current choice has a check mark, and hex bytes (unsigned Char in hex) stay the default (2026-10-14) | Done | [D-GUI-7](#d-gui-7-memory-display-formats) |
-| GUI-8 | The memory view's ASCII column follows the chosen display format: each cell's bytes show as one group in the order of the value (2026-10-14) | In review (PR #52) | [D-GUI-7](#d-gui-7-memory-display-formats) |
+| GUI-8 | The memory view's ASCII column follows the chosen display format: each cell's bytes show as one group in the order of the value (2026-10-14) | Done | [D-GUI-7](#d-gui-7-memory-display-formats) |
 
 ### 2.12 Live chart
 
