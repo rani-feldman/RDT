@@ -101,7 +101,7 @@ Each requirement links to its design section.
 | SYM-5 | An expression through a pointer follows the pointer when the firmware moves it | Done | [D-SYM-5](#d-sym-5-pointers) |
 | SYM-6 | Loading a large ELF is fast after the first time | Done | [D-SYM-6](#d-sym-6-symbol-cache) |
 | SYM-7 | When an ELF is rebuilt, RDT reloads it and finds every watched item again by name (2026-10-05) | Done | [D-SYM-7](#d-sym-7-elf-rebuild-detection) |
-| SYM-8 | Check on connect that each ELF matches the firmware running on its MCU, and check again when the link or the MCU comes back; with no identity variable or build ID, compare a sample of the flash image. Show the result in the GUI, with a large banner that can't be missed while an MCU does not match, and refuse reads and writes to an MCU that does not match (2026-10-12, updated 2026-10-14) | Done | [D-SYM-8](#d-sym-8-build-identity-check) |
+| SYM-8 | Check on connect that each ELF matches the firmware running on its MCU, and check again when the link or the MCU comes back; with no identity variable or build ID, compare a sample of the flash image. Show the result in the GUI, with the mismatch on the red error bar (GUI-10) while an MCU does not match, and refuse reads and writes to an MCU that does not match (2026-10-12, updated 2026-10-14) | Done | [D-SYM-8](#d-sym-8-build-identity-check) |
 
 ### 2.6 Memory access
 
@@ -166,6 +166,7 @@ Each requirement links to its design section.
 | GUI-7 | The memory view offers display formats from a right-click menu: a Decimal toggle; Unsigned and Signed submenus with Char, Int, Short and Long; Ascii, Float and Double. The current choice has a check mark, and hex bytes (unsigned Char in hex) stay the default (2026-10-14) | Done | [D-GUI-7](#d-gui-7-memory-display-formats) |
 | GUI-8 | The memory view's ASCII column shows only beside the default hex bytes (unsigned Char in hex); any other display format hides it, and Ascii in the menu shows memory as text (2026-10-14, updated 2026-10-14) | Done | [D-GUI-7](#d-gui-7-memory-display-formats) |
 | GUI-9 | A status box before the Connect button shows the link state and the link, such as a green `Connected · COM3` or a grey `Closed · COM3` (2026-10-14) | Done | [D-GUI-2](#d-gui-2-connection-bar) |
+| GUI-10 | Every error shows in one slim red bar under the toolbar: an ELF that does not match its firmware and the latest failed connect, read, write or poll. The status bar shows only ordinary messages (2026-10-14) | Done | [D-GUI-10](#d-gui-10-error-bar) |
 
 ### 2.12 Live chart
 
@@ -615,8 +616,8 @@ RDT compares bytes that differ between firmware builds, read from the device and
 - **Results:** `match`, `mismatch`, `unchecked` (nothing to compare, an unknown variable, or a variable with no value in the file, such as one in `.bss`) and `unread` (the MCU did not answer). Only `mismatch` has an effect.
 - **On a mismatch:** every read and write to that MCU is refused with `ImageMismatch` (a `WriteRefused`) naming both values (`device 'rdt-main', ELF 'rdt-mXin'`), including polling and the memory view (rani, 2026-10-14; before that, reads still worked). The GUI has no way around it (rani, 2026-10-14): load the matching ELF or flash the matching firmware, then connect again or use Target > Check ELF identity. The CLI's `--allow-mismatch` and `Target.allow_mismatch(mcu)` from Python still allow access, until the next check.
 - **Image box:** while connected, the toolbar shows an image box next to the connection status (GUI-9): green `Image ✓ verified`, red `Image ✗ mismatch`, `Image: checking`, `Image ? not read` or `Image not checked`, with each MCU's result in its tooltip. It is hidden while not connected.
-- **Mismatch banner:** while any MCU's ELF does not match, a large red banner spans the top of the main window under the toolbar. It reads `⚠ ELF does not match the firmware on <MCU>`, says reads and writes to it are refused, gives the detail (such as the first differing address), and has **Load ELF...** (opens Target > MCUs and ELF files) and **Check again** buttons. It can't be hidden, and it goes away once every MCU matches or the link closes. rani asked for it on 2026-10-14 after missing the status bar line; the status bar line and the Image box stay.
-- **Shown:** after Connect, the GUI status bar says `ELF matches the firmware`, `ELF does NOT match the firmware` (in red) or `ELF not checked (no identity variable or build ID)`, one per MCU when there are several (`identity_summary` in `rdt/gui/app.py`). The console logs every result, unchecked ones too. A build-ID mismatch shows the two hashes as `readelf -n` prints them, skipping the 16-byte note header that every build shares. On the CLI, a mismatch is a warning on stderr, `rdt info` prints each MCU's result, and `rdt watch` prints a `#` line when a rebuilt ELF does not match.
+- **Error bar:** while any MCU's ELF does not match, the red error bar under the toolbar (D-GUI-10) shows `⚠ ELF does not match the firmware on <MCU>; reads and writes to it are refused`, with the detail (such as the first differing address) in its tooltip and **Load ELF...** (opens Target > MCUs and ELF files) and **Check again** buttons. That line can't be closed; it goes away once every MCU matches or the link closes. rani first asked for a large banner (PR #70) after missing the red status bar line, then on 2026-10-14 for a slim bar that holds every error (PR #73).
+- **Shown:** after Connect, the GUI status bar says `ELF matches the firmware`, `ELF does NOT match the firmware` or `ELF not checked (no identity variable or build ID)`, one per MCU when there are several (`identity_summary` in `rdt/gui/app.py`). The console logs every result, unchecked ones too. A build-ID mismatch shows the two hashes as `readelf -n` prints them, skipping the 16-byte note header that every build shares. On the CLI, a mismatch is a warning on stderr, `rdt info` prints each MCU's result, and `rdt watch` prints a `#` line when a rebuilt ELF does not match.
 - **Recommended setup:** link with `-Wl,--build-id` and keep `.note.gnu.build-id` in flash after `.isr_vector`, so every build is checked with no identity variable (example `sim/examples/firmware/link_build_id.ld`; steps in `docs/use-your-own-elf.md`).
 - **Editing:** the GUI's MCU dialog has an Identity variable column. The example workspace and target file check `firmware_name` on MCU `main`.
 
@@ -729,7 +730,7 @@ The write guard lives in `Workspace.write` (`rdt/workspace.py`). It is used by t
 
 #### D-WS-2 Limits
 
-`min` and `max`, in shown units, are checked before the write is sent. A value outside them is refused with a message: in the GUI's status bar, or as an error on the CLI.
+`min` and `max`, in shown units, are checked before the write is sent. A value outside them is refused with a message: on the GUI's error bar (D-GUI-10), or as an error on the CLI.
 
 #### D-WS-3 Confirm before writing
 
@@ -873,6 +874,15 @@ Right-click the memory view's dump to choose how its cells show memory (GUI-7).
 #### D-GUI-6 Device worker thread
 
 All device I/O runs on one worker thread (`rdt/gui/device.py`), in the order it was asked for, so the window never waits on the link. Jobs carry a key (the poll, the memory view, the ELF check). A job is dropped while an earlier job with the same key is still pending, which is how a slow link falls behind instead of queueing (D-POLL-4). Results come back to the window as Qt signals.
+
+#### D-GUI-10 Error bar
+
+rani asked on 2026-10-14 for every error to be in one place, after an error showed in a large ELF banner at the top and another in the status bar at the bottom. `ErrorBanner` in `rdt/gui/app.py` is a slim red bar under the connection toolbar, which can't be moved or hidden. It has up to two lines:
+
+- **ELF mismatch** (D-SYM-8): stays until every MCU matches again, with **Load ELF...** and **Check again** buttons and each MCU's detail in the tooltip (`show_mismatch`).
+- **Latest error:** a failed connect, read, write or poll, or a refused write. It has a ✕ to close it, and a newer error replaces it. Any later message that is not an error clears it, since the later action went through (`MainWindow.status(msg, error=True)` calls `show_error`).
+
+The bar is hidden when both lines are empty. The status bar at the bottom shows only ordinary messages, never in red. The text can be selected and copied, and a long error never widens the window.
 
 ### 4.12 Live chart
 
@@ -1081,7 +1091,7 @@ Every failure is an `rdt.RdtError` subclass (`rdt/errors.py`) with a message tha
 | `BadReply` | A reply doesn't parse with the profile |
 | `ConfigError` | A target file, workspace or profile is invalid |
 
-The CLI prints the message and exits with code 1. The GUI shows it in the status bar, or in red on the item it belongs to.
+The CLI prints the message and exits with code 1. The GUI shows it on the red error bar under the toolbar (D-GUI-10), or in red on the item it belongs to.
 
 ### 4.16 Simulator
 
@@ -1324,6 +1334,7 @@ The application is built against the simulator. As soon as the firmware has the 
 | 2026-10-14 | The memory view's ASCII column shows only beside the hex bytes and is hidden for every other display format, replacing the per-cell regrouping (GUI-8), at rani's request |
 | 2026-10-14 | An ELF mismatch shows a large red banner across the top of the main window, with Load ELF... and Check again buttons, which can't be hidden while the mismatch lasts (SYM-8), at rani's request after missing the status bar line |
 | 2026-10-14 | The workspace is split into the `.rdtw`, a watch list file and a commands CSV; interface settings move to a per-user `ui.toml` that replaces `gui.ini` and `console.ini`; each of the three can be imported and exported (WSP-4 to WSP-6), at rani's request |
+| 2026-10-14 | The large ELF mismatch banner becomes one slim red error bar under the toolbar that holds every error: the mismatch and the latest failed action, which has a close button. The status bar no longer shows errors (GUI-10, SYM-8), at rani's request |
 
 ## 9. Appendix: binary protocol (planned)
 
