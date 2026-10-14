@@ -174,8 +174,7 @@ Each requirement links to its design section.
 | GUI-14 | Layout C: a Target panel with one card per MCU (link and ELF state, variables, memory ranges) replaces the Variables panel and the toolbar image box, and Watch, Scope, Memory and Console mode tabs in the toolbar each keep their own layout (2026-10-14) | Done | [D-GUI-14](#d-gui-14-layout-c) |
 | GUI-15 | A dark theme: View > Theme offers System, Light or Dark, saved per user (2026-10-14) | Done | [D-GUI-15](#d-gui-15-dark-theme) |
 | GUI-16 | Drag variables and watch rows onto a watch tab, a tab's title or the chart (2026-10-14) | Done | [D-GUI-16](#d-gui-16-drag-and-drop) |
-| GUI-17 | The title bar shows no text, and the app icon sits in the menu row just before File (rani, 2026-10-14) | Done | [D-GUI-17](#d-gui-17-icon-in-the-menu-row) |
-| GUI-18 | The title bar's own icon is hidden; only the icon before File shows (rani, 2026-10-14) | Done | [D-GUI-18](#d-gui-18-no-title-bar-icon) |
+| GUI-17 | One title bar row: the app icon, the menus and the minimise, maximise and close buttons in a single line, with no title text and no standard Windows title bar above it (rani, 2026-10-14) | Done | [D-GUI-17](#d-gui-17-one-row-title-bar) |
 
 ### 2.12 Live chart
 
@@ -955,13 +954,13 @@ Each mode's layout is saved with `QMainWindow.saveState` as `session/layout_<mod
 - **Tab titles:** holding a drag over a tab's title switches to that tab.
 - **Chart:** dropping on the plot or the signal list first watches the item in the front tab if it is not watched yet; after its first read it is charted if it is numeric, otherwise a status message says why not (`MainWindow.drop_on_chart`, `_chart_dropped`).
 
-#### D-GUI-17 Icon in the menu row
+#### D-GUI-17 One-row title bar
 
-`MainWindow._menu_icon` puts the app icon (`rdt/gui/assets/rdt.png`, 22 px) in the left corner of the menu bar, before File. The window title is a single space, so the title bar shows only the system icon and buttons; the workspace name and the unsaved mark (`name * - RDT`) are kept in `MainWindow.doc_title`.
+`rdt/gui/titlebar.py` makes the main window frameless and sets a 38 px row as its menu widget (`titlebar.install`, called before the menus are built; it returns the menu bar inside the row, and `MainWindow.menu_bar` / `menuBar()` give the menus a place). The row holds the 22 px app icon, the menus (13 pt text), and minimise, maximise or restore, and close (red on hover).
 
-#### D-GUI-18 No title bar icon
-
-On Windows, `MainWindow.showEvent` calls `blank_title_icon`, which sends `WM_SETICON` with a transparent 16 x 16 icon as the window's small icon (the one in the title bar). The big icon stays, so the taskbar and Alt-Tab still show the app icon. Windows still reserves the icon's space at the left of the title bar. Any failure is ignored (it is cosmetic). Not available on other systems.
+- **Title text:** none. The window title is still set (`name * - RDT`), so the taskbar and Alt-Tab show it.
+- **Moving and resizing:** pressing an empty part of the row calls the system move, a double click maximises or restores, and the outer 6 px of the window call the system resize (cursor changes at the edges; the top edge is covered by the row).
+- **Opt out:** `RDT_NATIVE_TITLEBAR=1` keeps the standard Windows title bar.
 
 ### 4.12 Live chart
 

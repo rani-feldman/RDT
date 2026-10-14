@@ -76,7 +76,7 @@ def wait_value(qtbot, win, path, check, timeout=5000):
 
 
 def test_connect_and_poll(qtbot, win):
-    assert win.doc_title == "bench.rdtw - RDT"
+    assert win.windowTitle() == "bench.rdtw - RDT"
     # one button shows the state and connects or disconnects (GUI-11)
     where = win.ws.config.connection.address
     qtbot.waitUntil(lambda: win.bar.connect_button.text() == "Disconnected \u00b7 " + where, timeout=3000)
@@ -160,7 +160,7 @@ def test_symbol_browser_adds_and_save_round_trips(qtbot, win, tmp_path):
     sb.list.topLevelItem(0).setSelected(True)
     sb.add_button.click()
     assert "main:rx_buffer" in win.watch_tree.states
-    assert win.dirty and win.doc_title.endswith("* - RDT")
+    assert win.dirty and win.windowTitle().endswith("* - RDT")
     win.watch_tree.set_format("main:motor.speed", "hex")
     out = tmp_path / "saved.rdtw"
     assert win._save_to(out)
