@@ -937,9 +937,6 @@ class MemoryView(QWidget):
 
 # --- SCPI profile editor ---------------------------------------------------------------------
 
-_OPTIONAL = {"reply_regex"}
-
-
 def _escape(s: str) -> str:
     return s.encode("unicode_escape").decode("ascii")
 
@@ -964,7 +961,6 @@ class ProfileDialog(QDialog):
         tips = {
             "read": "Placeholders: {mcu} {addr} {len}. {addr} is sent as bare hex, such as 20000000",
             "write": "Placeholders: {mcu} {addr} {value} {size}. {addr} and {value} are sent as bare hex",
-            "reply_regex": "Optional; the group named data (or group 1) holds the hex data",
             "terminator": "Escapes allowed: \\n, \\r\\n",
             "align": "Every read and write covers whole aligned words of this many bytes; "
                      "a smaller value is read as its word and written by read-modify-write",
@@ -987,9 +983,7 @@ class ProfileDialog(QDialog):
                 text = _escape(value) if f.name == "terminator" else ("" if value is None else
                                                                      f"{value:g}" if isinstance(value, float) else str(value))
                 w = QLineEdit(text)
-                if f.name in _OPTIONAL:
-                    w.setPlaceholderText("none")
-                if f.name in ("read", "write", "reply_regex"):
+                if f.name in ("read", "write"):
                     w.setFont(mono())
                 w.textChanged.connect(self._preview)
             if f.name in tips:
@@ -1036,8 +1030,6 @@ class ProfileDialog(QDialog):
                 values[name] = int(text)
             elif name == "timeout_ms":
                 values[name] = float(text)
-            elif name in _OPTIONAL:
-                values[name] = text.strip() or None
             else:
                 values[name] = text
         return Profile(**values, ranges=self.ranges)
