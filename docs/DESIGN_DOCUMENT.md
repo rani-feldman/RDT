@@ -1278,11 +1278,8 @@ The application is built against the simulator. As soon as the firmware has the 
 | 2026-10-14 | The memory view gets right-click display formats: signed and unsigned Char, Short, Int and Long in hex or decimal, Ascii, Float and Double, with hex bytes as the default (GUI-7), at rani's request |
 | 2026-10-14 | The memory view's ASCII column follows the chosen display format, each cell's bytes shown in the order of the value (GUI-8), at rani's request |
 | 2026-10-14 | RDT sends no query of its own: the error query after a timeout, `rdt errors` and `.err` are removed (RM-7), and so is the `*IDN?` probe on connect (RM-8). Connected means the port or socket opened, and only a broken port or socket takes the link down (LNK-7). The GUI shows the link in a status box such as `Connected · COM3` (GUI-9). At rani's request, replacing the 2026-10-11 error-query hint |
-<<<<<<< HEAD
-| 2026-10-14 | The ELF identity is checked again when the link or a silent MCU comes back, and the result shows in the status bar after Connect, with a recommended build-ID linker setup (SYM-8), at rani's request to check the ELF is not outdated |
-=======
 | 2026-10-14 | The profile's `reply_regex` is removed, since a read reply is only comma-separated words (SCPI-11, RM-9), at rani's request |
->>>>>>> origin/main
+| 2026-10-14 | The ELF identity is checked again when the link or a silent MCU comes back, and the result shows in the status bar after Connect, with a recommended build-ID linker setup (SYM-8), at rani's request to check the ELF is not outdated |
 
 ## 9. Appendix: binary protocol (planned)
 
