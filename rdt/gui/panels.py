@@ -809,7 +809,10 @@ class MemoryView(QWidget):
         size = self.format.size
         self.table.setColumnCount(BYTES_PER_ROW // size + 1)
         self.table.setHorizontalHeaderLabels([f"{i * size:X}" for i in range(BYTES_PER_ROW // size)] + ["ASCII"])
-        self.table.setColumnHidden(BYTES_PER_ROW // size, self.format != MemFormat())   # only beside hex bytes
+        ascii_shown = self.format == MemFormat()      # only beside hex bytes
+        self.table.setColumnHidden(BYTES_PER_ROW // size, not ascii_shown)
+        # stretch the ASCII column only; with it hidden, the last value column keeps its own width
+        self.table.horizontalHeader().setStretchLastSection(ascii_shown)
 
     def _menu(self, pos) -> None:
         fmt = self.format
