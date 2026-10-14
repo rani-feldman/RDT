@@ -83,7 +83,9 @@ def align_span(addr: int, size: int, align: int) -> tuple[int, int]:
 
 def fill_template(template: str, **values) -> str:
     """Fill a command template. ``{addr}`` and ``{value}`` are written as bare upper-case hex with
-    no prefix; a template may pad them, as in ``{addr:08X}``, but not change the base."""
+    no prefix. ``{addr}`` is at least 8 digits, with leading zeros (08000000), since the firmware
+    checks that every address has 8 characters; a template may pad either differently, as in
+    ``{value:08X}``, but not change the base."""
     out = []
     for literal, name, spec, _ in string.Formatter().parse(template):
         out.append(literal)
@@ -96,7 +98,7 @@ def fill_template(template: str, **values) -> str:
             if spec and not _HEX_SPEC.match(spec):
                 raise ConfigError(f"{{{name}:{spec}}} in {template!r}: addresses and values are always "
                                   f"bare hex; only a width such as {{{name}:08X}} is allowed")
-            out.append(format(value, spec or "X"))
+            out.append(format(value, spec or ("08X" if name == "addr" else "X")))
         elif spec:
             out.append(format(value, spec))
         else:

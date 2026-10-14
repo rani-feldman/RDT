@@ -1,6 +1,6 @@
 # SCPI profile: the same [scpi] table the RDT host uses. The simulator answers exactly these
 # templates, so editing them here is how to try another command set before the firmware has it.
-# {addr} and {value} are always bare hex with no prefix (20000000, 3FC00000), and a read reply
+# {addr} and {value} are always bare hex with no prefix (20000000, 3FC00000); {addr} has at least 8 digits (08000000), and a read reply
 # is one bare hex value per 4-byte word, comma-separated, lowest address first (3FC00000,43B40000).
 [scpi]
 name         = "RDT simulator"
