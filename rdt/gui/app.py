@@ -268,7 +268,7 @@ class MainWindow(QMainWindow):
         self.device.closed.connect(self._show_state)
         self._connecting = False
         self._last_state: str | None = None
-        self._last_image: str | None = None
+        self._shown_identities: set[int] = set()
         self.log: CsvLog | None = None
         self._log_link_up = True
 
@@ -345,8 +345,6 @@ class MainWindow(QMainWindow):
         action(m, "&MCUs and ELF files...", self.edit_mcus)
         m.addSeparator()
         action(m, "Check ELF &identity", lambda: self.check_identity())
-        self.allow_action = action(m, "Allow access despite ELF &mismatch", self.allow_mismatch)
-        self.allow_action.setEnabled(False)
         m = self.menuBar().addMenu("&Watch")
         action(m, "&Add expression...", self.add_expression, "Ctrl+E")
         action(m, "&Poll now", self.read_all, "F6")
@@ -608,7 +606,6 @@ class MainWindow(QMainWindow):
     def disconnect(self) -> None:
         self._connecting = False
         self.device.close(lambda _: self.status("Disconnected"))
-        self.allow_action.setEnabled(False)
         self._show_state()
 
     def reconnect(self) -> None:
@@ -627,18 +624,15 @@ class MainWindow(QMainWindow):
     # --- ELF identity (SYM-8) ------------------------------------------------------------------
 
     def show_identity(self, results) -> None:
-        """Note each MCU's identity check in the console; a mismatch also goes to the status bar
-        and enables Target > Allow access despite ELF mismatch."""
+        """Note each MCU's identity check in the console; a mismatch also goes to the status bar.
+        There is no way around a mismatch in the GUI: load the ELF that matches the firmware."""
+        self._shown_identities = {id(r) for r in results}
         for r in results:
             self.console.log(str(r), "error" if r.status == "mismatch" else "note")
         bad = [r for r in results if r.status == "mismatch"]
         if bad:
             self.status("ELF does not match the firmware on " + ", ".join(r.mcu for r in bad) +
-                        "; reads and writes to it are refused (Target > Allow access despite ELF mismatch)", error=True)
-        t = self.device.target
-        self.allow_action.setEnabled(t is not None and any(
-            m.identity is not None and m.identity.status == "mismatch" and not m.allow_mismatch
-            for m in t.mcus.values()))
+                        "; reads and writes to it are refused until its ELF matches", error=True)
 
     def check_identity(self, mcus: list[str] | None = None) -> None:
         """Compare the ELFs with the firmware again, such as after flashing. Also runs by itself
@@ -654,21 +648,6 @@ class MainWindow(QMainWindow):
 
         self.device.submit(lambda t: [r for name in (mcus or list(t.mcus)) for r in t.check_identity(name)],
                            done, lambda e: self.status(describe_error(e), True), key="identity")
-
-    def allow_mismatch(self) -> None:
-        def allow(t):
-            names = [m.name for m in t.mcus.values() if m.identity is not None and m.identity.status == "mismatch"]
-            for n in names:
-                t.allow_mismatch(n)
-            return names
-
-        def done(names):
-            self.allow_action.setEnabled(False)
-            if names:
-                self.status(f"Reads and writes allowed to {', '.join(names)} although its ELF does not match")
-                self.console.log(f"access allowed despite ELF mismatch: {', '.join(names)}", "note")
-
-        self.device.submit(allow, done)
 
     def _open_failed(self, e: Exception) -> None:
         self._connecting = False
@@ -719,16 +698,12 @@ class MainWindow(QMainWindow):
         shown = up and t is not None
         self.bar._image.setVisible(shown)
         if not shown:
-            self._last_image = None
             return
         results = [m.identity for m in t.mcus.values() if m.identity is not None]
         checking = self.device.busy("identity") or bool(t.stale_identities())
         key = image_state(results, checking)
-        if key == "mismatch" and self._last_image != "mismatch" and not self.allow_action.isEnabled() \
-                and any(not m.allow_mismatch for m in t.mcus.values() if m.identity in results
-                        and m.identity.status == "mismatch"):
+        if any(r.status == "mismatch" and id(r) not in self._shown_identities for r in results):
             self.show_identity(results)   # found by a check run before a poll, not by this window
-        self._last_image = key
         text, look = IMAGE_LOOKS[key]
         fg, border, bg = STATE_COLORS[look]
         self.bar.image.setText(text)
@@ -737,7 +712,7 @@ class MainWindow(QMainWindow):
         tip = "\n".join(f"{m.name}: {m.identity.status} \u2014 {m.identity.detail}" if m.identity else
                         f"{m.name}: not checked yet" for m in t.mcus.values())
         if key == "mismatch":
-            tip += "\nReads and writes to it are refused (Target > Allow access despite ELF mismatch)"
+            tip += "\nReads and writes to it are refused until its ELF matches the firmware"
         self.bar.image.setToolTip(tip)
 
     def _check_elfs(self) -> None:
