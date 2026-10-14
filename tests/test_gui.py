@@ -73,7 +73,7 @@ def test_connect_and_poll(qtbot, win):
     assert win.windowTitle() == "bench.rdtw - RDT"
     assert win.bar.port.value() == int(win.ws.config.connection.address.rsplit(":", 1)[1])
     connect(qtbot, win)
-    assert "connected" in win.bar.state.text()
+    assert win.bar.state.text() == "Connected \u00b7 " + win.ws.config.connection.address
     wait_value(qtbot, win, "main:motor.current_ma", lambda v: v.endswith(" A"))
     wait_value(qtbot, win, "main:motor.mode", lambda v: "MODE_" in v)
     wait_value(qtbot, win, "main:tick_count", lambda v: v.startswith("0x"))
@@ -373,7 +373,7 @@ def test_console_transcript(qtbot, win, tmp_path, monkeypatch):
 
     connect(qtbot, win)
     con = win.console
-    assert con.entries[-1][1:] == ("note", "connected: " + win.device.target.idn[:40])
+    assert con.entries[-1][1:] == ("note", "Connected \u00b7 " + win.ws.config.connection.address)
     con.send("*IDN?")
     qtbot.waitUntil(lambda: con.entries[-1][1] == "rx", timeout=3000)
     con.send("BOGUS?")
@@ -407,9 +407,11 @@ def test_console_transcript(qtbot, win, tmp_path, monkeypatch):
     assert "Tab" in con.output.hint
 
     # search: every match highlighted, Enter and Shift+Enter step, newest first
+    con.send("BOGUS?")
+    qtbot.waitUntil(lambda: sum(kind == "error" for _, kind, _ in con.entries) == 2, timeout=3000)
     con.show_find()
     con.find_text.setText("bogus")
-    assert con.find_count.text() == "2 of 2"        # the command and the error line
+    assert con.find_count.text() == "2 of 2"        # the command, sent twice
     con.find_next()
     assert con.find_count.text() == "1 of 2"
     con.find_previous()

@@ -36,15 +36,7 @@ class McuSilent(RdtError):
 
 
 class CommandTimeout(RdtError):
-    """The device sent no reply. The firmware does this when a command fails.
-
-    ``hint`` is what the error query returned afterwards, if anything. The error queue is shared
-    with other tools on the link, so the hint may belong to someone else's command.
-    """
-
-    def __init__(self, message: str, hint: "DeviceError | None" = None):
-        super().__init__(message + (f" (error queue: {hint})" if hint else ""))
-        self.hint = hint
+    """The device sent no reply. The firmware does this when a command fails."""
 
 
 class CommandRejected(RdtError):
@@ -62,11 +54,10 @@ class BadReply(RdtError):
 class WriteNotConfirmed(RdtError):
     """The value read back after a write is not the value written."""
 
-    def __init__(self, message: str, written: bytes, read_back: bytes | None, hint: "DeviceError | None" = None):
-        super().__init__(message + (f" (error queue: {hint})" if hint else ""))
+    def __init__(self, message: str, written: bytes, read_back: bytes | None):
+        super().__init__(message)
         self.written = written
         self.read_back = read_back
-        self.hint = hint
 
 
 class DeviceError:

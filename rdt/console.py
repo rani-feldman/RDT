@@ -130,7 +130,7 @@ class CommandHistory:
 
 def profile_commands(profile: Profile | None) -> list[str]:
     """The commands the SCPI profile defines, as they would be typed: a template's text up to its
-    first field (``MEMory:READ? ``), and the error and probe queries in full."""
+    first field (``MEMory:READ? ``)."""
     if profile is None:
         return []
     out = []
@@ -138,7 +138,6 @@ def profile_commands(profile: Profile | None) -> list[str]:
         head = template.split("{", 1)[0]
         if head.strip():
             out.append(head)
-    out += [q for q in (profile.error_query, profile.probe) if q]
     return out
 
 
