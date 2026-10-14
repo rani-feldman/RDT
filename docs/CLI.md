@@ -174,7 +174,7 @@ A target file is also a workspace with no watch tabs; see [Workspace](#workspace
 
 ### Default files
 
-Without `-t` or `-w`, `rdt` uses `rdt.toml` from the current folder when there is one, so with your own bench in it, `rdt info` and `rdt read main:motor` need no options. Command-line options still override it. It can be a target file or a workspace; `add`, `remove` and `tab` save their changes into it, as for any workspace. `rdt-gui` opens it too when there is no last workspace to reopen. To start one for an STM32H7, from the repository root:
+Without `-t` or `-w`, `rdt` uses `rdt.toml` from the current folder when there is one, else `rdt.toml` from the workspace folder (`%LOCALAPPDATA%\rdt`, beside `ui.toml`), so with your own bench in it, `rdt info` and `rdt read main:motor` need no options. Command-line options still override it. It can be a target file or a workspace; `add`, `remove` and `tab` save their changes into it, as for any workspace. `rdt-gui` opens it too when there is no last workspace to reopen. To start one for an STM32H7, from the repository root:
 
 ```
 copy examples\stm32h7_interface.rdtw rdt.toml
@@ -255,7 +255,7 @@ A workspace is three files, next to each other and named after it:
 | `bench.watch.toml` | The watch tabs (`[[tab]]`, `[[tab.watch]]`) and the chart layout (`[chart]`) | TOML |
 | `bench.commands.toml` | The known commands: one `[[command]]` table each, with `command`, `name`, `group`, `description` | TOML |
 
-Opening the `.rdtw` loads all of them. A file is made only once there is something to keep in it. Saving under a new name (`Save as`) takes the files named after the workspace along to the new name; a file named otherwise, such as a commands list several workspaces share (`commands_file = "../gac_commands.toml"`), stays where it is and both workspaces use it. A file the workspace names but that is missing gives a warning and an empty list, and is made again on the next save. A workspace whose commands are in a CSV file (`bench.commands.csv`, as the first version of the split saved them) still opens; the next save writes them to `bench.commands.toml` and points the `.rdtw` at it, leaving the CSV file as it was.
+Opening the `.rdtw` loads all of them. A file is made only once there is something to keep in it. The `.rdtw` and its files always sit in one folder: saving writes `bench.watch.toml` and `bench.commands.toml` beside the `.rdtw`, named after it, and Save as writes them under the new name. A workspace that names a file elsewhere (`commands_file = "../gac_commands.toml"`) still opens with it; the next save writes that list beside the `.rdtw` and leaves the other file as it was. Workspaces are kept by default in `%LOCALAPPDATA%\rdt`, the folder of `ui.toml`; the GUI's Open and Save dialogs start there. A file the workspace names but that is missing gives a warning and an empty list, and is made again on the next save. A workspace whose commands are in a CSV file (`bench.commands.csv`, as the first version of the split saved them) still opens; the next save writes them to `bench.commands.toml` and points the `.rdtw` at it, leaving the CSV file as it was.
 
 Each part can also be moved between workspaces:
 

@@ -84,30 +84,45 @@ def test_an_old_single_file_workspace_is_split_on_save(tmp_path):
     assert back.commands == [SavedCommand("MOT:SPE?", "Speed")] and back.poll_ms == 250
 
 
-def test_save_as_takes_its_own_files_along(tmp_path):
+def test_save_as_takes_its_files_along(tmp_path):
     ws = bench()
     ws.save(tmp_path / "a.rdtw")
     shared = tmp_path / "shared.toml"
-    ws.commands_path = shared                  # a commands file several workspaces use
-    ws.save()
+    ws.commands_path = shared                  # loaded from a file under another name
     ws.save(tmp_path / "b.rdtw")
     raw = tomllib.loads((tmp_path / "b.rdtw").read_text())
-    assert raw["watch_file"] == "b.watch.toml"   # named after the workspace: follows its new name
-    assert raw["commands_file"] == "shared.toml"  # named otherwise: stays
+    assert raw["watch_file"] == "b.watch.toml"   # always beside the .rdtw, named after it
+    assert raw["commands_file"] == "b.commands.toml"
+    assert not shared.exists()
     assert (tmp_path / "a.watch.toml").is_file() and (tmp_path / "b.watch.toml").is_file()
 
 
-def test_files_in_another_folder(tmp_path):
+def test_files_in_another_folder_come_beside_the_workspace(tmp_path):
+    """The .rdtw and its files sit in one folder (rani, 2026-10-14): a commands file named from
+    elsewhere still loads, and saving writes the commands beside the .rdtw; the old file is left."""
     (tmp_path / "lists").mkdir()
     (tmp_path / "lists" / "cmds.csv").write_text("*IDN?\n")
     (tmp_path / "w.rdtw").write_text('commands_file = "lists/cmds.csv"\n')
     ws = Workspace.load(tmp_path / "w.rdtw")
     assert ws.commands == [SavedCommand("*IDN?")]
     ws.commands.append(SavedCommand("MOT:SPE?"))
-    ws.save()   # a CSV commands file becomes a TOML one beside it; the CSV file is left as it was
+    ws.save()
     assert (tmp_path / "lists" / "cmds.csv").read_text() == "*IDN?\n"
-    assert 'commands_file = "lists/cmds.toml"' in (tmp_path / "w.rdtw").read_text()
+    assert 'commands_file = "w.commands.toml"' in (tmp_path / "w.rdtw").read_text()
     assert Workspace.load(tmp_path / "w.rdtw").commands == [SavedCommand("*IDN?"), SavedCommand("MOT:SPE?")]
+
+
+def test_workspace_folder_is_beside_ui_toml(tmp_path, monkeypatch):
+    from rdt.ui_settings import workspace_dir
+    from rdt.workspace import default_target
+    monkeypatch.setenv("RDT_UI_FILE", str(tmp_path / "rdt" / "ui.toml"))
+    monkeypatch.chdir(tmp_path)
+    assert workspace_dir() == tmp_path / "rdt" and default_target() is None
+    (tmp_path / "rdt").mkdir()
+    (tmp_path / "rdt" / "rdt.toml").write_text("")
+    assert default_target() == tmp_path / "rdt" / "rdt.toml"
+    (tmp_path / "rdt.toml").write_text("")      # the current folder's comes first
+    assert default_target() == Path("rdt.toml")
 
 
 def test_commands_csv_from_before_becomes_toml(tmp_path):
