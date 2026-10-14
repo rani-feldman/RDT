@@ -75,7 +75,7 @@ Each requirement links to its design section.
 | SCPI-8 | A manual SCPI console sends any command and shows the raw reply (2026-10-05) | Done | [D-SCPI-8](#d-scpi-8-scpi-console) |
 | SCPI-9 | The profile can be edited in the GUI, with a preview of the commands and a test read | Done | [D-SCPI-9](#d-scpi-9-profile-editor) |
 | SCPI-10 | Every SCPI read and write covers whole 4-byte aligned words: a 2-byte variable is read as its 4-byte word and the result is trimmed, and a smaller or unaligned write is done as read-modify-write (2026-10-12) | Done | [D-SCPI-10](#d-scpi-10-aligned-words) |
-| SCPI-11 | A read reply is one bare hex value per 4-byte word, comma-separated, lowest address first, the way the firmware prints a `uint32_t`: `30303030,2F30302F,43B40000`. This is the only reply format (2026-10-13). A regular expression can pick the words out of a longer reply | Done | [D-SCPI-11](#d-scpi-11-word-replies) |
+| SCPI-11 | A read reply is one bare hex value per 4-byte word, comma-separated, lowest address first, the way the firmware prints a `uint32_t`: `30303030,2F30302F,43B40000`. This is the only reply format (2026-10-13); the reply holds nothing else, so there is no reply regex (2026-10-14) | Done | [D-SCPI-11](#d-scpi-11-word-replies) |
 
 ### 2.4 Multiple MCUs
 
@@ -239,6 +239,7 @@ Console features taken from ComPort-Zone (an open serial terminal); rani approve
 | RM-6 | Size query: RDT asking the firmware for its largest read (`MEMory:MAX?`) on connect. Built, then removed by rani on 2026-10-12; the maximum response size is set only in the SCPI configuration | Removed | [D-SCPI-2](#d-scpi-2-block-read) |
 | RM-7 | Error query: RDT reading `SYSTem:ERRor?` once after a timeout as a hint, the profile key `error_query`, `rdt errors` and the console's `.err`. Built 2026-10-11, removed by rani on 2026-10-14; `SYST:ERR?` can still be typed by hand | Removed | [D-SCPI-5](#d-scpi-5-failed-commands-send-no-reply) |
 | RM-8 | Probe on connect: `*IDN?` (profile key `probe`) sent on connect and every reconnect, and the device identity in the GUI and `rdt info`. Removed by rani on 2026-10-14 | Removed | [D-LNK-7](#d-lnk-7-connect-without-a-probe) |
+| RM-9 | Reply regex: the profile key `reply_regex` (Reply regex in the profile editor) that picked the data out of a longer read reply. Removed by rani on 2026-10-14, since a reply holds only the comma-separated words | Removed | [D-SCPI-11](#d-scpi-11-word-replies) |
 
 Requirements on the firmware itself (FW-1 to FW-10) are in [section 5](#5-firmware-specification).
 
@@ -392,7 +393,6 @@ read         = "MEMory:READ? {mcu},{addr},{len}"
 write        = "MEMory:WRITE {mcu},{addr},{value},{size}"
 max_write    = 4               # largest value one write accepts: 1, 2, 4 or 8 bytes
 align        = 4               # every read and write covers whole aligned words: 1, 2, 4 or 8
-reply_regex  = ""              # optional; group "data" (or group 1) holds the reply words
 byte_order   = "little"        # only for an MCU without an ELF
 max_response = 1024            # bytes of data one read reply can carry
 terminator   = "\n"
@@ -400,7 +400,7 @@ timeout_ms   = 500
 retries      = 2               # extra attempts after a read times out
 ```
 
-Placeholders: `{mcu}`, `{addr}`, `{len}`, `{value}` and `{size}`. `{addr}` and `{value}` are always bare upper-case hex (D-SCPI-4); `{mcu}`, `{len}` and `{size}` are decimal. The profile checks itself when loaded: an unknown placeholder, a format spec on `{addr}` or `{value}` that changes the base, a bad `max_write` or `align` or a non-positive timeout is a `ConfigError`. The GUI's profile editor also refuses a template that can't work, such as a read without `{len}`. A profile may also list `[[ranges]]` for every MCU, or for one MCU with `mcu = "name"` (D-MEM-2). The retired keys `error_query` and `probe` (RM-7, RM-8) are ignored when an older profile still has them.
+Placeholders: `{mcu}`, `{addr}`, `{len}`, `{value}` and `{size}`. `{addr}` and `{value}` are always bare upper-case hex (D-SCPI-4); `{mcu}`, `{len}` and `{size}` are decimal. The profile checks itself when loaded: an unknown placeholder, a format spec on `{addr}` or `{value}` that changes the base, a bad `max_write` or `align` or a non-positive timeout is a `ConfigError`. The GUI's profile editor also refuses a template that can't work, such as a read without `{len}`. A profile may also list `[[ranges]]` for every MCU, or for one MCU with `mcu = "name"` (D-MEM-2). The retired keys `error_query`, `probe` and `reply_regex` (RM-7, RM-8, RM-9) are ignored when an older profile still has them.
 
 #### D-SCPI-2 Block read
 
@@ -474,7 +474,7 @@ rani set this on 2026-10-13, after connecting RDT to the real target on COM3: th
 - **Decoding:** `Profile.decode_data(reply, length, byte_order)` in `rdt/profile.py` splits the reply on commas. Each token is a bare hex value of at most `align` bytes (D-SCPI-10), and leading zeros may be left out. Each value becomes `align` bytes in the MCU's byte order.
 - **Byte order:** the order comes from that MCU's ELF. `Target` passes it to `Session` as `byte_order_of`, and the profile's `byte_order` is used only for an MCU without an ELF.
 - **Refused replies:** a `0x` prefix, a token wider than `align`, or the wrong number of words is a `BadReply`.
-- **Longer replies:** when the firmware wraps the words in other text, `reply_regex` picks them out first (group `data`, or group 1).
+- **Nothing else in the reply:** the whole reply is the words. The `reply_regex` key that picked them out of a longer reply was removed on 2026-10-14 at rani's request (RM-9), and an old profile that still has it loads with it ignored.
 - **Simulator:** it replies in the same words, in each simulated MCU's byte order.
 
 ### 4.4 Multiple MCUs
@@ -1278,7 +1278,11 @@ The application is built against the simulator. As soon as the firmware has the 
 | 2026-10-14 | The memory view gets right-click display formats: signed and unsigned Char, Short, Int and Long in hex or decimal, Ascii, Float and Double, with hex bytes as the default (GUI-7), at rani's request |
 | 2026-10-14 | The memory view's ASCII column follows the chosen display format, each cell's bytes shown in the order of the value (GUI-8), at rani's request |
 | 2026-10-14 | RDT sends no query of its own: the error query after a timeout, `rdt errors` and `.err` are removed (RM-7), and so is the `*IDN?` probe on connect (RM-8). Connected means the port or socket opened, and only a broken port or socket takes the link down (LNK-7). The GUI shows the link in a status box such as `Connected · COM3` (GUI-9). At rani's request, replacing the 2026-10-11 error-query hint |
+<<<<<<< HEAD
 | 2026-10-14 | The ELF identity is checked again when the link or a silent MCU comes back, and the result shows in the status bar after Connect, with a recommended build-ID linker setup (SYM-8), at rani's request to check the ELF is not outdated |
+=======
+| 2026-10-14 | The profile's `reply_regex` is removed, since a read reply is only comma-separated words (SCPI-11, RM-9), at rani's request |
+>>>>>>> origin/main
 
 ## 9. Appendix: binary protocol (planned)
 
