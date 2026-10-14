@@ -219,6 +219,20 @@ def plug_icon(color: str) -> QIcon:
     return QIcon(pm)
 
 
+IDENTITY_WORDS = {"match": "ELF matches the firmware", "mismatch": "ELF does NOT match the firmware",
+                  "unchecked": "ELF not checked (no identity variable or build ID)",
+                  "unread": "ELF identity could not be read"}
+
+
+def identity_summary(results) -> str:
+    """One status-bar line for the identity checks (SYM-8), so a missing setup is not silent."""
+    if not results:
+        return IDENTITY_WORDS["unchecked"]
+    if len(results) == 1:
+        return IDENTITY_WORDS[results[0].status]
+    return "; ".join(f"{r.mcu}: {IDENTITY_WORDS[r.status]}" for r in results)
+
+
 class MainWindow(QMainWindow):
     def __init__(self, ws: Workspace | None = None):
         super().__init__()
@@ -577,8 +591,10 @@ class MainWindow(QMainWindow):
 
     def _opened(self, t) -> None:
         self._connecting = False
-        self.status(f"Connected to {self.ws.config.connection.describe()}")
-        self.show_identity([m.identity for m in t.mcus.values() if m.identity is not None])
+        results = [m.identity for m in t.mcus.values() if m.identity is not None]
+        self.status(f"Connected to {self.ws.config.connection.describe()}; " + identity_summary(results),
+                    error=any(r.status == "mismatch" for r in results))
+        self.show_identity(results)
         self.read_all()
         self._show_state()
 
@@ -588,8 +604,7 @@ class MainWindow(QMainWindow):
         """Note each MCU's identity check in the console; a mismatch also goes to the status bar
         and enables Target > Allow writes despite ELF mismatch."""
         for r in results:
-            if r.status != "unchecked":
-                self.console.log(str(r), "error" if r.status == "mismatch" else "note")
+            self.console.log(str(r), "error" if r.status == "mismatch" else "note")
         bad = [r for r in results if r.status == "mismatch"]
         if bad:
             self.status("ELF does not match the firmware on " + ", ".join(r.mcu for r in bad) +
@@ -600,7 +615,8 @@ class MainWindow(QMainWindow):
             for m in t.mcus.values()))
 
     def check_identity(self, mcus: list[str] | None = None) -> None:
-        """Compare the ELFs with the firmware again, such as after flashing."""
+        """Compare the ELFs with the firmware again, such as after flashing. Also runs by itself
+        when the link or an MCU comes back, since the firmware may have been flashed meanwhile."""
         if self.device.target is None:
             self.status("Connect first to check the ELF identity", error=True)
             return
@@ -608,10 +624,10 @@ class MainWindow(QMainWindow):
         def done(results):
             self.show_identity(results)
             if not any(r.status == "mismatch" for r in results):
-                self.status("ELF identity: " + "; ".join(f"{r.mcu} {r.status}" for r in results))
+                self.status(identity_summary(results))
 
         self.device.submit(lambda t: [r for name in (mcus or list(t.mcus)) for r in t.check_identity(name)],
-                           done, lambda e: self.status(describe_error(e), True))
+                           done, lambda e: self.status(describe_error(e), True), key="identity")
 
     def allow_mismatch(self) -> None:
         def allow(t):
@@ -659,6 +675,11 @@ class MainWindow(QMainWindow):
         self.bar.connect_button.setStyleSheet(f"QPushButton {{ color: {b_fg}; background: {b_bg}; "
                                               f"border: 1px solid {b_border}; border-radius: 4px; padding: 3px 12px }}")
         up = state == LinkState.UP
+        t = self.device.target
+        if up and t is not None and not self._connecting and not self.device.busy("identity"):
+            stale = t.stale_identities()
+            if stale:
+                self.check_identity(stale)
         self.memory.setEnabled(up)
         self.console.set_link_up(up)
         for w in (self.bar.transport, self.bar.host, self.bar.port, self.bar.com, self.bar.baud):
