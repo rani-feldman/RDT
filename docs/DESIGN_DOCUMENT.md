@@ -169,8 +169,8 @@ Each requirement links to its design section.
 | GUI-9 | Show the link state and the link, such as a green `Connected · COM3` (2026-10-14; since GUI-11 shown on the connect button itself) | Done | [D-GUI-2](#d-gui-2-connection-bar) |
 | GUI-10 | Every error shows in one slim red bar under the toolbar: an ELF that does not match its firmware and the latest failed connect, read, write or poll. The status bar shows only ordinary messages (2026-10-14) | Done | [D-GUI-10](#d-gui-10-error-bar) |
 | GUI-11 | The status box and the Connect / Disconnect button become one button that shows the link state and the link, and a click connects, disconnects or cancels: green `Connected · COM3`, blue `Disconnected · COM3`, red `Link down · COM3`, amber `Connecting · COM3` (2026-10-14) | Done | [D-GUI-2](#d-gui-2-connection-bar) |
-| GUI-12 | Each MCU has an optional short name and tag colour, and each watch row shows its MCU as a coloured tag with the short name before the expression (2026-10-14) | In review (PR #85) | [D-GUI-12](#d-gui-12-mcu-tags) |
-| GUI-13 | A watched value that changed since the previous read is highlighted for a moment (2026-10-14) | In review (PR #85) | [D-GUI-13](#d-gui-13-change-highlight) |
+| GUI-12 | Each MCU has an optional short name and tag colour, and each watch row shows its MCU as a coloured tag with the short name before the expression (2026-10-14) | Done | [D-GUI-12](#d-gui-12-mcu-tags) |
+| GUI-13 | A watched value that changed since the previous read is highlighted for a moment (2026-10-14) | Done | [D-GUI-13](#d-gui-13-change-highlight) |
 | GUI-14 | Layout C: MCU cards in the left sidebar replace the image box and the Variables panel, and Watch, Scope, Memory and Console mode tabs sit in the toolbar (2026-10-14) | Planned | [D-GUI-14](#d-gui-14-planned-layout-c-dark-theme-and-drag-and-drop) |
 | GUI-15 | A dark theme (2026-10-14) | Planned | [D-GUI-14](#d-gui-14-planned-layout-c-dark-theme-and-drag-and-drop) |
 | GUI-16 | Drag and drop (2026-10-14) | Planned | [D-GUI-14](#d-gui-14-planned-layout-c-dark-theme-and-drag-and-drop) |
