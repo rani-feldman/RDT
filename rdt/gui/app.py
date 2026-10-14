@@ -14,7 +14,7 @@ from datetime import datetime
 from pathlib import Path
 
 from PySide6.QtCore import QSettings, Qt, QTimer
-from PySide6.QtGui import QAction, QKeySequence
+from PySide6.QtGui import QAction, QColor, QIcon, QKeySequence, QPainter, QPen, QPixmap
 from PySide6.QtWidgets import (
     QAbstractItemView, QApplication, QCheckBox, QComboBox, QDialog, QDialogButtonBox, QDockWidget, QFileDialog, QLabel,
     QLineEdit, QMainWindow, QMessageBox, QPushButton, QSpinBox, QTableWidget, QTableWidgetItem, QToolBar,
@@ -30,7 +30,7 @@ from ..target import ConnectionConfig, McuConfig, TargetConfig
 from ..workspace import Workspace
 from .chart import ChartPanel
 from .device import Device, describe_error
-from .panels import CONSOLE_KEYS, Console, McuDialog, MemoryView, ProfileDialog
+from .panels import CONSOLE_KEYS, Console, McuDialog, MemoryView, ProfileDialog, mono
 from .variables import SymbolBrowser, WatchTabs, WatchTree
 
 FILTER = "RDT workspace (*.rdtw);;Target file (*.toml);;All files (*)"
@@ -91,7 +91,7 @@ class ConnectionBar(QToolBar):
         self.connect_button = QPushButton("Connect")
         self.connect_button.clicked.connect(main.toggle_connection)
         self.state = QLabel()
-        self.state.setMinimumWidth(180)
+        self.state.setFont(mono())
         self.poll = QSpinBox()
         self.poll.setRange(0, 3_600_000)
         self.poll.setSingleStep(100)
@@ -116,8 +116,8 @@ class ConnectionBar(QToolBar):
         self._serial = [self.addWidget(self.com), self.addWidget(self.baud)]
         self.addSeparator()
         self.addWidget(self.profile)
-        self.addWidget(self.connect_button)
         self.addWidget(self.state)
+        self.addWidget(self.connect_button)
         self.addSeparator()
         self.addWidget(self.polling)
         self.addWidget(self.poll)
@@ -190,6 +190,33 @@ class ConnectionBar(QToolBar):
         if not host:
             raise ConfigError("type the device's IP address")
         return ConnectionConfig(kind, f"{host}:{self.port.value()}")
+
+
+# The connection status box: text, border and background for each link state.
+STATE_COLORS = {
+    "up": ("#3ccf7a", "#1f7a46", "#0d1f15"),
+    "busy": ("#e0a030", "#8a6418", "#211a0c"),
+    "down": ("#e05050", "#8a2a2a", "#210f0f"),
+    "closed": ("#9a9a9a", "#3c3c3c", "#141414"),
+}
+BUTTON_COLORS = ("#e0e0e0", "#3a7bd5", "#16191f")   # the Connect button while not connected
+
+
+def plug_icon(color: str) -> QIcon:
+    """A small power-plug icon in ``color`` for the Connect and Disconnect button."""
+    pm = QPixmap(32, 32)
+    pm.fill(Qt.transparent)
+    p = QPainter(pm)
+    p.setRenderHint(QPainter.Antialiasing)
+    pen = QPen(QColor(color), 3, Qt.SolidLine, Qt.RoundCap, Qt.RoundJoin)
+    p.setPen(pen)
+    p.drawLine(11, 3, 11, 10)                  # prongs
+    p.drawLine(21, 3, 21, 10)
+    p.drawLine(6, 10, 26, 10)                  # top of the body
+    p.drawArc(6, 2, 20, 18, 180 * 16, 180 * 16)  # rounded bottom of the body
+    p.drawLine(16, 20, 16, 29)                 # cord
+    p.end()
+    return QIcon(pm)
 
 
 class MainWindow(QMainWindow):
@@ -477,6 +504,16 @@ class MainWindow(QMainWindow):
 
     def connection_edited(self, *_) -> None:
         self.set_dirty()
+        self._show_state()
+
+    def _link_name(self) -> str:
+        """The link shown in the status box: the COM port, or IP:port for TCP and UDP."""
+        if self.device.target is not None:
+            return self.device.target.config.connection.address
+        try:
+            return self.bar.connection().address
+        except ConfigError:
+            return ""
 
     def _take_connection(self) -> None:
         self.ws.config.connection = self.bar.connection()
@@ -540,7 +577,7 @@ class MainWindow(QMainWindow):
 
     def _opened(self, t) -> None:
         self._connecting = False
-        self.status(f"Connected to {t.idn or self.ws.config.connection.describe()}")
+        self.status(f"Connected to {self.ws.config.connection.describe()}")
         self.show_identity([m.identity for m in t.mcus.values() if m.identity is not None])
         self.read_all()
         self._show_state()
@@ -599,21 +636,28 @@ class MainWindow(QMainWindow):
     def _show_state(self) -> None:
         state = self.device.state
         if self._connecting:
-            text, color, button = "connecting...", "#c87800", "Cancel"
+            word, look, button = "Connecting", "busy", "Cancel"
         elif state == LinkState.UP:
-            idn = self.device.target.idn if self.device.target else None
-            text, color, button = "● connected" + (f": {idn[:40]}" if idn else ""), "#208020", "Disconnect"
+            word, look, button = "Connected", "up", "Disconnect"
         elif state == LinkState.DOWN:
-            text, color, button = "● link down, reconnecting", "#c03030", "Disconnect"
+            word, look, button = "Link down", "down", "Disconnect"
         else:
-            text, color, button = "○ not connected", "#888888", "Connect"
+            word, look, button = "Closed", "closed", "Connect"
+        where = self._link_name()
+        text = f"{word} \u00b7 {where}" if where else word
         if text != self._last_state:
             if self._last_state is not None:
-                self.console.log(text.lstrip("●○ "), "error" if state == LinkState.DOWN else "note")
+                self.console.log(text, "error" if state == LinkState.DOWN else "note")
             self._last_state = text
+        fg, border, bg = STATE_COLORS[look]
         self.bar.state.setText(text)
-        self.bar.state.setStyleSheet(f"color: {color}")
+        self.bar.state.setStyleSheet(f"color: {fg}; background: {bg}; border: 1px solid {border}; "
+                                     "border-radius: 3px; padding: 2px 8px")
+        b_fg, b_border, b_bg = (fg, border, bg) if look == "up" else BUTTON_COLORS
         self.bar.connect_button.setText(button)
+        self.bar.connect_button.setIcon(plug_icon(b_fg))
+        self.bar.connect_button.setStyleSheet(f"QPushButton {{ color: {b_fg}; background: {b_bg}; "
+                                              f"border: 1px solid {b_border}; border-radius: 4px; padding: 3px 12px }}")
         up = state == LinkState.UP
         self.memory.setEnabled(up)
         self.console.set_link_up(up)

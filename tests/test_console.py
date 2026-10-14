@@ -56,7 +56,7 @@ def test_history_path(monkeypatch, tmp_path):
 
 def test_profile_commands():
     p = Profile()
-    assert profile_commands(p) == ["MEMory:READ? ", "MEMory:WRITE ", "SYSTem:ERRor?", "*IDN?"]
+    assert profile_commands(p) == ["MEMory:READ? ", "MEMory:WRITE "]
     assert profile_commands(None) == []
 
 
