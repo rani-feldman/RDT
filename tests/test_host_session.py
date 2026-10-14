@@ -30,9 +30,8 @@ def target(request, sim):
         yield t
 
 
-def test_connect_probes_the_device(target):
+def test_connect_sends_nothing(target):
     assert target.link_state is LinkState.UP
-    assert target.idn.startswith("RDT,Simulator")
     assert target.max_response == 1024
 
 
@@ -77,19 +76,19 @@ def test_console_command(target):
     assert target.command("SIM:MCU:LIST?") == '0,"main",1,"motorctl"'
     assert target.command("*CLS") is None
     assert target.command("FOO:BAR?") is None                 # failed: no reply
-    assert target.error_query().code == -113
+    assert target.command("SYST:ERR?").startswith("-113,")
 
 
-def test_timeout_gives_the_error_queue_as_a_hint(sim):
+def test_failed_read_times_out_and_the_link_stays_up(sim):
     # The host thinks 0x30000000 exists, the device does not: the read fails with no reply.
     profile = Profile(timeout_ms=100, retries=1, ranges=[Range("ghost", 0x30000000, 16)])
     with make_target("tcp", sim.tcp_address, profile) as t:
         t0 = time.perf_counter()
         with pytest.raises(CommandTimeout) as e:
             t.read("main", 0x30000000, 4)
-        assert e.value.hint.code == -222
+        assert "no reply to read of 4 bytes" in str(e.value)
         assert time.perf_counter() - t0 < 1.0
-        assert t.link_state is LinkState.UP     # the device answered the error query
+        assert t.link_state is LinkState.UP     # a timeout alone never takes the link down
         assert t.read_value("@main:0x20000010:u32") == 0x12345678
 
 
@@ -122,7 +121,7 @@ def test_max_response_comes_from_the_profile_only(two_mcus):
         t.session.protocol.send = lambda command: (sent.append(command), send(command))[1]
         with t:
             assert t.max_response == 32
-            assert sent == ["*IDN?"]          # nothing asks the device for its maximum
+            assert sent == []                 # nothing is sent on connect, not even *IDN?
             assert len(t.read("main", 0x20000000, 236)) == 236   # 8 reads, none over 32 bytes
 
 
@@ -159,7 +158,7 @@ def test_small_reads_ask_for_whole_aligned_words(two_mcus):
             assert t.read_value("@main:0x20000008:i16") == -120          # 2 bytes in the word at 20000008
             assert t.read("main", 0x20000001, 2) == bytes.fromhex("00C0")
             assert t.read("main", 0x20000002, 4) == t.read("main", 0x20000000, 8)[2:6]   # straddles two words
-        assert sent[1:] == ["MEMory:READ? 0,20000008,4", "MEMory:READ? 0,20000000,4",
+        assert sent == ["MEMory:READ? 0,20000008,4", "MEMory:READ? 0,20000000,4",
                             "MEMory:READ? 0,20000000,8", "MEMory:READ? 0,20000000,8"]
 
 
@@ -243,7 +242,7 @@ def test_silent_mcu_is_greyed_out_alone(sim, device):
     with make_target("tcp", sim.tcp_address) as t:
         t.session.SILENT_PROBE_S = 0.2
         device.mcus[1].silent = True
-        with pytest.raises(McuSilent, match="-240"):
+        with pytest.raises(McuSilent, match="3 timeouts in a row"):
             t.read_value("@motorctl:0x20000084:u32")
         assert t.is_silent("motorctl") and not t.is_silent("main")
         # Further accesses fail at once, without waiting for a timeout; writes are refused.
@@ -261,20 +260,9 @@ def test_silent_mcu_is_greyed_out_alone(sim, device):
         assert not t.is_silent("motorctl")
 
 
-def test_silent_mcu_after_three_timeouts_without_an_error_query(sim, device):
-    profile = Profile(timeout_ms=100, retries=2, error_query=None)
-    with make_target("tcp", sim.tcp_address, profile) as t:
-        device.mcus[1].silent = True
-        with pytest.raises(McuSilent, match="3 timeouts in a row"):
-            t.read_value("@motorctl:0x20000084:u32")
-        assert t.read_value("@main:0x20000010:u32") == 0x12345678
-
-
 def test_silent_mcu_after_three_timeouts_while_mcu0_answers(sim, device):
     profile = Profile(timeout_ms=100, retries=2)
     with make_target("tcp", sim.tcp_address, profile) as t:
-        # The error query answers but says nothing useful, as when another tool emptied the queue.
-        t.session.protocol.error_query = lambda timeout: (True, None)
         device.mcus[1].silent = True
         with pytest.raises(McuSilent, match="3 timeouts in a row"):
             t.read_value("@motorctl:0x20000084:u32")
@@ -324,14 +312,15 @@ def test_connect_fails_cleanly_when_nothing_listens():
     assert t.link_state is LinkState.CLOSED
 
 
-def test_udp_device_that_stops_answering_takes_the_link_down(sim):
+def test_udp_device_that_never_answers_times_out(sim):
     with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as s:
         s.bind(("127.0.0.1", 0))   # a UDP port that never answers
-        t = make_target("udp", s.getsockname(), Profile(timeout_ms=50, retries=1, probe=None),
-                        auto_reconnect=False)
+        t = make_target("udp", s.getsockname(), Profile(timeout_ms=50, retries=1), auto_reconnect=False)
         with t:
-            with pytest.raises(LinkDown, match="stopped answering"):
+            assert t.link_state is LinkState.UP   # RDT sends nothing on connect, so the socket is enough
+            with pytest.raises(CommandTimeout):
                 t.read_value("@main:0x20000010:u32")
+            assert t.link_state is LinkState.UP
 
 
 # --- UDP --------------------------------------------------------------------------------------
@@ -351,14 +340,13 @@ def test_udp_retries_lost_datagrams(device):
 def test_serial(device):
     with Simulator(device, TransportConfig(tcp=None, udp=None, serial="pty")) as s:
         with make_target("serial", s.serial_port) as t:
-            assert t.idn.startswith("RDT,Simulator")
             assert t.read_value("@motorctl:0x20000084:u32") == 500
             t.write_value("@motorctl:0x20000088:f32", 42.5)
             assert t.read_value("@motorctl:0x20000088:f32") == 42.5
             t.send_break(50)                       # CON-10: the link still works after a break
             assert t.read_value("@motorctl:0x20000084:u32") == 500
             t.reconnect()                          # CON-9
-            assert t.idn.startswith("RDT,Simulator") and t.read_value("@motorctl:0x20000084:u32") == 500
+            assert t.read_value("@motorctl:0x20000084:u32") == 500
 
 
 # --- sharing the link -------------------------------------------------------------------------
@@ -396,7 +384,7 @@ def test_another_scpi_client_on_the_same_device(sim):
                 t.write_value("@main:0x20000024:u32", i)
                 assert t.read_value("@main:0x20000024:u32") == i
                 assert t.read("motorctl", 0x20000000, 16)[:2] == b"\x01\x00"
-            # A failed read still fails cleanly, whatever the shared queue returns as its hint.
+            # A failed read still fails cleanly.
             with pytest.raises(CommandTimeout):
                 t.read("main", 0x30000000, 4)
             assert t.link_state is LinkState.UP

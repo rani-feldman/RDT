@@ -25,8 +25,8 @@ def make_target(kind, address, profile=None, mcus=None, **kw) -> Target:
 
 
 class Relay:
-    """Forwards TCP connections to the simulator. ``cut()`` drops every connection and refuses
-    new ones (accepts and closes them at once), until ``heal()``."""
+    """Forwards TCP connections to the simulator. ``cut()`` drops every connection and stops
+    listening, so new connections are refused, until ``heal()`` listens again on the same port."""
 
     def __init__(self, upstream):
         self.upstream = tuple(upstream)
@@ -36,12 +36,12 @@ class Relay:
         self.conns: list[socket.socket] = []
         self.lock = threading.Lock()
         self.running = True
-        threading.Thread(target=self._accept, daemon=True).start()
+        threading.Thread(target=self._accept, args=(self.listener,), daemon=True).start()
 
-    def _accept(self):
+    def _accept(self, listener):
         while self.running:
             try:
-                client, _ = self.listener.accept()
+                client, _ = listener.accept()
             except OSError:
                 return
             if self.broken:
@@ -68,6 +68,11 @@ class Relay:
 
     def cut(self):
         self.broken = True
+        try:
+            self.listener.shutdown(socket.SHUT_RDWR)   # wakes accept() and stops listening
+        except OSError:
+            pass
+        self.listener.close()
         with self.lock:
             for s in self.conns:
                 try:
@@ -79,6 +84,8 @@ class Relay:
 
     def heal(self):
         self.broken = False
+        self.listener = socket.create_server(self.address)
+        threading.Thread(target=self._accept, args=(self.listener,), daemon=True).start()
 
     def close(self):
         self.running = False

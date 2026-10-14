@@ -19,7 +19,7 @@ from PySide6.QtWidgets import (
 
 from ..console import (CommandHistory, SessionLog, completions, hex_to_text, history_path, merge_commands, read_commands,
                        text_to_hex, write_commands)
-from ..errors import CommandTimeout, ConfigError, LinkDown, RdtError, WriteRefused
+from ..errors import ConfigError, RdtError, WriteRefused
 from ..memfmt import INT_TYPES, MemFormat
 from ..profile import Profile, align_span, parse_int
 from ..target import McuConfig, Target
@@ -71,18 +71,12 @@ def mono() -> QFont:
 
 
 def run_command(t: Target, text: str) -> str | None:
-    """Send one SCPI command typed by hand. Returns the reply; for a query that got none, a note
-    with what the error queue says (the firmware answers a failed command with silence)."""
+    """Send one SCPI command typed by hand. Returns the reply, or a note for a query that got none
+    (the firmware answers a failed command with silence)."""
     reply = t.command(text)
-    if reply is not None:
+    if reply is not None or not text.split(None, 1)[0].endswith("?"):
         return reply
-    if not text.split(None, 1)[0].endswith("?"):
-        return None
-    try:
-        err = t.error_query()
-    except (CommandTimeout, LinkDown):
-        err = None
-    return "(no reply" + (f"; error queue: {err}" if err else "") + ")"
+    return "(no reply)"
 
 
 # --- SCPI console ----------------------------------------------------------------------------
@@ -943,7 +937,7 @@ class MemoryView(QWidget):
 
 # --- SCPI profile editor ---------------------------------------------------------------------
 
-_OPTIONAL = {"reply_regex", "error_query", "probe"}
+_OPTIONAL = {"reply_regex"}
 
 
 def _escape(s: str) -> str:

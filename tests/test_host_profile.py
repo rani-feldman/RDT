@@ -84,7 +84,7 @@ def test_error_replies():
 def test_host_and_simulator_read_the_profile_the_same_way():
     host, sim = Profile.load(DEFAULT_PROFILE), SimProfile.load(DEFAULT_PROFILE)
     for key in ("read", "write", "max_write", "align",
-                "max_response", "error_query", "terminator"):
+                "max_response", "terminator"):
         assert getattr(host, key) == getattr(sim, key), key
     assert host.timeout_ms == 500
 

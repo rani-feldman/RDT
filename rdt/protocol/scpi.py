@@ -9,7 +9,7 @@ from __future__ import annotations
 import logging
 import time
 
-from ..errors import BadReply, CommandRejected, DeviceError
+from ..errors import BadReply, CommandRejected
 from ..profile import Profile, parse_error
 from ..transport import Transport
 
@@ -68,19 +68,3 @@ class ScpiProtocol:
         """One write command. The firmware sends no reply to a write, success or failure."""
         self.send(self.profile.format_write(mcu, addr, value, size))
 
-    # --- error queue -------------------------------------------------------------------------
-
-    def error_query(self, timeout: float) -> tuple[bool, DeviceError | None]:
-        """Ask the error queue once. Returns (answered, error); error is None for "No error".
-
-        The queue is shared with other tools on the link, so the answer is only a hint.
-        """
-        if not self.profile.error_query:
-            return True, None
-        reply = self.query(self.profile.error_query, timeout)
-        if reply is None:
-            return False, None
-        try:
-            return True, parse_error(reply)
-        except BadReply:
-            return True, None
