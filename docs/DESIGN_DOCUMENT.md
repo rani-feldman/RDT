@@ -956,7 +956,7 @@ Each mode's layout is saved with `QMainWindow.saveState` as `session/layout_<mod
 
 #### D-GUI-17 Title bar
 
-Windows fixes the height of its standard title bar, so `rdt/gui/titlebar.py` makes the main window frameless and fills the menu bar row with the title bar (`titlebar.install`, called after the menus are built).
+Windows fixes the height of its standard title bar, so `rdt/gui/titlebar.py` makes the main window frameless and sets a 48 px row as its menu widget (`titlebar.install`, called before the menus are built; it returns the menu bar inside the row, which the menus are added to).
 
 - **Row:** 48 px high. Left corner: the app icon at 32 px and the window title; then the menus; right corner: minimise, maximise or restore, and close (red on hover).
 - **Moving and resizing:** pressing an empty part of the row calls the system move, a double click maximises or restores, and the outer 6 px of the window call the system resize (cursor changes at the edges).
