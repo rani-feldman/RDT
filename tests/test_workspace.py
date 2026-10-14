@@ -136,7 +136,8 @@ def test_tabs_save_and_load(tmp_path):
     ws = Workspace(tabs=[Tab("Motor", [speed, Watch("main:motor.mode", read_only=True)]),
                          Tab("Empty"), Tab("Overview", [Watch("main:tick_count"), speed])])
     path = ws.save(tmp_path / "tabs.rdtw")
-    raw = tomllib.loads(path.read_text())
+    assert tomllib.loads(path.read_text())["watch_file"] == "tabs.watch.toml"
+    raw = tomllib.loads((tmp_path / "tabs.watch.toml").read_text())
     assert [t["name"] for t in raw["tab"]] == ["Motor", "Empty", "Overview"]
     assert raw["tab"][2]["watch"][1] == {"expr": "main:motor.speed"}   # settings at the first place only
     back = Workspace.load(path)
@@ -156,7 +157,9 @@ def test_an_old_workspace_loads(tmp_path):
     assert "buttons are no longer supported" in ws.warnings[0]
     ws.save()
     text = path.read_text()
-    assert "button" not in text and "[[tab]]" in text and "[[tab.watch]]" in text
+    assert "button" not in text and "[[tab" not in text and 'watch_file = "old.watch.toml"' in text
+    watch = (tmp_path / "old.watch.toml").read_text()
+    assert "[[tab]]" in watch and "[[tab.watch]]" in watch
     assert Workspace.load(path).warnings == []
 
 
@@ -380,10 +383,13 @@ def test_saved_commands_round_trip(tmp_path):
     ws.commands = [SavedCommand("MOT:SPE?", "Speed", "Motor", "rpm"), SavedCommand("*IDN?")]
     path = ws.save(tmp_path / "w.rdtw")
     assert Workspace.load(path).commands == ws.commands
-    assert '[[command]]\ncommand = "*IDN?"\n' in path.read_text(encoding="utf-8")
-    path.write_text(path.read_text(encoding="utf-8") + '\n[[command]]\nname = "no command"\n', encoding="utf-8")
+    assert 'commands_file = "w.commands.csv"' in path.read_text(encoding="utf-8")
+    assert (tmp_path / "w.commands.csv").read_text(encoding="utf-8-sig").splitlines() == [
+        "command,name,group,description", "MOT:SPE?,Speed,Motor,rpm", "*IDN?,,,"]
+    old = tmp_path / "old.rdtw"   # from before the split: the commands inside the workspace
+    old.write_text('[[command]]\ncommand = "*IDN?"\n\n[[command]]\nname = "no command"\n', encoding="utf-8")
     with pytest.raises(ConfigError, match=r"\[\[command\]\]"):
-        Workspace.load(path)
+        Workspace.load(old)
 
 
 # --- WS-4: the workspace's read-only default -------------------------------------------------
@@ -414,7 +420,7 @@ def test_read_only_default_save_and_load(tmp_path):
     ws.read_only = True
     ws.save(tmp_path / "ro.rdtw")
     text = (tmp_path / "ro.rdtw").read_text()
-    assert "read_only = true" in text.split("[connection]")[0]
+    assert re.search(r"^read_only *= true$", text.split("[connection]")[0], re.M)
     back = Workspace.load(tmp_path / "ro.rdtw")
     assert back.read_only and [w.read_only for w in back.watches] == [False, None, True]
     with pytest.raises(ConfigError, match="read_only must be true or false"):

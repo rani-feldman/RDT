@@ -96,6 +96,8 @@ A bit field is written by reading the word that holds it, changing the field and
 | `watch [EXPR...] [--tab NAME] [-i MS] [-n N] [--csv FILE]` | Poll values and print one line per sample. A struct or array becomes one column per field and cell. With no names, every item in the workspace's watch tabs (or with `--tab`, one tab's), each at its own interval. `--csv` also logs every value read to a CSV file (see [CSV log](#csv-log)) |
 | `console [--timestamps] [--log FILE]` | Interactive SCPI console. `.read EXPR` reads, `.write EXPR VALUE` writes, `.history [N]` lists the saved history, `!N` sends entry N again, `.quit` leaves. See [Console](#console) |
 | `commands list [TEXT]`, `commands import FILE [--replace]`, `commands export FILE`, `commands clear` | The workspace's list of known commands. See [Console](#console). Needs no device |
+| `watchlist import FILE [--replace]`, `watchlist export FILE` | Bring in the watch tabs of a watch list file (or another `.rdtw`), or write this workspace's tabs and chart to one. See [Files of a workspace](#files-of-a-workspace). Needs no device |
+| `ui show`, `ui import FILE`, `ui export FILE` | The GUI's per-user interface settings: show them, take an exported file's, or export them. See [Files of a workspace](#files-of-a-workspace). Needs no workspace or device |
 | `history [-n N] [--clear]` | List the last N (default 20, 0 for all) commands of the saved console history, or delete it. Needs no device |
 | `init FILE` | Save the current target (file and command-line options) as a new workspace. Needs no device |
 | `list` | Show the workspace's watch tabs and their items. Needs no device |
@@ -182,7 +184,7 @@ and change `profile` to `"sim/examples/default_profile.toml"` (paths are relativ
 
 ## Workspace
 
-A workspace (`.rdtw`) is a target file plus everything set up on top of it: the watch tabs, each a named watch list, with each item's format, scaling, polling and write safety, and the chart layout. Give it with `-w` (`-t` is the same option). [`examples/sim_bench.rdtw`](../examples/sim_bench.rdtw) is one for the simulator, with the tabs `Motor` and `System`:
+A workspace (`.rdtw`) is a target file plus everything set up on top of it: the watch tabs, each a named watch list, with each item's format, scaling, polling and write safety, the chart layout, and the device's known commands. The tabs and chart are kept in a watch list file and the commands in a CSV file, both named by the `.rdtw` (see [Files of a workspace](#files-of-a-workspace)). Give it with `-w` (`-t` is the same option). [`examples/sim_bench.rdtw`](../examples/sim_bench.rdtw) is one for the simulator, with the tabs `Motor` and `System`:
 
 ```
 rdt -w examples/sim_bench.rdtw read                 # every watched item, scaled
@@ -192,15 +194,21 @@ rdt -w examples/sim_bench.rdtw write main:motor.target 2500    # asks first, che
 rdt -w examples/sim_bench.rdtw add main:gains --tab Tuning     # makes the tab Tuning
 ```
 
-Start one from a target file or command-line options with `rdt init bench.rdtw`, then build the watch tabs with `add`, `remove` and `tab`, or edit the file. RDT rewrites the whole file when it saves, so comments are not kept, and paths are saved relative to the file.
+Start one from a target file or command-line options with `rdt init bench.rdtw`, then build the watch tabs with `add`, `remove` and `tab`, or edit the files. RDT rewrites the files when it saves, so comments are not kept, and paths are saved relative to the workspace.
 
 ```toml
+# bench.rdtw
 profile = "fw_profile.toml"   # or an inline [scpi] table, as in a target file
 poll_ms = 500                 # global polling interval; 0 turns polling off
+watch_file    = "bench.watch.toml"     # the watch tabs and chart
+commands_file = "bench.commands.csv"   # the known commands
 
 [connection]                  # and [[mcu]] tables: the same as a target file
 ...
+```
 
+```toml
+# bench.watch.toml
 [[tab]]
 name = "Motor"                # one watch tab, in the order the GUI shows them
 
@@ -224,18 +232,46 @@ name = "Overview"
   expr = "main:motor.speed"   # also in this tab, with the settings given above
 
 [chart]                       # the GUI's chart layout; kept as written
-
-[[command]]                   # the device's known commands, for the console's list
-command     = "MOTor:SPEed?"
-name        = "Speed"         # name, group and description are optional
-group       = "Motor"
-description = "Motor speed in rpm"
 ```
 
-Every key in a `[[tab.watch]]` but `expr` is optional.
+```
+# bench.commands.csv: the device's known commands, for the console's list
+command,name,group,description
+MOTor:SPEed?,Speed,Motor,Motor speed in rpm
+```
+
+Every key in a `[[tab.watch]]` but `expr` is optional, and so are a command's name, group and description.
+
+### Files of a workspace
+
+A workspace is three files, next to each other and named after it:
+
+| File | Holds | Format |
+| --- | --- | --- |
+| `bench.rdtw` | Connection, SCPI profile, MCUs and ELF files, `poll_ms`, `read_only`, and the names of the other two | TOML |
+| `bench.watch.toml` | The watch tabs (`[[tab]]`, `[[tab.watch]]`) and the chart layout (`[chart]`) | TOML |
+| `bench.commands.csv` | The known commands: `command,name,group,description` | CSV, UTF-8, opens in Excel |
+
+Opening the `.rdtw` loads all of them. A file is made only once there is something to keep in it. Saving under a new name (`Save as`) takes the files named after the workspace along to the new name; a file named otherwise, such as a commands list several workspaces share (`commands_file = "../gac_commands.csv"`), stays where it is and both workspaces use it. A file the workspace names but that is missing gives a warning and an empty list, and is made again on the next save.
+
+Each part can also be moved between workspaces:
+
+```
+rdt -w bench.rdtw watchlist export motor.watch.toml     # the tabs and chart
+rdt -w other.rdtw watchlist import motor.watch.toml     # adds its tabs; --replace replaces them
+rdt -w other.rdtw watchlist import bench.rdtw           # another workspace works too
+rdt -w bench.rdtw commands export gac.csv
+rdt -w other.rdtw commands import gac.csv
+rdt ui export my-ui.toml                                 # the GUI's look, per user
+rdt ui import my-ui.toml
+```
+
+Importing a watch list adds its tabs: a tab with the same name as one already there gets the items it lacks, and an item already watched keeps the settings it has here. `--replace` drops the tabs and chart and takes the file's.
+
+The GUI's interface settings (the console's text size and wrapping, the memory view's display format) are per user, not per workspace: they are in `ui.toml` next to the console history (`%LOCALAPPDATA%\rdt\ui.toml` on Windows). `rdt ui show` prints them. An export holds only those settings; the GUI's memory of the last workspace stays out of it. Importing replaces them all: one the file leaves out goes back to its default. The first time the GUI starts with this version, it moves the settings from the older `gui.ini` and `console.ini` into `ui.toml`.
 
 - **Tabs.** Each tab has a name, unique whatever the case, and its own list of items. An item can be in several tabs, but it is still one item: its settings are the same in every tab and it is read once per poll. RDT writes its settings at its first place only; a later place may repeat them, but not differ. Every tab is polled, not only the one the GUI shows.
-- **Older workspaces.** A file from before tabs has a plain `[[watch]]` list; it loads as one tab named `Watch` and is saved with tabs. Its `[[button]]` tables (command buttons, which RDT no longer has) are ignored with a warning and left out when the file is saved; send such commands with `rdt send` or the console.
+- **Older workspaces.** A workspace from before the split keeps its tabs, chart and `[[command]]` tables inside the `.rdtw`. It still opens, and the next save moves them out into the two files. A file from before tabs has a plain `[[watch]]` list; it loads as one tab named `Watch` and is saved with tabs. Its `[[button]]` tables (command buttons, which RDT no longer has) are ignored with a warning and left out when the file is saved; send such commands with `rdt send` or the console.
 
 - **Scaling** applies to a single value, not to a struct or array. A write takes the value in shown units and writes the nearest raw value. A value whose raw form doesn't fit the type is refused, and a float variable keeps the fraction.
 - **Write safety.** A `read_only` item refuses writes. `read_only = true` at the top of the workspace makes every item read-only unless the item says `read_only = false`, and also refuses raw writes (`rdt read-only on|off` sets it). `min` and `max` are checked in shown units, and `confirm` asks before writing. Without a terminal to ask, or `-y`, the write is refused. A read-only or confirm-first struct or array covers its fields and cells too.
@@ -355,6 +391,7 @@ rdt/
   scheduler.py                                      poll scheduler: block merging, one poll for many items
   stats.py, csvlog.py                               min/max/mean per value, the CSV log
   workspace.py, scaling.py, tomlw.py                workspace files, display formats and scaling, write safety
+  ui_settings.py                                    the GUI's per-user interface settings (ui.toml)
   console.py                                        console history, autocomplete, session log, known commands
   cli.py                                            command line
   gui/         app.py, device.py, variables.py, panels.py, chart.py   the GUI (PySide6): main window, device worker thread,

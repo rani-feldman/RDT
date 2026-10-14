@@ -1,9 +1,20 @@
-"""Workspace (``.rdtw``): everything about one bench in one TOML file.
+"""Workspace (``.rdtw``): everything about one bench, in three files.
 
 A workspace is a target file (connection, SCPI profile, MCUs) plus what the user set up on top
 of it: the watch tabs, each a named watch list, with each item's display format, scaling,
-polling and write safety, and the chart layout. A plain target file loads as a workspace with no
-tabs, and a workspace works anywhere a target file does.
+polling and write safety, and the chart layout; and the device's known commands. A plain target
+file loads as a workspace with no tabs, and a workspace works anywhere a target file does.
+
+The watch tabs and chart are kept in their own watch list file, and the known commands in their
+own CSV file; the ``.rdtw`` names them (``watch_file``, ``commands_file``), so opening it loads
+everything. By default they sit next to it, named after it::
+
+    bench.rdtw               connection, profile, MCUs, polling, read-only default
+    bench.watch.toml         [[tab]] / [[tab.watch]] and [chart]
+    bench.commands.csv       command,name,group,description
+
+Each can be imported into another workspace or exported on its own. A workspace from before the
+split (tabs and commands inside the ``.rdtw``) still opens, and is split when it is saved.
 
 An expression may be in several tabs. It is still one item: its settings are the same in every
 tab, and it is read once per poll.
@@ -13,12 +24,13 @@ tab, and it is read once per poll.
         for w in ws.watches:
             print(ws.read(t, w))
 
-Saving rewrites the whole file, so comments in it are not kept. Paths (ELFs, a profile file)
-are saved relative to the workspace.
+Saving rewrites the files, so comments in them are not kept. Paths (ELFs, a profile file, the
+watch list and commands files) are saved relative to the workspace.
 """
 
 from __future__ import annotations
 
+import csv
 import os
 import tomllib
 from dataclasses import dataclass, field, fields
@@ -26,7 +38,7 @@ from pathlib import Path
 from typing import Callable
 
 from . import scheduler, tomlw
-from .console import SavedCommand
+from .console import SavedCommand, merge_commands, read_commands, write_commands
 from .errors import ConfigError, RdtError, SymbolError, WriteRefused
 from .profile import Profile, Range
 from .scaling import Display
@@ -38,6 +50,8 @@ from .target import Target, TargetConfig
 
 POLL_KINDS = ("global", "manual")
 DEFAULT_POLL_MS = 500
+WATCH_SUFFIX = ".watch.toml"        # bench.rdtw keeps its watch tabs in bench.watch.toml
+COMMANDS_SUFFIX = ".commands.csv"   # and its known commands in bench.commands.csv
 
 
 def canonical(expr: str) -> str:
@@ -162,6 +176,8 @@ class Workspace:
     commands: list[SavedCommand] = field(default_factory=list)   # the device's known commands (CON-7)
     read_only: bool = False          # every item read-only unless it says otherwise (WS-4)
     path: Path | None = None
+    watch_path: Path | None = None     # the watch list file (tabs and chart); None until saved
+    commands_path: Path | None = None  # the known commands file (CSV); None until saved
     warnings: list[str] = field(default_factory=list)   # about the file as it was loaded
 
     # --- files -------------------------------------------------------------------------------
@@ -187,10 +203,7 @@ class Workspace:
             poll = 0
         if not isinstance(poll, int) or poll < 0:
             raise ConfigError("poll_ms must be a time in ms, or 0 (or \"off\") for no polling")
-        tabs = _tabs_from(raw)
-        chart = raw.get("chart", {})
-        if not isinstance(chart, dict):
-            raise ConfigError("[chart] must be a table")
+        tabs, chart = _tabs_from(raw), _chart_from(raw)
         read_only = raw.get("read_only", False)
         if not isinstance(read_only, bool):
             raise ConfigError("read_only must be true or false")
@@ -198,6 +211,26 @@ class Workspace:
         if raw.get("button"):
             ws.warnings.append("command buttons are no longer supported: the [[button]] tables are ignored "
                                "and are left out when the workspace is saved")
+        watch_file = _file_key(raw, "watch_file")
+        if watch_file is not None:
+            if tabs or chart:
+                raise ConfigError("the workspace names a watch_file and also has [[tab]], [[watch]] or [chart] "
+                                  "tables; keep the watch tabs in one place")
+            ws.watch_path = base / watch_file
+            if ws.watch_path.is_file():
+                ws.tabs, ws.chart = read_watch_file(ws.watch_path)
+            else:
+                ws.warnings.append(f"the watch list {watch_file} is missing; starting with no tabs")
+        commands_file = _file_key(raw, "commands_file")
+        if commands_file is not None:
+            if raw.get("command"):
+                raise ConfigError("the workspace names a commands_file and also has [[command]] tables; "
+                                  "keep the commands in one place")
+            ws.commands_path = base / commands_file
+            if ws.commands_path.is_file():
+                ws.commands = _read_commands(ws.commands_path)
+            else:
+                ws.warnings.append(f"the commands file {commands_file} is missing; starting with no commands")
         return ws
 
     def to_dict(self, base: Path) -> dict:
@@ -236,36 +269,84 @@ class Workspace:
             mcus.append(md)
         if mcus:
             d["mcu"] = mcus
-        tabs, written = [], set()
-        for tab in self.tabs:
-            td: dict = {"name": tab.name}
-            if tab.watches:
-                # an item in several tabs keeps its settings at its first place only
-                td["watch"] = [w.to_dict() if w.expr not in written else {"expr": w.expr} for w in tab.watches]
-                written.update(w.expr for w in tab.watches)
-            tabs.append(td)
-        if tabs:
-            d["tab"] = tabs
-        if self.chart:
-            d["chart"] = self.chart
-        if self.commands:
-            d["command"] = [{k: v for k, v in (("command", c.command), ("name", c.name), ("group", c.group),
-                                                ("description", c.description)) if v} for c in self.commands]
+        if self.watch_path is not None:
+            d["watch_file"] = _rel(self.watch_path, base)
+        if self.commands_path is not None:
+            d["commands_file"] = _rel(self.commands_path, base)
         return d
 
     def save(self, path: str | Path | None = None) -> Path:
+        """Save the workspace, its watch list file and its commands file. A file the workspace
+        does not have yet is made next to it, named after it; so is one named after the
+        workspace's old name when it is saved under a new one. A file named otherwise (one shared
+        by several workspaces, say) stays where it is."""
         path = Path(path) if path is not None else self.path
         if path is None:
             raise ConfigError("the workspace has no file yet; give a path to save it to")
-        text = tomlw.dumps(self.to_dict(path.parent), "RDT workspace. Saved by RDT, so comments are not kept.")
-        tmp = path.with_name(path.name + ".tmp")
+        watch_path = _own_file(self.watch_path, self.path, path, WATCH_SUFFIX,
+                               bool(self.tabs or self.chart))
+        commands_path = _own_file(self.commands_path, self.path, path, COMMANDS_SUFFIX, bool(self.commands))
+        if watch_path is not None:
+            write_watch_file(watch_path, self.tabs, self.chart)
+        if commands_path is not None:
+            try:
+                _write_atomic(commands_path, lambda tmp: write_commands(tmp, self.commands))
+            except OSError as e:
+                raise ConfigError(f"cannot save commands file {commands_path}: {e.strerror}") from None
+        self.watch_path, self.commands_path = watch_path, commands_path
+        text = tomlw.dumps(self.to_dict(path.parent), "RDT workspace. Saved by RDT, so comments are not kept.\n"
+                           "The watch tabs and the known commands are in the files it names.")
         try:
-            tmp.write_text(text, encoding="utf-8")
-            os.replace(tmp, path)
+            _write_atomic(path, lambda tmp: tmp.write_text(text, encoding="utf-8"))
         except OSError as e:
             raise ConfigError(f"cannot save workspace {path}: {e.strerror}") from None
         self.path = path
         return path
+
+    # --- import and export ----------------------------------------------------------------------
+
+    def export_watches(self, path: str | Path) -> Path:
+        """Write the watch tabs and the chart to a watch list file of their own."""
+        path = Path(path)
+        write_watch_file(path, self.tabs, self.chart)
+        return path
+
+    def import_watches(self, path: str | Path, replace: bool = False) -> tuple[int, int]:
+        """Take the watch tabs from a watch list file (or another workspace). ``replace`` drops
+        the current tabs and chart and takes the file's; otherwise its tabs are added, a tab with
+        the same name as one here gets the items it lacks, and an item already watched keeps its
+        settings here. Returns how many items were added and how many skipped (already there)."""
+        tabs, chart = read_watch_file(path)
+        if replace:
+            self.tabs, self.chart = tabs, chart
+            return sum(len(t.watches) for t in tabs), 0
+        added = skipped = 0
+        for tab in tabs:
+            if not self.has_tab(tab.name):
+                self.add_tab(tab.name)
+            here = self.tab(tab.name)
+            for w in tab.watches:
+                if here.watch(w.expr):
+                    skipped += 1
+                else:
+                    self.add(w, here.name)
+                    added += 1
+        return added, skipped
+
+    def export_commands(self, path: str | Path) -> Path:
+        """Write the known commands to a CSV file."""
+        path = Path(path)
+        try:
+            write_commands(path, self.commands)
+        except OSError as e:
+            raise ConfigError(f"cannot write {path}: {e.strerror}") from None
+        return path
+
+    def import_commands(self, path: str | Path, replace: bool = False) -> tuple[int, int]:
+        """Add commands from a CSV or text file (or replace the list with them), skipping ones
+        already listed. Returns how many were added and how many skipped."""
+        self.commands, added, skipped = merge_commands(self.commands, _read_commands(Path(path)), replace)
+        return added, skipped
 
     # --- tabs ---------------------------------------------------------------------------------
 
@@ -569,6 +650,105 @@ def _commands_from(raw: dict) -> list[SavedCommand]:
             raise ConfigError(f"[[command]] {t['command']!r}: unknown keys {', '.join(sorted(unknown))}")
         out.append(SavedCommand(t["command"].strip(), *(str(t.get(k, "")) for k in ("name", "group", "description"))))
     return out
+
+
+def _chart_from(raw: dict) -> dict:
+    chart = raw.get("chart", {})
+    if not isinstance(chart, dict):
+        raise ConfigError("[chart] must be a table")
+    return chart
+
+
+def _file_key(raw: dict, key: str) -> str | None:
+    v = raw.get(key)
+    if v is None:
+        return None
+    if not isinstance(v, str) or not v.strip():
+        raise ConfigError(f"{key} must be a file name, such as \"bench{WATCH_SUFFIX if key == 'watch_file' else COMMANDS_SUFFIX}\"")
+    return v
+
+
+def _own_file(current: Path | None, old_ws: Path | None, new_ws: Path, suffix: str, needed: bool) -> Path | None:
+    """Where the workspace saved at ``new_ws`` keeps one of its files: where it is now, unless it
+    is named after the workspace's old name (then it follows the new name); next to the
+    workspace when it has none yet but has something to keep. None when there is nothing."""
+    if current is None:
+        return _beside(new_ws, suffix) if needed else None
+    if old_ws is not None and Path(current) == _beside(old_ws, suffix):
+        return _beside(new_ws, suffix)
+    return current
+
+
+def _beside(ws_path: Path, suffix: str) -> Path:
+    """bench.rdtw -> bench.watch.toml, next to it."""
+    return ws_path.with_name(ws_path.stem + suffix)
+
+
+def _write_atomic(path: Path, write: Callable[[Path], None]) -> None:
+    tmp = path.with_name(path.name + ".tmp")
+    write(tmp)
+    os.replace(tmp, path)
+
+
+def _read_commands(path: Path) -> list[SavedCommand]:
+    try:
+        return read_commands(path)
+    except OSError as e:
+        raise ConfigError(f"cannot read commands file {path}: {e.strerror}") from None
+    except (ValueError, csv.Error) as e:
+        raise ConfigError(f"commands file {path}: {e}") from None
+
+
+def read_watch_file(path: str | Path) -> tuple[list[Tab], dict]:
+    """The watch tabs and chart layout in a watch list file. A workspace (``.rdtw``) works too:
+    its own tabs and chart, wherever it keeps them."""
+    path = Path(path)
+    if path.suffix.lower() == ".rdtw":
+        ws = Workspace.load(path)
+        return ws.tabs, ws.chart
+    try:
+        with open(path, "rb") as f:
+            raw = tomllib.load(f)
+    except OSError as e:
+        raise ConfigError(f"cannot read watch list {path}: {e.strerror}") from None
+    except tomllib.TOMLDecodeError as e:
+        raise ConfigError(f"watch list {path}: {e}") from None
+    unknown = set(raw) - {"tab", "watch", "chart"}
+    if unknown:
+        raise ConfigError(f"watch list {path}: unknown keys {', '.join(sorted(unknown))}; it holds only "
+                          f"[[tab]] tables (with [[tab.watch]] items) and [chart]")
+    try:
+        return _tabs_from(raw), _chart_from(raw)
+    except ConfigError as e:
+        raise ConfigError(f"watch list {path}: {e}") from None
+
+
+def watch_dict(tabs: list[Tab], chart: dict) -> dict:
+    """The watch list file's contents: the tabs and their items, and the chart layout."""
+    out, written = [], set()
+    for tab in tabs:
+        td: dict = {"name": tab.name}
+        if tab.watches:
+            # an item in several tabs keeps its settings at its first place only
+            td["watch"] = [w.to_dict() if w.expr not in written else {"expr": w.expr} for w in tab.watches]
+            written.update(w.expr for w in tab.watches)
+        out.append(td)
+    d: dict = {}
+    if out:
+        d["tab"] = out
+    if chart:
+        d["chart"] = chart
+    return d
+
+
+def write_watch_file(path: str | Path, tabs: list[Tab], chart: dict) -> None:
+    path = Path(path)
+    text = tomlw.dumps(watch_dict(tabs, chart), "RDT watch list: watch tabs, their items and the chart.\n"
+                                                "Saved by RDT, so comments are not kept.")
+    try:
+        _write_atomic(path, lambda tmp: tmp.write_text(text, encoding="utf-8"))
+    except OSError as e:
+        raise ConfigError(f"cannot save watch list {path}: {e.strerror}") from None
 
 
 def _num(v: float) -> float | int:
