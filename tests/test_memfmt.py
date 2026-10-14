@@ -54,3 +54,13 @@ def test_out_of_range_is_refused():
         MemFormat("signed", "Char", True).from_text("-129", "little")
     with pytest.raises(ValueError, match="not a hex"):
         MemFormat("unsigned", "Short").from_text("xyz", "little")
+
+
+def test_ascii_column_follows_the_value_order():
+    raw = b"\x03\x00\x00\x30"                  # 0x30000003 in little-endian memory
+    long = MemFormat("unsigned", "Long")
+    assert long.to_text(raw, "little") == "30000003"
+    assert long.to_ascii(raw, "little") == "0..."
+    assert long.to_ascii(b"\x30\x00\x00\x03", "big") == "0..."
+    assert MemFormat().to_ascii(b"A", "little") == "A"
+    assert MemFormat("unsigned", "Short").to_ascii(b"AB", "little") == "BA"
