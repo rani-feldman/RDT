@@ -34,6 +34,7 @@ from .cards import McuCards
 from .device import Device, describe_error
 from .dnd import DropTarget
 from .panels import CONSOLE_KEYS, Console, McuDialog, MemoryView, ProfileDialog, mono
+from . import titlebar
 from .style import THEMES, apply_theme, is_dark
 from .variables import WatchTabs, WatchTree
 
@@ -389,26 +390,6 @@ def identity_summary(results) -> str:
     return "; ".join(f"{r.mcu}: {IDENTITY_WORDS[r.status]}" for r in results)
 
 
-def blank_title_icon(hwnd: int) -> None:
-    """Windows only: make the small icon in the title bar transparent, so only the menu row shows
-    the app icon (GUI-18). The taskbar and Alt-Tab keep the normal icon (the big one)."""
-    try:
-        import ctypes
-        from ctypes import wintypes
-        user32 = ctypes.windll.user32
-        user32.CreateIcon.restype = wintypes.HICON
-        user32.CreateIcon.argtypes = [wintypes.HINSTANCE, ctypes.c_int, ctypes.c_int, ctypes.c_ubyte,
-                                      ctypes.c_ubyte, ctypes.c_char_p, ctypes.c_char_p]
-        user32.SendMessageW.argtypes = [wintypes.HWND, wintypes.UINT, wintypes.WPARAM, wintypes.LPARAM]
-        and_bits = b"\xff" * 32            # 16 x 16, 1 bit per pixel: all 1 = transparent
-        xor_bits = b"\x00" * 32
-        icon = user32.CreateIcon(None, 16, 16, 1, 1, and_bits, xor_bits)
-        if icon:
-            user32.SendMessageW(hwnd, 0x0080, 0, icon)      # WM_SETICON, ICON_SMALL
-    except Exception:
-        pass                                 # cosmetic only
-
-
 class MainWindow(QMainWindow):
     def __init__(self, ws: Workspace | None = None):
         super().__init__()
@@ -465,8 +446,8 @@ class MainWindow(QMainWindow):
         self.resizeDocks([self.docks["Chart"]], [300], Qt.Vertical)
         self.resizeDocks([self.docks["Target"]], [300], Qt.Horizontal)
         self.mode = "watch"
+        self.menu_bar = titlebar.install(self)
         self._menus()
-        self._menu_icon()
         self.set_theme()
         self.set_mode(str(self.ui.value("session/mode", "watch")), remember=False)
         self.message = QLabel()
@@ -488,14 +469,9 @@ class MainWindow(QMainWindow):
 
     # --- menus -------------------------------------------------------------------------------
 
-    def _menu_icon(self) -> None:
-        """The app icon in front of File, in the menu row."""
-        label = self.menu_icon = QLabel()      # kept so Python does not delete it
-        label.setPixmap(QPixmap(str(Path(__file__).parent / "assets" / "rdt.png")).scaled(
-            22, 22, Qt.KeepAspectRatio, Qt.SmoothTransformation))
-        label.setContentsMargins(8, 0, 4, 0)
-        self.menuBar().setCornerWidget(label, Qt.TopLeftCorner)
-        label.show()
+    def menuBar(self):
+        """The menu bar inside the title bar row; QMainWindow.menuBar() would replace the row."""
+        return self.menu_bar
 
     def _menus(self) -> None:
         def action(menu, text, slot, shortcut=None):
@@ -506,7 +482,7 @@ class MainWindow(QMainWindow):
             menu.addAction(a)
             return a
 
-        m = self.menuBar().addMenu("&File")
+        m = self.menu_bar.addMenu("&File")
         action(m, "&New workspace", self.new_file, QKeySequence.New)
         action(m, "&Open...", self.open_file, QKeySequence.Open)
         action(m, "&Save", self.save, QKeySequence.Save)
@@ -522,14 +498,14 @@ class MainWindow(QMainWindow):
         action(sub, "&Interface settings...", lambda: self.export_ui())
         m.addSeparator()
         action(m, "&Quit", self.close, QKeySequence.Quit)
-        m = self.menuBar().addMenu("&Target")
+        m = self.menu_bar.addMenu("&Target")
         action(m, "&Connect or disconnect", self.toggle_connection, "F5")
         action(m, "SCPI &profile...", self.edit_profile)
         action(m, "Load profile file...", self.load_profile)
         action(m, "&MCUs and ELF files...", self.edit_mcus)
         m.addSeparator()
         action(m, "Check ELF &identity", lambda: self.check_identity())
-        m = self.menuBar().addMenu("&Watch")
+        m = self.menu_bar.addMenu("&Watch")
         action(m, "&Add expression...", self.add_expression, "Ctrl+E")
         action(m, "&Poll now", self.read_all, "F6")
         self.polling_action = action(m, "Poll &automatically", lambda: self.set_polling(self.polling_action.isChecked()), "F7")
@@ -552,7 +528,7 @@ class MainWindow(QMainWindow):
         self.log_action.setCheckable(True)
         self.read_only_action = action(m, "All items &read-only", self.set_read_only)
         self.read_only_action.setCheckable(True)
-        m = self.menuBar().addMenu("&View")
+        m = self.menu_bar.addMenu("&View")
         for k, (name, text) in enumerate(MODES.items(), start=1):
             action(m, f"{text} mode", lambda _=False, n=name: self.set_mode(n), f"Ctrl+{k}")
         action(m, "Reset this mode's layout", self.reset_layout)
@@ -570,14 +546,14 @@ class MainWindow(QMainWindow):
             a.setCheckable(True)
             group.addAction(a)
             self.theme_actions[name] = a
-        m = self.menuBar().addMenu("&Help")
+        m = self.menu_bar.addMenu("&Help")
         action(m, "&Keyboard shortcuts", self.show_shortcuts, "F1")
 
     def shortcut_rows(self) -> list[tuple[str, str, str]]:
         """(where, what, keys) for every menu shortcut, read from the menus themselves, then the
         console's keys."""
         rows = []
-        for top in self.menuBar().actions():
+        for top in self.menu_bar.actions():
             menu = top.menu()
             for a in menu.actions() if menu else []:
                 if not a.shortcut().isEmpty():
@@ -629,8 +605,7 @@ class MainWindow(QMainWindow):
     def set_dirty(self, dirty: bool = True) -> None:
         self.dirty = dirty
         name = self.ws.path.name if self.ws.path else "untitled"
-        self.doc_title = f"{name}{' *' if dirty else ''} - RDT"
-        self.setWindowTitle(" ")              # the title bar shows only the icon (rani, 2026-10-14)
+        self.setWindowTitle(f"{name}{' *' if dirty else ''} - RDT")
 
     def status(self, msg: str, error: bool = False) -> None:
         """Errors go to the red bar under the toolbar; other messages to the status bar, and
@@ -881,12 +856,6 @@ class MainWindow(QMainWindow):
             return False
         self.status(f"Exported the interface settings to {Path(path).name}")
         return True
-
-    def showEvent(self, event) -> None:
-        super().showEvent(event)
-        if sys.platform == "win32" and not getattr(self, "_title_icon_hidden", False):
-            self._title_icon_hidden = True
-            blank_title_icon(int(self.winId()))
 
     def closeEvent(self, event) -> None:
         if not self._maybe_save():
