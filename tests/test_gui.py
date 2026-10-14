@@ -116,7 +116,7 @@ def test_write_inline_with_limits_and_confirm(qtbot, win, monkeypatch):
     assert "confirmed" in win.message.text()
 
     tree.write("main:motor.target", "5000")     # above max
-    qtbot.waitUntil(lambda: "above its maximum" in win.message.text(), timeout=3000)
+    qtbot.waitUntil(lambda: "above its maximum" in win.banner.error, timeout=3000)
 
     monkeypatch.setattr(QMessageBox, "question", lambda *a, **k: QMessageBox.No)
     tree.write("main:motor.target", "100")
@@ -776,17 +776,32 @@ def test_elf_identity(qtbot, win, tmp_path, monkeypatch):
     win.disconnect()
     qtbot.waitUntil(lambda: win.device.target is None, timeout=3000)
     connect(qtbot, win)
-    qtbot.waitUntil(lambda: "does not match the firmware on main" in win.message.text(), timeout=3000)
-    assert "does not match the firmware on main" in win.message.text()
+    qtbot.waitUntil(lambda: "does not match the firmware on main" in win.banner.text.text(), timeout=3000)
     qtbot.waitUntil(lambda: win.bar.image.text() == "Image \u2717 mismatch", timeout=3000)
-    assert not win.banner.isHidden() and "ELF does not match the firmware on main" in win.banner.title.text()
-    assert "rdt-mXin" in win.banner.detail.text() and not win.banner.toggleViewAction().isVisible()
+    assert not win.banner.isHidden() and not win.banner.load_button.isHidden()
+    assert "rdt-mXin" in win.banner.toolTip() and not win.banner.toggleViewAction().isVisible()
+    assert "does not match" not in win.message.text()   # one error bar, nothing red at the bottom
     monkeypatch.setattr(QMessageBox, "question", lambda *a, **k: QMessageBox.Yes)
     win.watch_tree.write("main:motor.target", "1500")
-    qtbot.waitUntil(lambda: "does not match" in win.message.text(), timeout=3000)
+    qtbot.waitUntil(lambda: "write main:motor.target" in win.banner.error, timeout=3000)
+    assert win.banner.text.text().count("\n") == 1 and not win.banner.close_button.isHidden()
     win.disconnect()
     qtbot.waitUntil(lambda: not win.bar._image.isVisible(), timeout=3000)
+    qtbot.waitUntil(win.banner.isHidden, timeout=3000)   # "Disconnected" clears the write error
+
+
+def test_error_bar(qtbot, win):
+    """Errors show in the bar under the toolbar, not in the status bar; closing it or a later
+    successful action clears them."""
     assert win.banner.isHidden()
+    win.status("Cannot connect: no such port", error=True)
+    assert not win.banner.isHidden() and win.banner.text.text() == "Cannot connect: no such port"
+    assert win.message.text() == "" and win.banner.load_button.isHidden()
+    win.banner.close_button.click()
+    assert win.banner.isHidden()
+    win.status("poll: timeout", error=True)
+    win.status("Saved x.rdtw")
+    assert win.banner.isHidden() and win.message.text() == "Saved x.rdtw"
 
 
 def test_commands_import_and_export_buttons(qtbot, win, tmp_path, monkeypatch):
