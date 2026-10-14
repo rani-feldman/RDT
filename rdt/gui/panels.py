@@ -13,13 +13,14 @@ from PySide6.QtCore import QEvent, QObject, QSettings, QStringListModel, Qt, QTi
 from PySide6.QtGui import QColor, QFont, QFontDatabase, QKeySequence, QShortcut, QTextCharFormat, QTextCursor
 from PySide6.QtWidgets import (
     QAbstractItemView, QApplication, QCheckBox, QComboBox, QCompleter, QDialog, QDialogButtonBox, QFileDialog, QFormLayout, QHBoxLayout,
-    QHeaderView, QLabel, QLineEdit, QListWidget, QMessageBox, QPlainTextEdit, QPushButton, QSpinBox, QTableWidget,
+    QHeaderView, QLabel, QLineEdit, QListWidget, QMenu, QMessageBox, QPlainTextEdit, QPushButton, QSpinBox, QTableWidget,
     QSplitter, QTableWidgetItem, QTextEdit, QToolButton, QTreeWidget, QTreeWidgetItem, QVBoxLayout, QWidget,
 )
 
 from ..console import (CommandHistory, SessionLog, completions, hex_to_text, history_path, merge_commands, read_commands,
                        text_to_hex, write_commands)
 from ..errors import CommandTimeout, ConfigError, LinkDown, RdtError, WriteRefused
+from ..memfmt import INT_TYPES, MemFormat
 from ..profile import Profile, align_span, parse_int
 from ..target import McuConfig, Target
 from ..workspace import Workspace
@@ -740,7 +741,9 @@ class Console(QWidget):
 
 
 class MemoryView(QWidget):
-    """Hex and ASCII dump of raw memory. Typing a new byte in a hex cell writes it."""
+    """Dump of raw memory, 16 bytes per row with their ASCII. Right-click picks how the cells show the
+    bytes (GUI-7): hex bytes by default, unsigned or signed C integers in hex or decimal, characters,
+    floats or doubles. Typing a new value in a cell writes it."""
 
     def __init__(self, main):
         super().__init__()
@@ -765,14 +768,15 @@ class MemoryView(QWidget):
                            (self.length, 0), (read, 0), (self.auto, 0)):
             row.addWidget(w, stretch)
         layout.addLayout(row)
-        self.table = QTableWidget(0, BYTES_PER_ROW + 1)
+        self.table = QTableWidget(0, 0)
         self.table.setFont(mono())
-        self.table.setHorizontalHeaderLabels([f"{i:X}" for i in range(BYTES_PER_ROW)] + ["ASCII"])
         self.table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeToContents)
         self.table.horizontalHeader().setStretchLastSection(True)
         self.table.verticalHeader().setFont(mono())
         self.table.setEditTriggers(QAbstractItemView.DoubleClicked | QAbstractItemView.EditKeyPressed)
         self.table.itemChanged.connect(self._edited)
+        self.table.setContextMenuPolicy(Qt.CustomContextMenu)
+        self.table.customContextMenuRequested.connect(self._menu)
         layout.addWidget(self.table, 1)
         self.message = QLabel("")
         layout.addWidget(self.message)
@@ -780,7 +784,63 @@ class MemoryView(QWidget):
         self.timer.timeout.connect(self.read)
         self.base: int | None = None
         self.data = b""
+        self.order = "little"
         self._shown_mcu = ""
+        self.format = self._load_format()
+        self._layout_columns()
+
+    # --- display format ------------------------------------------------------------------------
+
+    def _load_format(self) -> MemFormat:
+        s = self.main.settings()
+        try:
+            return MemFormat(str(s.value("memory/kind", "unsigned")), str(s.value("memory/type", "Char")),
+                             str(s.value("memory/decimal", "false")).lower() == "true")
+        except ValueError:
+            return MemFormat()
+
+    def set_format(self, fmt: MemFormat) -> None:
+        """Show the cells in another format, and remember it for the next start."""
+        self.format = fmt
+        s = self.main.settings()
+        s.setValue("memory/kind", fmt.kind)
+        s.setValue("memory/type", fmt.type)
+        s.setValue("memory/decimal", "true" if fmt.decimal else "false")
+        self._layout_columns()
+        if self.base is not None:
+            self._show((self._shown_mcu, self.base, self.data, self.order))
+
+    def _layout_columns(self) -> None:
+        size = self.format.size
+        self.table.setColumnCount(BYTES_PER_ROW // size + 1)
+        self.table.setHorizontalHeaderLabels([f"{i * size:X}" for i in range(BYTES_PER_ROW // size)] + ["ASCII"])
+
+    def _menu(self, pos) -> None:
+        fmt = self.format
+        menu = QMenu(self)
+
+        def add(parent: QMenu, text: str, target: MemFormat) -> None:
+            a = parent.addAction(text)
+            a.setCheckable(True)
+            a.setChecked(target == fmt)     # a check mark, not a radio dot: the menu is rebuilt each time
+            a.triggered.connect(lambda: self.set_format(target))
+
+        decimal = menu.addAction("Decimal")
+        decimal.setCheckable(True)
+        decimal.setChecked(fmt.decimal)
+        decimal.setEnabled(fmt.kind in ("unsigned", "signed"))
+        decimal.setToolTip("Show the integer formats in decimal instead of hex")
+        decimal.toggled.connect(lambda on: self.set_format(replace(self.format, decimal=on)))
+        for kind in ("unsigned", "signed"):
+            sub = menu.addMenu(kind.capitalize())
+            for name in INT_TYPES:
+                add(sub, name, MemFormat(kind, name, fmt.decimal))
+        menu.addSeparator()
+        for kind in ("ascii", "float", "double"):
+            add(menu, kind.capitalize(), MemFormat(kind, fmt.type, fmt.decimal))
+        menu.exec(self.table.viewport().mapToGlobal(pos))
+
+    # --- reading -------------------------------------------------------------------------------
 
     def set_workspace(self, ws: Workspace) -> None:
         self.mcu.clear()
@@ -804,17 +864,22 @@ class MemoryView(QWidget):
                 addr = parse_int(text)
             except ValueError:
                 addr = t.resolve(f"{mcu}:{text}").addr
-            return mcu, addr, t.read(mcu, addr, length)
+            return mcu, addr, t.read(mcu, addr, length), t.mcu(mcu).byte_order
 
         self.main.device.submit(job, self._show, self._failed, key="memory")
 
     def _failed(self, e: Exception) -> None:
         self.message.setText(describe_error(e))
 
+    def _row_start(self) -> int:
+        return self.base - self.base % BYTES_PER_ROW
+
     def _show(self, result) -> None:
-        mcu, base, data = result
-        self._shown_mcu, self.base, self.data = mcu, base, data
-        start = base - base % BYTES_PER_ROW
+        mcu, base, data, order = result
+        self._shown_mcu, self.base, self.data, self.order = mcu, base, data, order
+        fmt, size = self.format, self.format.size
+        cells = BYTES_PER_ROW // size
+        start = self._row_start()
         rows = (base + len(data) - start + BYTES_PER_ROW - 1) // BYTES_PER_ROW
         self.table.blockSignals(True)
         self.table.setRowCount(rows)
@@ -822,37 +887,38 @@ class MemoryView(QWidget):
         for r in range(rows):
             text = []
             for c in range(BYTES_PER_ROW):
-                addr = start + r * BYTES_PER_ROW + c
-                i = addr - base
+                i = start + r * BYTES_PER_ROW + c - base
+                text.append((chr(data[i]) if 32 <= data[i] < 127 else ".") if 0 <= i < len(data) else " ")
+            for c in range(cells):
+                i = start + r * BYTES_PER_ROW + c * size - base
                 item = self.table.item(r, c)
                 if item is None:
                     item = QTableWidgetItem()
                     self.table.setItem(r, c, item)
-                if 0 <= i < len(data):
-                    item.setText(f"{data[i]:02X}")
+                item.setTextAlignment(Qt.AlignRight | Qt.AlignVCenter)
+                if 0 <= i and i + size <= len(data):     # a cell only partly read stays blank
+                    item.setText(fmt.to_text(data[i:i + size], order))
                     item.setFlags(Qt.ItemIsSelectable | Qt.ItemIsEnabled | Qt.ItemIsEditable)
-                    text.append(chr(data[i]) if 32 <= data[i] < 127 else ".")
                 else:
                     item.setText("")
                     item.setFlags(Qt.NoItemFlags)
-                    text.append(" ")
             ascii_item = QTableWidgetItem("".join(text))
             ascii_item.setFlags(Qt.ItemIsSelectable | Qt.ItemIsEnabled)
-            self.table.setItem(r, BYTES_PER_ROW, ascii_item)
+            self.table.setItem(r, cells, ascii_item)
         self.table.blockSignals(False)
-        self.message.setText(f"{mcu}: {len(data)} bytes at 0x{base:08X}")
+        self.message.setText(f"{mcu}: {len(data)} bytes at 0x{base:08X} as {fmt.label}")
+
+    # --- writing -------------------------------------------------------------------------------
 
     def _edited(self, item: QTableWidgetItem) -> None:
-        if self.base is None or item.column() >= BYTES_PER_ROW:
+        fmt = self.format
+        if self.base is None or item.column() >= BYTES_PER_ROW // fmt.size:
             return
-        start = self.base - self.base % BYTES_PER_ROW
-        addr = start + item.row() * BYTES_PER_ROW + item.column()
+        addr = self._row_start() + item.row() * BYTES_PER_ROW + item.column() * fmt.size
         try:
-            value = int(item.text().strip(), 16)
-            if not 0 <= value <= 0xFF:
-                raise ValueError
-        except ValueError:
-            self.message.setText(f"{item.text()!r} is not a byte; type two hex digits such as 7F")
+            data = fmt.from_text(item.text(), self.order)
+        except ValueError as e:
+            self.message.setText(str(e))
             self.read()
             return
         mcu = self._shown_mcu
@@ -862,16 +928,17 @@ class MemoryView(QWidget):
             self.main.status(str(e), error=True)
             self.read()
             return
+        shown = fmt.to_text(data, self.order)
 
         def done(_):
-            self.main.status(f"{mcu}:0x{addr:08X} = 0x{value:02X}")
+            self.main.status(f"{mcu}:0x{addr:08X} = {shown} ({fmt.label})")
             self.read()
 
         def failed(e):
             self.main.status(f"write {mcu}:0x{addr:08X}: {describe_error(e)}", error=True)
             self.read()
 
-        self.main.device.submit(lambda t: t.write(mcu, addr, bytes([value])), done, failed)
+        self.main.device.submit(lambda t: t.write(mcu, addr, data), done, failed)
 
 
 # --- SCPI profile editor ---------------------------------------------------------------------
