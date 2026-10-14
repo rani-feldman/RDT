@@ -83,7 +83,22 @@ RDT can tell whether the firmware on the device is the build your ELF came from,
 
 [`link_build_id.ld`](../sim/examples/firmware/link_build_id.ld) is a small linker script laid out this way.
 
-**A constant variable instead.** Set `identity = "fw_build"` under `[[mcu]]`, or the Identity variable column in Target > MCUs and ELF files, and give the firmware a constant that changes with every build, such as `__attribute__((used)) const char fw_build[] = __DATE__ " " __TIME__;`. It must be `const` (in flash), and it only changes when its own file is compiled again, so the build ID is the safer choice.
+**Keil MDK (armlink) and other toolchains without a build ID.** armlink writes no build ID, so give the firmware a constant that changes on every build, and tell RDT its name. [`examples/keil/make_build_id.bat`](../examples/keil/make_build_id.bat) writes a new `build_id.c` before each build:
+
+```c
+__attribute__((used)) const char fw_build_id[] = "20261014-091530-3f9a1c2e";   /* build time + random */
+```
+
+1. Copy `make_build_id.bat` into the project folder (next to the `.uvprojx`), and run it once so `build_id.c` exists.
+2. Add `build_id.c` to the project (any group).
+3. Options for Target > User > Before Build/Rebuild: tick Run #1 and set it to `make_build_id.bat`.
+4. Options for Target > Linker > Misc controls: add `--keep=fw_build_id`, so armlink doesn't remove the unused constant.
+5. Options for Target > Output: keep Debug Information ticked, so RDT finds the variable by name.
+6. In RDT, set `identity = "fw_build_id"` under `[[mcu]]` (or Target > MCUs and ELF files > Identity variable), and point `elf` at the `.axf` Keil writes.
+
+The constant lands in flash, since it is `const`. On a mismatch RDT shows both IDs, such as `device '20261014-091530-3f9a1c2e', ELF '20261014-101204-77b0d4e1'`, so you can see which build is older.
+
+**A hand-written constant.** `const char fw_build[] = __DATE__ " " __TIME__;` also works, but it only changes when its own file is compiled again, so it misses builds where only other files changed.
 
 **When RDT checks:**
 
