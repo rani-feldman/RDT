@@ -34,6 +34,7 @@ from .cards import McuCards
 from .device import Device, describe_error
 from .dnd import DropTarget
 from .panels import CONSOLE_KEYS, Console, McuDialog, MemoryView, ProfileDialog, mono
+from . import titlebar
 from .style import THEMES, apply_theme, is_dark
 from .variables import WatchTabs, WatchTree
 
@@ -446,6 +447,7 @@ class MainWindow(QMainWindow):
         self.resizeDocks([self.docks["Target"]], [300], Qt.Horizontal)
         self.mode = "watch"
         self._menus()
+        titlebar.install(self)
         self.set_theme()
         self.set_mode(str(self.ui.value("session/mode", "watch")), remember=False)
         self.message = QLabel()
