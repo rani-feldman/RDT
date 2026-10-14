@@ -11,7 +11,7 @@ from pathlib import Path
 from PySide6.QtCore import QEvent, QObject, QStringListModel, Qt, QTimer
 from PySide6.QtGui import QColor, QFont, QFontDatabase, QKeySequence, QShortcut, QTextCharFormat, QTextCursor
 from PySide6.QtWidgets import (
-    QAbstractItemView, QApplication, QCheckBox, QComboBox, QCompleter, QDialog, QDialogButtonBox, QFileDialog, QFormLayout, QHBoxLayout,
+    QAbstractItemView, QApplication, QCheckBox, QColorDialog, QComboBox, QCompleter, QDialog, QDialogButtonBox, QFileDialog, QFormLayout, QHBoxLayout,
     QHeaderView, QLabel, QLineEdit, QListWidget, QMenu, QMessageBox, QPlainTextEdit, QPushButton, QSpinBox, QTableWidget,
     QSplitter, QTableWidgetItem, QTextEdit, QToolButton, QTreeWidget, QTreeWidgetItem, QVBoxLayout, QWidget,
 )
@@ -20,7 +20,7 @@ from ..console import CommandHistory, SessionLog, completions, hex_to_text, text
 from ..errors import ConfigError, RdtError, WriteRefused
 from ..memfmt import INT_TYPES, MemFormat
 from ..profile import Profile, align_span, parse_int
-from ..target import McuConfig, Target
+from ..target import MCU_COLORS, McuConfig, Target, check_color, check_short, mcu_short
 from ..workspace import Workspace
 from .device import describe_error
 from .terminal import Terminal
@@ -1091,25 +1091,32 @@ class ProfileDialog(QDialog):
 
 
 class McuDialog(QDialog):
-    """The target's MCUs: id, name, ELF file, timeout and identity variable. MCU 0 is the main MCU."""
+    """The target's MCUs: id, name, short name and colour (GUI-12), ELF file, timeout and identity
+    variable. MCU 0 is the main MCU."""
 
-    COLS = ("Id", "Name", "ELF file", "Timeout ms", "Identity variable")
+    COLS = ("Id", "Name", "Short name", "Colour", "ELF file", "Timeout ms", "Identity variable")
+    COL_ID, COL_NAME, COL_SHORT, COL_COLOR, COL_ELF, COL_TIMEOUT, COL_IDENTITY = range(7)
 
     def __init__(self, mcus: list[McuConfig], parent=None):
         super().__init__(parent)
         self.setWindowTitle("MCUs and ELF files")
-        self.resize(760, 260)
+        self.resize(900, 260)
         self.originals = {m.id: m for m in mcus}
         layout = QVBoxLayout(self)
         self.table = QTableWidget(0, len(self.COLS))
         self.table.setHorizontalHeaderLabels(self.COLS)
-        self.table.horizontalHeader().setSectionResizeMode(2, QHeaderView.Stretch)
+        self.table.horizontalHeader().setSectionResizeMode(self.COL_ELF, QHeaderView.Stretch)
         layout.addWidget(self.table)
         for m in mcus:
             self._add_row(m.id, m.name, str(m.elf or ""), "" if m.timeout_ms is None else f"{m.timeout_ms:g}",
-                          m.identity or "")
-        self.table.horizontalHeaderItem(4).setToolTip(
+                          m.identity or "", m.short or "", m.color or "")
+        self.table.horizontalHeaderItem(self.COL_SHORT).setToolTip(
+            "Shown on the MCU's tags, such as CM7. Empty: the part of the name after the last underscore")
+        self.table.horizontalHeaderItem(self.COL_COLOR).setToolTip(
+            "The MCU's tag colour. Double-click to choose; empty: a colour picked by its id")
+        self.table.horizontalHeaderItem(self.COL_IDENTITY).setToolTip(
             "A constant variable, such as a version string or build ID, compared with the ELF on connect")
+        self.table.cellDoubleClicked.connect(self._double_clicked)
         row = QHBoxLayout()
         for text, slot in (("Add MCU", self._add), ("Remove", self._remove), ("Browse ELF...", self._browse)):
             b = QPushButton(text)
@@ -1122,11 +1129,36 @@ class McuDialog(QDialog):
         buttons.rejected.connect(self.reject)
         layout.addWidget(buttons)
 
-    def _add_row(self, mcu_id: int, name: str, elf: str, timeout: str, identity: str = "") -> None:
+    def _add_row(self, mcu_id: int, name: str, elf: str, timeout: str, identity: str = "", short: str = "",
+                 color: str = "") -> None:
         r = self.table.rowCount()
         self.table.insertRow(r)
-        for c, text in enumerate((str(mcu_id), name, elf, timeout, identity)):
+        for c, text in ((self.COL_ID, str(mcu_id)), (self.COL_NAME, name), (self.COL_SHORT, short),
+                        (self.COL_COLOR, color), (self.COL_ELF, elf), (self.COL_TIMEOUT, timeout),
+                        (self.COL_IDENTITY, identity)):
             self.table.setItem(r, c, QTableWidgetItem(text))
+        self._show_color(r)
+
+    def _show_color(self, r: int) -> None:
+        """Paint the colour cell with the colour the MCU's tag will have."""
+        item = self.table.item(r, self.COL_COLOR)
+        text = item.text().strip()
+        try:
+            mcu_id = int(self.table.item(r, self.COL_ID).text())
+        except (ValueError, AttributeError):
+            mcu_id = r
+        color = QColor(text if QColor.isValidColorName(text) else MCU_COLORS[mcu_id % len(MCU_COLORS)])
+        item.setBackground(color)
+        item.setForeground(QColor("white"))
+
+    def _double_clicked(self, r: int, c: int) -> None:
+        if c != self.COL_COLOR:
+            return
+        item = self.table.item(r, c)
+        color = QColorDialog.getColor(item.background().color(), self, "Tag colour")
+        if color.isValid():
+            item.setText(color.name())
+            self._show_color(r)
 
     def _add(self) -> None:
         ids = {int(self.table.item(r, 0).text()) for r in range(self.table.rowCount())
@@ -1144,7 +1176,7 @@ class McuDialog(QDialog):
             return
         path, _ = QFileDialog.getOpenFileName(self, "ELF file", "", "ELF files (*.elf *.axf *.out);;All files (*)")
         if path:
-            self.table.item(r, 2).setText(path)
+            self.table.item(r, self.COL_ELF).setText(path)
 
     def _accept(self) -> None:
         try:
@@ -1157,22 +1189,28 @@ class McuDialog(QDialog):
     def result_mcus(self) -> list[McuConfig]:
         out = []
         for r in range(self.table.rowCount()):
-            text = [self.table.item(r, c).text().strip() if self.table.item(r, c) else "" for c in range(5)]
+            text = [self.table.item(r, c).text().strip() if self.table.item(r, c) else ""
+                    for c in range(len(self.COLS))]
             try:
-                mcu_id = int(text[0])
+                mcu_id = int(text[self.COL_ID])
             except ValueError:
                 raise ConfigError(f"row {r + 1}: the id must be a number") from None
-            if not text[1]:
+            if not text[self.COL_NAME]:
                 raise ConfigError(f"MCU {mcu_id} needs a name")
-            elf = Path(text[2]) if text[2] else None
-            timeout = float(text[3]) if text[3] else None
+            short = check_short(text[self.COL_SHORT]) if text[self.COL_SHORT] else None
+            color = check_color(text[self.COL_COLOR]) if text[self.COL_COLOR] else None
+            elf = Path(text[self.COL_ELF]) if text[self.COL_ELF] else None
+            timeout = float(text[self.COL_TIMEOUT]) if text[self.COL_TIMEOUT] else None
             old = self.originals.get(mcu_id)
-            base = old if old is not None else McuConfig(mcu_id, text[1])
-            out.append(replace(base, id=mcu_id, name=text[1], elf=elf, timeout_ms=timeout,
-                               identity=text[4] or None))
+            base = old if old is not None else McuConfig(mcu_id, text[self.COL_NAME])
+            out.append(replace(base, id=mcu_id, name=text[self.COL_NAME], elf=elf, timeout_ms=timeout,
+                               identity=text[self.COL_IDENTITY] or None, short=short, color=color))
         ids = [m.id for m in out]
         if 0 not in ids:
             raise ConfigError("MCU 0, the main MCU, is required")
         if len(set(ids)) != len(ids) or len({m.name for m in out}) != len(out):
             raise ConfigError("MCU ids and names must be unique")
+        shorts = [mcu_short(m).lower() for m in out]
+        if len(set(shorts)) != len(shorts):
+            raise ConfigError("MCU short names must be unique; type one for each MCU that shares one")
         return sorted(out, key=lambda m: m.id)
