@@ -62,6 +62,38 @@ What the simulator does with the ELF:
 
 The RDT GUI checks the ELF every second while connected and loads the new one by itself: watched variables are found again by name, and the GUI flags any that moved or changed type. The simulator loads its memory only when it starts, so restart it after a rebuild to get the new initial values. Until then it still has the old layout.
 
+## Check that the device runs this ELF
+
+RDT can tell whether the firmware on the device is the build your ELF came from, and refuses writes when it is not, so a stale ELF can't write to the wrong address. It reads a few bytes from the device and compares them with the same bytes in the ELF file.
+
+**The GNU build ID (recommended).** The linker computes a SHA-1 hash over the whole linked image, so any change to code or data gives a new one. Nothing to set in RDT; it finds the build ID in the ELF by itself.
+
+1. Link with `-Wl,--build-id`. In STM32CubeIDE: Project > Properties > C/C++ Build > Settings > MCU GCC Linker > Miscellaneous > Other flags.
+2. Keep the build ID in flash. In the linker script (`STM32H7xx_FLASH.ld`), add this section right after `.isr_vector`:
+
+   ```
+     .note.gnu.build-id :
+     {
+       KEEP(*(.note.gnu.build-id))
+     } >FLASH
+   ```
+
+   Keep the section name exactly as it is. Without the section, the linker places the note where it likes; it can land at the start of flash, in front of the vector table.
+3. Rebuild and flash. `arm-none-eabi-readelf -n build/interface.elf` prints `Build ID: ...`, and `arm-none-eabi-readelf -S` lists `.note.gnu.build-id` at a flash address with flag `A`.
+
+[`link_build_id.ld`](../sim/examples/firmware/link_build_id.ld) is a small linker script laid out this way.
+
+**A constant variable instead.** Set `identity = "fw_build"` under `[[mcu]]`, or the Identity variable column in Target > MCUs and ELF files, and give the firmware a constant that changes with every build, such as `__attribute__((used)) const char fw_build[] = __DATE__ " " __TIME__;`. It must be `const` (in flash), and it only changes when its own file is compiled again, so the build ID is the safer choice.
+
+**When RDT checks:**
+
+- On Connect. The status bar says `ELF matches the firmware`, `ELF does NOT match the firmware` (in red), or `ELF not checked` when there is no build ID or identity variable to compare. The console has the detail; a mismatch shows both build IDs, as `readelf -n` prints them.
+- When the link comes back after a drop, such as a reset over a native USB port, and before the next write if the link dropped meanwhile.
+- When the GUI loads a rebuilt ELF.
+- From **Target > Check ELF identity**. Use it after flashing over ST-LINK while the COM port stays open, since then the link never drops and RDT can't tell the firmware changed.
+
+On a mismatch, reads still work and writes are refused until you load the right ELF or choose **Target > Allow writes despite ELF mismatch** (`--allow-mismatch` on the command line).
+
 ## Other MCUs
 
 The same steps work for any MCU: give the simulator and RDT the same banks as `kind = "memory"` ranges and the same ELF. Each MCU of a multi-MCU device gets its own `[[mcu]]` block, ELF and banks; see [`two_mcus.toml`](../sim/examples/two_mcus.toml) and [`sim_bench.rdtw`](../examples/sim_bench.rdtw).

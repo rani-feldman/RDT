@@ -2,6 +2,7 @@
 
 import io
 import shutil
+import time
 from pathlib import Path
 
 import pytest
@@ -11,7 +12,7 @@ from rdt.cli import main
 from rdt.memmap import build_id_note, elf_bytes
 from sim import Simulator, TransportConfig, load_config
 
-from host_helpers import FIRMWARE, make_target
+from host_helpers import FIRMWARE, Relay, make_target
 
 ROOT = Path(__file__).resolve().parent.parent
 EXAMPLE_TARGET = ROOT / "examples" / "sim_target.toml"
@@ -78,6 +79,54 @@ def test_mismatch_refuses_writes_until_allowed(sim, tmp_path):
         t.write_value("main:gains[0]", 5)
         t.reconnect()                                    # checked again, and blocked again
         assert t.mcus["main"].identity.status == "mismatch" and not t.mcus["main"].allow_mismatch
+
+
+def test_build_id_in_flash_on_the_h7(tmp_path):
+    """An STM32H7 build with the GNU build ID kept in flash, read in aligned 4-byte words."""
+    from rdt.workspace import Workspace
+    from test_stm32h7 import SIM_CONFIG, WORKSPACE, run, with_elf
+
+    flashed = FIRMWARE / "main_build_id.elf"
+    assert build_id_note(flashed) == (0x08000000, 36)
+    sim_config = with_elf(tmp_path, SIM_CONFIG.read_text(), flashed)
+    for elf, status in ((flashed, "match"), (FIRMWARE / "main_build_id_v2.elf", "mismatch")):
+        ws = Workspace.load(WORKSPACE)
+        ws.config.mcus[0].elf = elf
+        with run(sim_config, ws) as t:
+            assert t.align == 4
+            ident = t.mcus["Interface"].identity
+            assert ident.status == status
+            if status == "mismatch":   # shown as the hash, as readelf -n prints it
+                assert ("device 838ca2732e15283c254448c2f0dc0131c0616be4, "
+                        "ELF 0d8ac456d8300cb502ab6131ad1bc35a8fb68e8f") in ident.detail
+                with pytest.raises(WriteRefused):
+                    t.write_value("Interface:gains[0]", 5)
+            else:
+                t.write_value("Interface:gains[0]", 5)
+
+
+def test_checked_again_after_the_link_comes_back(sim):
+    """The firmware may be flashed while the link is down: the next write checks again first."""
+    relay = Relay(sim.tcp_address)
+    try:
+        t = make_target("tcp", relay.address, mcus=mcus())
+        t.session.RECONNECT_DELAYS = (0.05, 0.1)
+        with t:
+            assert t.mcus["main"].identity.status == "match" and t.stale_identities() == []
+            relay.cut()
+            with pytest.raises(Exception):
+                t.read_value("main:gains[0]")
+            addr = t.resolve("main:firmware_name").addr
+            sim.device.mcus[0].memory.write(addr, b"rdt-new\0", force=True)   # flashed meanwhile
+            assert t.stale_identities() == []                                 # nothing to check while down
+            relay.heal()
+            assert t.session.wait_until_up(3)
+            assert t.stale_identities() == ["main"]
+            with pytest.raises(WriteRefused, match="does not match"):
+                t.write_value("main:gains[0]", 5)
+            assert t.stale_identities() == [] and "device 'rdt-new'" in t.mcus["main"].identity.detail
+    finally:
+        relay.close()
 
 
 def test_identity_problems_never_block(sim):
