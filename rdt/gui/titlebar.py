@@ -32,7 +32,7 @@ def _button(text: str, tip: str, close: bool = False) -> QToolButton:
     b.setFocusPolicy(Qt.NoFocus)
     hover = "rgba(232,17,35,230)" if close else "rgba(128,128,128,70)"
     b.setStyleSheet(
-        f"QToolButton {{ border: none; font-size: 11pt; background: transparent; color: palette(window-text); }}"
+        f"QToolButton {{ border: none; font-size: 10pt; background: transparent; color: palette(window-text); }}"
         f"QToolButton:hover {{ background: {hover}; {'color: white;' if close else ''} }}")
     return b
 
@@ -126,8 +126,8 @@ def install(win: QMainWindow) -> QMenuBar:
     icon = QLabel()
     icon.setPixmap(QPixmap(str(ICON_FILE)).scaled(ICON_SIZE, ICON_SIZE, Qt.KeepAspectRatio,
                                                   Qt.SmoothTransformation))
-    bar.setStyleSheet("QMenuBar { font-size: 11pt; background: transparent; color: palette(window-text); }"
-                      "QMenuBar::item { padding: 4px 10px; background: transparent; color: palette(window-text); }"
+    bar.setStyleSheet("QMenuBar { font-size: 10pt; background: transparent; color: palette(window-text); }"
+                      "QMenuBar::item { padding: 8px 9px 1px 9px; background: transparent; color: palette(window-text); }"
                       "QMenuBar::item:selected { background: rgba(128,128,128,70); }")
     lay.addWidget(icon)
     lay.addSpacing(4)
