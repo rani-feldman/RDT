@@ -61,7 +61,7 @@ Each requirement links to its design section.
 | LNK-6 | Other tools may use the firmware's SCPI port over LAN at the same time as RDT (2026-10-05) | Done | [D-LNK-6](#d-lnk-6-sharing-the-link-with-other-tools) |
 | LNK-7 | Connected means the COM port or socket opened; RDT sends nothing to the device on connect or reconnect (no `*IDN?`) and sends no probe; when the link shows as down is LNK-9 (2026-10-14) | Done | [D-LNK-7](#d-lnk-7-connect-without-a-probe) |
 | LNK-8 | The GUI lists each COM port with its description, such as `COM3 - GAC serial port (COM3)` (2026-10-13) | Done | [D-LNK-1](#d-lnk-1-com-port) |
-| LNK-9 | The link shows as down (red `Link down · COM3`) when the port or socket breaks, noticed within a second even with polling off, or when the device answers none of 3 reads in a row from any MCU while the port stays open ("no reply"). While the link is down the image box is hidden and writes are refused, and the ELFs are checked again when it comes back (2026-10-14; the default chosen in the thread "Status box on lost connection", not yet confirmed by rani) | In review (PR #78) | [D-LNK-9](#d-lnk-9-noticing-a-lost-link) |
+| LNK-9 | The link shows as down (red `Link down · COM3`) when the port or socket breaks, noticed within a second even with polling off, or when the device answers none of 3 reads in a row from any MCU while the port stays open ("no reply"). While the link is down the image box is hidden and writes are refused, and the ELFs are checked again when it comes back (2026-10-14; the default chosen in the thread "Status box on lost connection", not yet confirmed by rani) | Done | [D-LNK-9](#d-lnk-9-noticing-a-lost-link) |
 
 ### 2.3 SCPI commands
 
