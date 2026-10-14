@@ -66,7 +66,7 @@ The RDT GUI checks the ELF every second while connected and loads the new one by
 
 RDT can tell whether the firmware on the device is the build your ELF came from. When it is not, RDT refuses reads and writes to that MCU, so a stale ELF can't read or write the wrong address.
 
-**With no setup: a flash sample (any toolchain, Keil included).** The ELF holds the exact bytes of everything in flash: code, constants and the vector table. On Connect, RDT reads the start and end of each read-only section plus 32 blocks of 64 bytes spread over them (about 4 KB for a large image) and compares them with the ELF. Code and constants shift after almost any rebuild, so an outdated image is caught in practice; a change of a single constant could slip through. Nothing to set in the firmware, the build or RDT.
+**With no setup: a flash sample (any toolchain, Keil included).** The ELF holds the exact bytes of everything in flash: code, constants and the vector table. On Connect, RDT reads the start and end of each read-only section plus 32 blocks of 64 bytes spread over them (about 4 KB for a large image) and compares them with the ELF. Sections that run from somewhere other than where they are flashed, such as code a Keil scatter file puts in ITCM or RAM (copied there at startup), are skipped. Code and constants shift after almost any rebuild, so an outdated image is caught in practice; a change of a single constant could slip through. Nothing to set in the firmware, the build or RDT.
 
 If the firmware has a build ID or an identity variable (below), RDT compares that instead, which catches every change.
 
