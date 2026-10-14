@@ -356,7 +356,7 @@ def test_console_font_and_wrap(qtbot, win, tmp_path):
     con.set_font_size(11)
     other = Console(win)
     assert other.font_size() == 11 and other.wrap.isChecked()
-    assert (tmp_path / "console.ini").exists()
+    assert (tmp_path / "ui.toml").exists() and "font_size = 11" in (tmp_path / "ui.toml").read_text()
 
 
 def test_keyboard_shortcuts(qtbot, win):
@@ -831,3 +831,53 @@ def test_com_ports_show_their_description(qtbot, win, monkeypatch):
     bar.set_port("COM3")                               # a saved port shows its description
     assert bar.com.currentText() == "COM3 - GAC serial port (COM3)"
     assert app.port_name("COM3 - GAC serial port (COM3)") == "COM3" and app.port_name(" /dev/ttyUSB0 ") == "/dev/ttyUSB0"
+
+
+def test_settings_files_import_and_export(qtbot, win, bench, tmp_path, monkeypatch):
+    file_menu = win.menuBar().actions()[0].menu()
+    subs = {a.text().replace("&", ""): a.menu() for a in file_menu.actions() if a.menu()}
+    for name in ("Import", "Export"):
+        assert [a.text().replace("&", "") for a in subs[name].actions()] == \
+               ["Watch list...", "Commands...", "Interface settings..."]
+    # the workspace was saved in three files
+    assert (tmp_path / "bench.watch.toml").is_file()
+    exported = tmp_path / "out.watch.toml"
+    assert win.export_watches(exported) and "[[tab]]" in exported.read_text()
+    tabs = [t.name for t in win.ws.tabs]
+    win.ws.remove_tab(tabs[0])
+    win.watch_tabs.rebuild()
+    assert win.import_watches(exported, replace=False)
+    assert win.watch_tabs.count() == len(tabs) and win.dirty
+    assert win.import_watches(exported, replace=True) and [t.name for t in win.ws.tabs] == tabs
+    assert "Imported" in win.message.text()
+
+    win.console.set_font_size(9)
+    ui = tmp_path / "mine.toml"
+    assert win.export_ui(ui) and "font_size = 9" in ui.read_text()
+    ui.write_text('[console]\nfont_size = 15\nwrap = true\n\n[memory]\nkind = "float"\n')
+    assert win.import_ui(ui)
+    assert win.console.font_size() == 15 and win.console.wrap.isChecked()
+    assert win.memory.format.kind == "float"
+    ui.write_text("[console]\nsize = 1\n")
+    warnings = []
+    monkeypatch.setattr(QMessageBox, "warning", lambda *a, **k: warnings.append(a[2]))
+    assert not win.import_ui(ui)
+    assert "not an interface setting" in warnings[0]
+
+
+def test_old_ini_settings_move_to_ui_toml(qtbot, tmp_path):
+    from PySide6.QtCore import QSettings
+    gui = QSettings(str(tmp_path / "gui.ini"), QSettings.IniFormat)
+    gui.setValue("last_workspace", str(tmp_path / "x.rdtw"))
+    gui.setValue("memory/kind", "signed")
+    gui.setValue("memory/decimal", "true")
+    gui.sync()
+    con = QSettings(str(tmp_path / "console.ini"), QSettings.IniFormat)
+    con.setValue("font_size", 13)
+    con.setValue("wrap", True)
+    con.sync()
+    w = MainWindow()
+    qtbot.addWidget(w, before_close_func=lambda w: setattr(w, "dirty", False))
+    assert w.ui.values == {"session/last_workspace": str(tmp_path / "x.rdtw"), "memory/kind": "signed",
+                           "memory/decimal": True, "console/font_size": 13, "console/wrap": True}
+    assert (tmp_path / "ui.toml").is_file() and w.console.font_size() == 13

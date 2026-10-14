@@ -27,6 +27,7 @@ from ..errors import ConfigError, LinkDown
 from ..profile import Profile
 from ..session import LinkState
 from ..target import ConnectionConfig, McuConfig, TargetConfig
+from ..ui_settings import SETTINGS, UiSettings
 from ..workspace import Workspace
 from .chart import ChartPanel
 from .device import Device, describe_error
@@ -34,6 +35,8 @@ from .panels import CONSOLE_KEYS, Console, McuDialog, MemoryView, ProfileDialog,
 from .variables import SymbolBrowser, WatchTabs, WatchTree
 
 FILTER = "RDT workspace (*.rdtw);;Target file (*.toml);;All files (*)"
+WATCH_FILTER = "Watch list (*.watch.toml *.toml);;RDT workspace (*.rdtw);;All files (*)"
+UI_FILTER = "Interface settings (*.toml);;All files (*)"
 TICK_MS = 50            # how often the watch tabs look for items that are due
 ELF_CHECK_MS = 1000     # how often to look for rebuilt ELF files
 BAUDS = ("9600", "19200", "38400", "57600", "115200", "230400", "460800", "921600")
@@ -41,6 +44,35 @@ BAUDS = ("9600", "19200", "38400", "57600", "115200", "230400", "460800", "92160
 
 def new_workspace() -> Workspace:
     return Workspace(TargetConfig(mcus=[McuConfig(0, "main")]))
+
+
+def load_ui() -> UiSettings:
+    """The per-user interface settings (ui.toml). The first time, they are taken from the INI
+    files older versions kept them in (gui.ini and console.ini), which are then left alone."""
+    ui = UiSettings.load()
+    if ui.exists():
+        return ui
+    folder = history_path().parent
+    old = {}
+    for name, keys in (("gui.ini", {"last_workspace": "session/last_workspace", "memory/kind": "memory/kind",
+                                    "memory/type": "memory/type", "memory/decimal": "memory/decimal"}),
+                       ("console.ini", {"font_size": "console/font_size", "wrap": "console/wrap"})):
+        if not (folder / name).is_file():
+            continue
+        ini = QSettings(str(folder / name), QSettings.IniFormat)
+        for ini_key, key in keys.items():
+            v = ini.value(ini_key)
+            if v in (None, ""):
+                continue
+            kind = SETTINGS.get(key, str)
+            try:
+                old[key] = (str(v).lower() == "true") if kind is bool else kind(v)
+            except (TypeError, ValueError):
+                pass
+    if old:
+        ui.values = old
+        ui.save()
+    return ui
 
 
 def serial_ports() -> list[tuple[str, str]]:
@@ -271,6 +303,7 @@ class MainWindow(QMainWindow):
         self._shown_identities: set[int] = set()
         self.log: CsvLog | None = None
         self._log_link_up = True
+        self.ui = load_ui()
 
         self.chart = ChartPanel(self)
         self.chart.changed.connect(self._chart_changed)
@@ -336,6 +369,15 @@ class MainWindow(QMainWindow):
         action(m, "&Open...", self.open_file, QKeySequence.Open)
         action(m, "&Save", self.save, QKeySequence.Save)
         action(m, "Save &as...", self.save_as, QKeySequence.SaveAs)
+        m.addSeparator()
+        sub = m.addMenu("&Import")
+        action(sub, "&Watch list...", lambda: self.import_watches())
+        action(sub, "&Commands...", lambda: self.console.commands.import_file())
+        action(sub, "&Interface settings...", lambda: self.import_ui())
+        sub = m.addMenu("&Export")
+        action(sub, "&Watch list...", lambda: self.export_watches())
+        action(sub, "&Commands...", lambda: self.console.commands.export_file())
+        action(sub, "&Interface settings...", lambda: self.export_ui())
         m.addSeparator()
         action(m, "&Quit", self.close, QKeySequence.Quit)
         m = self.menuBar().addMenu("&Target")
@@ -471,19 +513,18 @@ class MainWindow(QMainWindow):
         self.load(ws)
         return True
 
-    @staticmethod
-    def settings() -> QSettings:
-        """Per-user GUI settings, next to the console history."""
-        return QSettings(str(history_path().parent / "gui.ini"), QSettings.IniFormat)
+    def settings(self) -> UiSettings:
+        """Per-user interface settings (ui.toml), next to the console history."""
+        return self.ui
 
     def remember(self, path: Path | None) -> None:
         """Remember the workspace file, to reopen it on the next start (WSP-3)."""
         if path is not None:
-            self.settings().setValue("last_workspace", str(Path(path).resolve()))
+            self.ui.set_value("session/last_workspace", str(Path(path).resolve()))
 
     def reopen_last(self) -> bool:
         """Open the workspace that was open last time, if its file is still there."""
-        last = self.settings().value("last_workspace", "")
+        last = self.ui.value("session/last_workspace", "")
         if not last:
             return False
         if not Path(last).is_file():
@@ -525,6 +566,83 @@ class MainWindow(QMainWindow):
         self.set_dirty(False)
         self.remember(path)
         self.status(f"Saved {path}")
+        return True
+
+    # --- import and export -------------------------------------------------------------------
+
+    def import_watches(self, path: str | Path | None = None, replace: bool | None = None) -> bool:
+        """Take the watch tabs (and chart) of a watch list file or another workspace."""
+        if path is None:
+            path, _ = QFileDialog.getOpenFileName(self, "Import watch list", "", WATCH_FILTER)
+            if not path:
+                return False
+        if replace is None:
+            replace = False
+            if self.ws.watches:
+                box = QMessageBox(QMessageBox.Question, "Import watch list",
+                                  f"The workspace watches {len(self.ws.watches)} items in {len(self.ws.tabs)} tabs. "
+                                  f"Add the file's tabs to them, or replace them (and the chart)?", parent=self)
+                add = box.addButton("Add", QMessageBox.AcceptRole)
+                rep = box.addButton("Replace", QMessageBox.DestructiveRole)
+                box.addButton(QMessageBox.Cancel)
+                box.exec()
+                if box.clickedButton() not in (add, rep):
+                    return False
+                replace = box.clickedButton() is rep
+        try:
+            added, skipped = self.ws.import_watches(path, replace)
+        except ConfigError as e:
+            QMessageBox.warning(self, "Import watch list", str(e))
+            return False
+        self.watch_tabs.rebuild()
+        self.chart.load(self.ws.chart)
+        self.set_dirty()
+        self.status(f"Imported {added} watched items from {Path(path).name}"
+                    + (f", skipped {skipped} already in their tab" if skipped else ""))
+        return True
+
+    def export_watches(self, path: str | Path | None = None) -> bool:
+        if path is None:
+            stem = self.ws.path.stem if self.ws.path else "watch"
+            path, _ = QFileDialog.getSaveFileName(self, "Export watch list", f"{stem}.watch.toml",
+                                                  "Watch list (*.watch.toml *.toml)")
+            if not path:
+                return False
+        try:
+            self.ws.export_watches(path)
+        except ConfigError as e:
+            QMessageBox.warning(self, "Export watch list", str(e))
+            return False
+        self.status(f"Exported {len(self.ws.tabs)} tabs ({len(self.ws.watches)} items) to {Path(path).name}")
+        return True
+
+    def import_ui(self, path: str | Path | None = None) -> bool:
+        """Take the interface settings in an exported file, and show them at once."""
+        if path is None:
+            path, _ = QFileDialog.getOpenFileName(self, "Import interface settings", "", UI_FILTER)
+            if not path:
+                return False
+        try:
+            self.ui.import_file(path)
+        except ConfigError as e:
+            QMessageBox.warning(self, "Import interface settings", str(e))
+            return False
+        self.console.apply_settings()
+        self.memory.apply_settings()
+        self.status(f"Imported the interface settings from {Path(path).name}")
+        return True
+
+    def export_ui(self, path: str | Path | None = None) -> bool:
+        if path is None:
+            path, _ = QFileDialog.getSaveFileName(self, "Export interface settings", "ui.toml", UI_FILTER)
+            if not path:
+                return False
+        try:
+            self.ui.export(path)
+        except ConfigError as e:
+            QMessageBox.warning(self, "Export interface settings", str(e))
+            return False
+        self.status(f"Exported the interface settings to {Path(path).name}")
         return True
 
     def closeEvent(self, event) -> None:

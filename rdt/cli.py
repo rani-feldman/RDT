@@ -11,6 +11,8 @@
     rdt -t bench.toml console
     rdt history
     rdt -w bench.rdtw commands import fw_commands.csv
+    rdt -w bench.rdtw watchlist export motor.watch.toml
+    rdt ui export my-ui.toml
 
 Without -t or -w, rdt uses rdt.toml in the current folder when there is one.
 Without a target file, give the link and the MCUs on the command line:
@@ -21,7 +23,6 @@ Without a target file, give the link and the MCUs on the command line:
 from __future__ import annotations
 
 import argparse
-import csv
 import logging
 import re
 import sys
@@ -30,8 +31,7 @@ from datetime import datetime
 from pathlib import Path
 
 from . import __version__, codec
-from .console import (CommandHistory, SavedCommand, SessionLog, completions, merge_commands, read_commands,
-                      write_commands)
+from .console import CommandHistory, SavedCommand, SessionLog, completions
 from .csvlog import CsvLog
 from .errors import ConfigError, LinkDown, RdtError, SymbolError
 from .profile import Profile, parse_int
@@ -39,6 +39,7 @@ from .symbols import Location
 from .symbols.types import ArrayType, EnumType, StructType, Type, is_char_array
 from .scaling import FORMATS
 from .target import ConnectionConfig, McuConfig, Target, TargetConfig
+from .ui_settings import SETTINGS, UiSettings
 from .workspace import Reading, Shown, Watch, Workspace
 
 
@@ -187,6 +188,20 @@ def build_parser() -> argparse.ArgumentParser:
     q.add_argument("--replace", action="store_true", help="replace the list instead of adding to it")
     cmds.add_parser("export", help="write the list to a CSV file").add_argument("file", type=Path)
     cmds.add_parser("clear", help="empty the list")
+
+    p = sub.add_parser("watchlist", help="import or export the workspace's watch tabs and chart (no device needed)")
+    wl = p.add_subparsers(dest="watchlist_cmd", metavar="ACTION", required=True)
+    q = wl.add_parser("import", help="add the tabs of a watch list file (or another workspace), skipping items "
+                                     "already in a tab")
+    q.add_argument("file", type=Path)
+    q.add_argument("--replace", action="store_true", help="replace the tabs and chart instead of adding to them")
+    wl.add_parser("export", help="write the tabs and chart to a watch list file").add_argument("file", type=Path)
+
+    p = sub.add_parser("ui", help="the GUI's per-user interface settings (no workspace or device needed)")
+    ui = p.add_subparsers(dest="ui_cmd", metavar="ACTION", required=True)
+    ui.add_parser("show", help="show the settings and where they are kept")
+    ui.add_parser("import", help="take the settings in an exported file").add_argument("file", type=Path)
+    ui.add_parser("export", help="write the settings to a file").add_argument("file", type=Path)
     return ap
 
 
@@ -694,10 +709,7 @@ def cmd_commands(t: Target | None, args, out) -> int:
         _print_commands(ws.commands, args.text, out)
         return 0
     if args.commands_cmd == "export":
-        try:
-            write_commands(args.file, ws.commands)
-        except OSError as e:
-            raise ConfigError(f"cannot write {args.file}: {e.strerror}") from None
+        ws.export_commands(args.file)
         print(f"wrote {len(ws.commands)} commands to {args.file}", file=out)
         return 0
     ws = _need_file(ws)
@@ -706,16 +718,40 @@ def cmd_commands(t: Target | None, args, out) -> int:
         ws.commands = []
         msg = f"removed {n} commands"
     else:
-        try:
-            new = read_commands(args.file)
-        except OSError as e:
-            raise ConfigError(f"cannot read {args.file}: {e.strerror}") from None
-        except (ValueError, csv.Error) as e:
-            raise ConfigError(str(e)) from None
-        ws.commands, added, skipped = merge_commands(ws.commands, new, args.replace)
+        added, skipped = ws.import_commands(args.file, args.replace)
         msg = f"imported {added} commands" + (f", skipped {skipped} already listed" if skipped else "")
     ws.save()
     print(f"{msg} in {ws.path}", file=out)
+    return 0
+
+
+def cmd_watchlist(t: Target | None, args, out) -> int:
+    ws = args.ws
+    if args.watchlist_cmd == "export":
+        ws.export_watches(args.file)
+        print(f"wrote {len(ws.tabs)} tabs ({len(ws.watches)} watched items) to {args.file}", file=out)
+        return 0
+    ws = _need_file(ws)
+    added, skipped = ws.import_watches(args.file, args.replace)
+    ws.save()
+    msg = f"imported {added} items" + (f", skipped {skipped} already in their tab" if skipped else "")
+    print(f"{msg}; {ws.path} now has {len(ws.tabs)} tabs", file=out)
+    return 0
+
+
+def cmd_ui(t: Target | None, args, out) -> int:
+    ui = UiSettings.load()
+    if args.ui_cmd == "export":
+        ui.export(args.file)
+        print(f"wrote the interface settings to {args.file}", file=out)
+    elif args.ui_cmd == "import":
+        keys = ui.import_file(args.file)
+        print(f"took {len(keys)} interface settings from {args.file} into {ui.path}", file=out)
+    else:
+        print(f"{ui.path}{'' if ui.exists() else ' (not made yet: every setting is at its default)'}", file=out)
+        for key in SETTINGS:
+            v = ui.value(key)
+            print(f"  {key:<18} {'(default)' if v is None else str(v).lower() if isinstance(v, bool) else v}", file=out)
     return 0
 
 
@@ -921,10 +957,11 @@ COMMANDS = {
     "read-only": cmd_read_only,
     "info": cmd_info, "symbols": cmd_symbols, "ptype": cmd_ptype, "read": cmd_read, "write": cmd_write, "dump": cmd_dump, "poke": cmd_poke,
     "send": cmd_send, "watch": cmd_watch, "console": cmd_console, "history": cmd_history, "commands": cmd_commands,
+    "watchlist": cmd_watchlist,
 }
 
 
-OFFLINE = ("symbols", "ptype", "init", "list", "add", "remove", "tab", "commands", "read-only")   # never open the link
+OFFLINE = ("symbols", "ptype", "init", "list", "add", "remove", "tab", "commands", "watchlist", "read-only")   # never open the link
 
 
 def main(argv: list[str] | None = None, out=None) -> int:
@@ -935,6 +972,8 @@ def main(argv: list[str] | None = None, out=None) -> int:
     try:
         if args.cmd == "history":          # needs no workspace or device
             return cmd_history(None, args, out)
+        if args.cmd == "ui":
+            return cmd_ui(None, args, out)
         args.ws = load_workspace(args)
         for warning in args.ws.warnings:
             print(f"rdt: {warning}", file=sys.stderr)
