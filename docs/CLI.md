@@ -93,9 +93,8 @@ A bit field is written by reading the word that holds it, changing the field and
 | `dump EXPR [LEN]` or `dump MCU ADDR LEN` | Hex and ASCII dump of a variable or of a memory range |
 | `poke MCU ADDR HEX` | Write raw bytes, lowest address first, and confirm them |
 | `send COMMAND [--expect REGEX]` | Send one SCPI command. A query (header ending in `?`) waits for its reply; `--reply` and `--no-reply` override that. `--expect` checks the reply: exit code 11 if no part of it matches the regular expression or no reply came, such as `rdt send "*IDN?" --expect "^RDT,"` |
-| `errors` | Read the SCPI error queue until it is empty |
 | `watch [EXPR...] [--tab NAME] [-i MS] [-n N] [--csv FILE]` | Poll values and print one line per sample. A struct or array becomes one column per field and cell. With no names, every item in the workspace's watch tabs (or with `--tab`, one tab's), each at its own interval. `--csv` also logs every value read to a CSV file (see [CSV log](#csv-log)) |
-| `console [--timestamps] [--log FILE]` | Interactive SCPI console. `.read EXPR` reads, `.write EXPR VALUE` writes, `.err` reads the error queue, `.history [N]` lists the saved history, `!N` sends entry N again, `.quit` leaves. See [Console](#console) |
+| `console [--timestamps] [--log FILE]` | Interactive SCPI console. `.read EXPR` reads, `.write EXPR VALUE` writes, `.history [N]` lists the saved history, `!N` sends entry N again, `.quit` leaves. See [Console](#console) |
 | `commands list [TEXT]`, `commands import FILE [--replace]`, `commands export FILE`, `commands clear` | The workspace's list of known commands. See [Console](#console). Needs no device |
 | `history [-n N] [--clear]` | List the last N (default 20, 0 for all) commands of the saved console history, or delete it. Needs no device |
 | `init FILE` | Save the current target (file and command-line options) as a new workspace. Needs no device |
@@ -261,7 +260,7 @@ time,seconds,main:motor.speed [rpm],main:motor.mode,main:tick_count,event
 
 ## SCPI profile
 
-In every command, `{addr}` and `{value}` are written in bare upper-case hex with no prefix: address `0x11AABBCCDD` is sent as `11AABBCCDD`, and a float 1.5 as its bit pattern `3FC00000`. A template may pad them, as in `{addr:08X}`, but not change the base. A read reply is one bare hex value per 4-byte word (`align` bytes), lowest address first, separated by commas, the way the firmware prints each word as a `uint32_t`: 8 bytes holding the floats 1.5 and 360.0 come back as `3FC00000,43B40000`. RDT turns each value into bytes in the MCU's byte order (from the ELF), so on a little-endian MCU `00000101` is the bytes `01 01 00 00` in memory. Leading zeros may be left out; a reply with a prefix such as `0x`, a word wider than `align` bytes, or the wrong number of words is refused. Older profiles may still have `addr_format`, `value_format`, `data_format` or `size_query`; they are ignored.
+In every command, `{addr}` and `{value}` are written in bare upper-case hex with no prefix: address `0x11AABBCCDD` is sent as `11AABBCCDD`, and a float 1.5 as its bit pattern `3FC00000`. A template may pad them, as in `{addr:08X}`, but not change the base. A read reply is one bare hex value per 4-byte word (`align` bytes), lowest address first, separated by commas, the way the firmware prints each word as a `uint32_t`: 8 bytes holding the floats 1.5 and 360.0 come back as `3FC00000,43B40000`. RDT turns each value into bytes in the MCU's byte order (from the ELF), so on a little-endian MCU `00000101` is the bytes `01 01 00 00` in memory. Leading zeros may be left out; a reply with a prefix such as `0x`, a word wider than `align` bytes, or the wrong number of words is refused. Older profiles may still have `addr_format`, `value_format`, `data_format`, `size_query`, `error_query` or `probe`; they are ignored.
 
 Every read and write command covers whole aligned words of `align` bytes (4 by default; 1, 2, 4 or 8): the address is rounded down and the end rounded up to a multiple of `align`. A 2-byte variable at `20000006` is read with `MEMory:READ? 0,20000004,4`, and RDT keeps the 2 bytes asked for. `max_write` and `max_response` must be at least `align`.
 
@@ -271,7 +270,6 @@ The profile is the same `[scpi]` table the simulator reads ([`default_profile.to
 | --- | --- | --- |
 | `timeout_ms` | 500 | How long to wait for a reply |
 | `retries` | 2 | Extra attempts after a read times out, with a growing delay |
-| `probe` | `"*IDN?"` | Sent on connect and reconnect to check that the device answers. Empty to skip |
 | `reply_regex` | none | For a read reply with text around the data; the group named `data` (or group 1) holds the comma-separated words |
 | `byte_order` | `little` | Used for an MCU without an ELF |
 
@@ -291,15 +289,15 @@ Give a range's extent as `size`, or as `end`, the last address in it, the way fi
 
 ## What the host does with the firmware's habits
 
-- **No reply on failure.** A failed command sends no reply. After a read times out, RDT sends the error query once and reports its answer as a hint, then re-sends the read with a growing delay. The error queue is shared with other tools on the link, so the hint may be someone else's error.
+- **No reply on failure.** A failed command sends no reply. After a read times out, RDT re-sends it with a growing delay. RDT sends no query of its own (no error query, no `*IDN?`); to see why a command failed, send `SYST:ERR?` yourself (`rdt send` or the console).
 - **Writes are confirmed.** A write gets no reply either way, so RDT reads the value back after every write. A mismatch is an error that shows both values. Over UDP a write that didn't land is re-sent, but only after the read-back showed it missing.
 - **ELF identity.** On connect and `.reconnect`, RDT compares each MCU's `identity` variable (or the GNU build ID, when the linker put it in memory) on the device with the ELF file. On a mismatch it warns on stderr and refuses writes to that MCU; `--allow-mismatch` writes anyway. `rdt info` shows each MCU's result, and `watch` prints a `#` line when a rebuilt ELF does not match.
 - **Known memory only.** RDT refuses an access outside the MCU's ELF sections and listed ranges before sending anything, so a read that starts inside a region and runs past its end is never sent. Writes to read-only sections (`.text`, `.rodata`) are refused. An access that touches a peripheral range must stay inside it.
 - **Large reads** are split into pieces of at most `max_response` bytes (rounded down to a multiple of `align`). `max_response` is set in the SCPI profile; RDT never asks the device for it.
 - **Aligned words.** Reads and writes are always whole `align`-byte words. A write smaller than a word, or not on a word boundary, is a read-modify-write: RDT reads the word, puts the new bytes in, writes the whole word back and confirms only the bytes it was asked to write. If the firmware changes a neighbouring value in that word between the read and the write, the change is overwritten. The extra bytes of a word may lie outside the ELF's sections, but never in a peripheral range the access isn't in, and a read-modify-write never writes them into read-only memory.
 - **Values wider than `max_write`** are written in aligned pieces, one write command each. These are not atomic.
-- **Silent MCU.** When a secondary MCU stops answering (the `-240` error, or three timeouts in a row while MCU 0 answers the error query), only that MCU is marked silent. Its reads fail at once and its writes are refused; it is tried again every 2 s. The other MCUs keep working.
-- **Link loss.** If the connection breaks, or the device stops answering even the error query, the link goes down: accesses fail with "link down" and writes are refused. In `watch`, `console` and the GUI, RDT reconnects in the background with a growing delay.
+- **Silent MCU.** When a secondary MCU stops answering (a `-240` error reply, or three timeouts in a row), only that MCU is marked silent. Its reads fail at once and its writes are refused; it is tried again every 2 s. The other MCUs keep working.
+- **Link loss.** The link is up while the COM port or socket is open; RDT sends nothing to check the device on connect. If the port or socket breaks, the link goes down: accesses fail with "link down" and writes are refused. In `watch`, `console` and the GUI, RDT reconnects in the background with a growing delay.
 - **Shared link.** Each read reply is checked against the requested size, and anything left over from an earlier command is dropped before each new one, so a late or stray reply is never taken for the current one.
 
 ## Python API
@@ -341,7 +339,7 @@ with Target(ws.config) as t:
     ws.save()
 ```
 
-Errors are all `rdt.RdtError`: `AccessRefused`, `WriteRefused` (the workspace's write safety), `SymbolError` (a name, member or index that doesn't resolve), `CommandTimeout` (with `.hint`), `WriteNotConfirmed`, `McuSilent`, `LinkDown`, `ConfigError` and a few more in [`rdt/errors.py`](../rdt/errors.py).
+Errors are all `rdt.RdtError`: `AccessRefused`, `WriteRefused` (the workspace's write safety), `SymbolError` (a name, member or index that doesn't resolve), `CommandTimeout`, `WriteNotConfirmed`, `McuSilent`, `LinkDown`, `ConfigError` and a few more in [`rdt/errors.py`](../rdt/errors.py).
 
 ## Code layout
 

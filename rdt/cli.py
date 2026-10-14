@@ -33,7 +33,7 @@ from . import __version__, codec
 from .console import (CommandHistory, SavedCommand, SessionLog, completions, merge_commands, read_commands,
                       write_commands)
 from .csvlog import CsvLog
-from .errors import CommandTimeout, ConfigError, LinkDown, RdtError, SymbolError
+from .errors import ConfigError, LinkDown, RdtError, SymbolError
 from .profile import Profile, parse_int
 from .symbols import Location
 from .symbols.types import ArrayType, EnumType, StructType, Type, is_char_array
@@ -122,8 +122,6 @@ def build_parser() -> argparse.ArgumentParser:
     reply.add_argument("--no-reply", dest="expect", action="store_false", help="don't wait for a reply")
     p.add_argument("--expect", dest="pattern", metavar="REGEX",
                    help="check the reply: exit code 11 if no part of it matches REGEX or no reply came")
-
-    sub.add_parser("errors", help="read the SCPI error queue until it is empty")
 
     p = sub.add_parser("watch", help="poll values and print one line per sample (Ctrl+C stops)")
     p.add_argument("exprs", nargs="*", metavar="EXPR", help="default: the workspace's watch list")
@@ -231,7 +229,6 @@ def load_config(args: argparse.Namespace) -> TargetConfig:
 
 def cmd_info(t: Target, args, out) -> int:
     print(f"Link:          {t.config.connection.describe()}", file=out)
-    print(f"Device:        {t.idn or '(no probe)'}", file=out)
     print(f"Profile:       {t.profile.name}", file=out)
     print(f"Max response:  {t.max_response} bytes", file=out)
     for m in t.mcus.values():
@@ -441,12 +438,8 @@ def _send(t: Target, text: str, expect: bool | None, out) -> int:
         return 0
     if not is_query:
         return 0
-    # The firmware sends no reply when a command fails; the error queue may say why.
-    try:
-        err = t.error_query()
-    except (CommandTimeout, LinkDown):
-        err = None
-    print("(no reply" + (f"; error queue: {err}" if err else "") + ")", file=out)
+    # The firmware sends no reply when a command fails.
+    print("(no reply)", file=out)
     return 1
 
 
@@ -472,16 +465,6 @@ def cmd_send(t: Target, args, out) -> int:
     if not pattern.search(reply):
         print(f"rdt: the reply does not match {args.pattern!r}", file=sys.stderr)
         return EXIT_EXPECT_FAILED
-    return 0
-
-
-def cmd_errors(t: Target, args, out) -> int:
-    for _ in range(64):
-        err = t.error_query()
-        if err is None:
-            print('0,"No error"', file=out)
-            return 0
-        print(err, file=out)
     return 0
 
 
@@ -739,7 +722,6 @@ def cmd_commands(t: Target | None, args, out) -> int:
 CONSOLE_HELP = """Type any SCPI command; queries (header ending in '?') wait for a reply.
   .read EXPR...         read values, such as .read main:motor @main:0x20000010:u32
   .write EXPR VALUE     write a value and confirm it
-  .err                  read the error queue
   .history [N|clear]    the saved command history (last 20, or N), or delete it
   .commands [TEXT]      the workspace's known commands (those containing TEXT)
   .info                 the device, max response size and each MCU's memory, as rdt info
@@ -750,7 +732,7 @@ CONSOLE_HELP = """Type any SCPI command; queries (header ending in '?') wait for
   .quit                 leave (or Ctrl+D)
 Up and Down walk the history; Tab completes from the history, the known commands, the profile and
 common SCPI commands."""
-CONSOLE_DOT_COMMANDS = (".read ", ".write ", ".err", ".history", ".commands", ".info", ".reconnect", ".break",
+CONSOLE_DOT_COMMANDS = (".read ", ".write ", ".history", ".commands", ".info", ".reconnect", ".break",
                         ".help", ".quit")
 
 
@@ -855,7 +837,7 @@ def cmd_console(t: Target, args, out) -> int:
             raise ConfigError(f"cannot write the console log {args.log}: {e}") from None
     if getattr(args, "timestamps", False):
         out = _Stamped(out)
-    banner = f"Connected to {t.idn or t.config.connection.describe()}. .help for help."
+    banner = f"Connected to {t.config.connection.describe()}. .help for help."
     print(banner, file=out)
     if session_log is not None:
         session_log.write("note", banner)
@@ -893,9 +875,6 @@ def _console_loop(t: Target, args, history: CommandHistory, interactive: bool, o
                 break
             if line == ".help":
                 print(CONSOLE_HELP, file=out)
-            elif line == ".err":
-                err = t.error_query()
-                print(err if err else '0,"No error"', file=out)
             elif line == ".history clear":
                 history.clear()
                 print("console history cleared", file=out)
@@ -908,7 +887,7 @@ def _console_loop(t: Target, args, history: CommandHistory, interactive: bool, o
                 cmd_info(t, args, out)
             elif line == ".reconnect":
                 t.reconnect()
-                print(f"reconnected to {t.idn or t.config.connection.describe()}", file=out)
+                print(f"reconnected to {t.config.connection.describe()}", file=out)
                 for m in t.mcus.values():
                     if m.identity is not None and m.identity.status == "mismatch":
                         if args.allow_mismatch:
@@ -941,7 +920,7 @@ COMMANDS = {
     "init": cmd_init, "list": cmd_list, "add": cmd_add, "remove": cmd_remove, "tab": cmd_tab,
     "read-only": cmd_read_only,
     "info": cmd_info, "symbols": cmd_symbols, "ptype": cmd_ptype, "read": cmd_read, "write": cmd_write, "dump": cmd_dump, "poke": cmd_poke,
-    "send": cmd_send, "errors": cmd_errors, "watch": cmd_watch, "console": cmd_console, "history": cmd_history, "commands": cmd_commands,
+    "send": cmd_send, "watch": cmd_watch, "console": cmd_console, "history": cmd_history, "commands": cmd_commands,
 }
 
 

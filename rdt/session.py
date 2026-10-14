@@ -1,19 +1,17 @@
 """Session: sequencing, timeouts, retries, silent MCUs and reconnecting.
 
 The session is where the firmware's habits are handled:
-- A failed command sends no reply, so a timeout may be an error. After a read times out, the
-  error query is sent once and its answer kept as a hint. The queue is shared with other tools
-  on the link, so the hint is never relied on.
+- A failed command sends no reply, so a timeout may be an error. RDT sends no query of its own
+  (no error query, no *IDN?): the link is up while the port or socket is open.
 - A write sends no reply either way, so every write is confirmed by reading the value back.
 - Every read and write covers whole aligned words (the profile's ``align``, 4 by default). A read
   of 2 bytes reads the 4-byte word and keeps the 2 bytes asked for. A write smaller than a word,
   or not on a word boundary, reads the word, replaces the bytes and writes the whole word back
   (read-modify-write). A neighbouring value the firmware changes in between is overwritten.
-- A secondary MCU that stops answering is marked silent: on the -240 error, or after three
-  timeouts in a row while the main MCU still answers. Only that MCU's accesses fail, and it is
-  probed again every few seconds.
-- When the link breaks or the device stops answering, the session goes down, refuses accesses,
-  and reconnects in the background with a growing delay.
+- A secondary MCU that stops answering is marked silent: on a -240 error reply, or after three
+  timeouts in a row. Only that MCU's accesses fail, and it is tried again every few seconds.
+- When the port or socket breaks, the session goes down, refuses accesses, and reconnects in the
+  background with a growing delay.
 
 One lock serialises every exchange, so the GUI's poller and its console can share a session.
 """
@@ -28,7 +26,7 @@ from enum import Enum
 from typing import Callable
 
 from .errors import (
-    BadReply, CommandRejected, CommandTimeout, DeviceError, LinkDown, LinkError, McuSilent, WriteNotConfirmed,
+    BadReply, CommandRejected, CommandTimeout, LinkDown, LinkError, McuSilent, WriteNotConfirmed,
 )
 from .profile import Profile, align_span
 from .protocol import ScpiProtocol
@@ -56,7 +54,7 @@ Listener = Callable[[str, dict], None]
 
 
 class Session:
-    SILENT_AFTER = 3            # timeouts in a row, while MCU 0 answers, that mark an MCU silent
+    SILENT_AFTER = 3            # timeouts in a row that mark a secondary MCU silent
     SILENT_PROBE_S = 2.0        # how often a silent MCU is tried again
     RECONNECT_DELAYS = (0.25, 0.5, 1.0, 2.0, 4.0, 5.0)
     RETRY_DELAY_S = 0.05        # first delay before re-sending a timed-out read; doubles each time
@@ -79,10 +77,8 @@ class Session:
         self.byte_order_of = byte_order_of or (lambda mcu: profile.byte_order)   # for word replies
         self.auto_reconnect = auto_reconnect
         self.max_response = profile.max_response
-        self.idn: str | None = None
         self.state = LinkState.CLOSED
         self.down_reason = ""
-        self.last_hint: DeviceError | None = None
         self._mcus: dict[int, McuStatus] = {}
         self._lock = threading.RLock()
         self._listeners: list[Listener] = []
@@ -123,28 +119,10 @@ class Session:
             self._set_state(LinkState.UP)
 
     def _open(self) -> None:
-        p = self.profile
         self.transport.open()
-        try:
-            if p.probe:
-                reply = self._query_with_retries(p.probe)
-                if reply is None:
-                    raise LinkError(f"{self.transport.description}: no reply to {p.probe}")
-                self.idn = reply
-            self.max_response = p.max_response
-        except LinkError:
-            self.transport.close()
-            raise
+        self.max_response = self.profile.max_response
         for st in self._mcus.values():
             st.timeouts_in_row = 0
-
-    def _query_with_retries(self, command: str) -> str | None:
-        attempts = 1 + (self.profile.retries if self.transport.lossy else 0)
-        for _ in range(attempts):
-            reply = self.protocol.query(command, self.timeout_s(0))
-            if reply is not None:
-                return reply
-        return None
 
     def close(self) -> None:
         self._stop.set()
@@ -255,8 +233,6 @@ class Session:
         else:
             attempts = 1 + self.profile.retries
         what = f"read of {size} bytes at 0x{addr:08X} on {self._name(mcu)}"
-        hint: DeviceError | None = None
-        asked = main_answered = False
         bad: BadReply | None = None
         delay = self.RETRY_DELAY_S
         try:
@@ -271,57 +247,23 @@ class Session:
                     # Perhaps a late reply meant for an earlier command; the next send flushes it.
                     log.debug("%s: %s", what, e)
                     bad = e
-                    main_answered = True
                     continue
                 except CommandRejected as e:
-                    self.last_hint = e.error
                     if mcu != 0 and e.error.code == MCU_NOT_RESPONDING:
                         raise self._mark_silent(mcu, str(e.error)) from None
                     raise
                 if data is not None:
                     self._mcu_answered(mcu)
                     return data
-                if not asked:
-                    asked = True
-                    answered, hint = self._error_query()
-                    main_answered |= answered
-                    if hint is not None:
-                        self.last_hint = hint
-                if mcu != 0 and main_answered:
-                    if hint is not None and hint.code == MCU_NOT_RESPONDING:
-                        raise self._mark_silent(mcu, str(hint))
+                if mcu != 0:
                     st.timeouts_in_row += 1
                     if st.timeouts_in_row >= self.SILENT_AFTER:
                         raise self._mark_silent(mcu, f"{st.timeouts_in_row} timeouts in a row")
         except LinkError as e:
             raise self._link_lost(str(e)) from None
-        if not main_answered:
-            raise self._link_lost(f"the device stopped answering ({what} and {self.profile.error_query} got no reply)")
-        if hint is not None:
-            st.timeouts_in_row = 0  # the failure is explained, so it says nothing about a silent MCU
-        if bad is not None and hint is None:
+        if bad is not None:
             raise BadReply(f"{what}: {bad}")
-        raise CommandTimeout(f"no reply to {what}", hint)
-
-    def _error_query(self) -> tuple[bool, DeviceError | None]:
-        attempts = 1 + (self.profile.retries if self.transport.lossy else 0)
-        for _ in range(attempts):
-            answered, error = self.protocol.error_query(self.timeout_s(0))
-            if answered:
-                return True, error
-        return False, None
-
-    def error_query(self) -> DeviceError | None:
-        """Read one entry of the shared error queue (None for "No error")."""
-        with self._lock:
-            self._require_up()
-            try:
-                answered, error = self._error_query()
-            except LinkError as e:
-                raise self._link_lost(str(e)) from None
-            if not answered:
-                raise CommandTimeout(f"no reply to {self.profile.error_query}")
-            return error
+        raise CommandTimeout(f"no reply to {what}")
 
     # --- writes ------------------------------------------------------------------------------
 
@@ -368,15 +310,9 @@ class Session:
                 back = words_back[off:off + len(data)]
             if back == data:
                 return
-            try:
-                _, hint = self._error_query()
-            except LinkError as e:
-                raise self._link_lost(str(e)) from None
-            if hint is not None:
-                self.last_hint = hint
             raise WriteNotConfirmed(
                 f"write to 0x{addr:08X} on {self._name(mcu)} not confirmed: wrote {data.hex().upper()}, "
-                f"read back {back.hex().upper()}", data, back, hint)
+                f"read back {back.hex().upper()}", data, back)
 
     @staticmethod
     def _patch(words: bytes, off: int, data: bytes) -> bytes:
@@ -389,7 +325,7 @@ class Session:
         except (CommandTimeout, BadReply, McuSilent, CommandRejected) as e:
             raise WriteNotConfirmed(f"write to 0x{addr:08X} on {self._name(mcu)} not sent: reading the "
                                     f"{self.profile.align}-byte words around it failed: {e}",
-                                    data, None, getattr(e, "hint", None)) from None
+                                    data, None) from None
 
     def _send_pieces(self, mcu: int, pieces: list[tuple[int, bytes]], byte_order: str) -> None:
         for a, chunk in pieces:
@@ -400,7 +336,7 @@ class Session:
             return self.read(mcu, start, end - start)
         except (CommandTimeout, BadReply, McuSilent, CommandRejected) as e:
             raise WriteNotConfirmed(f"write to 0x{addr:08X} on {self._name(mcu)} sent, but the read-back failed: {e}",
-                                    data, None, getattr(e, "hint", None)) from None
+                                    data, None) from None
 
     # --- console -----------------------------------------------------------------------------
 
@@ -413,8 +349,7 @@ class Session:
     def command(self, text: str, expect_reply: bool | None = None, timeout_ms: float | None = None) -> str | None:
         """Send any command by hand. Waits for a reply if the header ends in ``?`` (or if asked to).
 
-        Returns the reply, or None if none came. A command that fails sends no reply, so ask the
-        error query to find out why.
+        Returns the reply, or None if none came. A command that fails sends no reply.
         """
         text = text.strip()
         if not text:
