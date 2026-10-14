@@ -106,7 +106,7 @@ The format is the same as `rdt watch --csv`; see [CSV log](CLI.md#csv-log). A lo
 
 ## Memory view
 
-Choose the MCU, type an address (`0x20000000`) or a variable name (`motor`), a length, and press **Read**. The dump shows 16 bytes per row with their ASCII. Double-click a byte, type two hex digits, and press Enter to write it. **Refresh** reads again at the global polling interval. Access outside the ELF's memory and the target's ranges is refused, as in the CLI.
+Choose the MCU, type an address (`0x20000000`) or a variable name (`motor`), a length, and press **Read**. The dump shows 16 bytes per row with their ASCII. Right-click the dump to choose how the cells show memory: **Unsigned** or **Signed** with a C type (**Char** 8 bits, **Short** 16, **Int** and **Long** 32, as on ARM), in hex, or in decimal when **Decimal** is ticked; **Ascii** (one character per byte); **Float** (32-bit); or **Double** (64-bit). The current choice has a check mark, values use the MCU's byte order, and the choice is remembered for the next start. The default is unsigned Char in hex, the plain hex bytes. Double-click a cell, type a new value in the shown format (a hex `0x` prefix is accepted in decimal too), and press Enter to write it; a value too big for the type is refused. **Refresh** reads again at the global polling interval. Access outside the ELF's memory and the target's ranges is refused, as in the CLI.
 
 ## SCPI console
 
