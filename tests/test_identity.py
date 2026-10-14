@@ -152,6 +152,42 @@ def test_flash_samples_without_an_identity(sim, tmp_path):
         assert 2000 < sum(len(b) for _, b in big) < 8000 and all(a % 4 == 0 and len(b) % 4 == 0 for a, b in big)
 
 
+def keil_like_elf(path: Path) -> Path:
+    """A tiny ARM ELF laid out as a Keil scatter file does it: ER_IROM1 runs from flash at
+    0x08000000, ER_ITCM runs from ITCM at 0x00000000 but is flashed at 0x08000100 and copied
+    there at startup (its segment's physical address is the load address)."""
+    import struct
+    rom, itcm = bytes(range(64)), bytes(range(100, 132))
+    shstr = b"\0ER_IROM1\0ER_ITCM\0.shstrtab\0"
+    ehsize, phsize, shsize = 52, 32, 40
+    off_rom = ehsize + 2 * phsize
+    off_itcm = off_rom + len(rom)
+    off_str = off_itcm + len(itcm)
+    off_sh = off_str + len(shstr)
+    off_sh += -off_sh % 4
+    out = bytearray(b"\x7fELF\x01\x01\x01" + bytes(9))
+    out += struct.pack("<HHIIIIIHHHHHH", 2, 40, 1, 0x08000001, ehsize, off_sh, 0x05000000,
+                       ehsize, phsize, 2, shsize, 4, 3)
+    for off, data, vaddr, paddr in ((off_rom, rom, 0x08000000, 0x08000000), (off_itcm, itcm, 0, 0x08000100)):
+        out += struct.pack("<IIIIIIII", 1, off, vaddr, paddr, len(data), len(data), 5, 4)
+    out += rom + itcm + shstr
+    out += bytes(off_sh - len(out))
+    out += bytes(shsize)
+    flags = 2 | 4                                                    # SHF_ALLOC | SHF_EXECINSTR
+    for name, off, data, addr in ((1, off_rom, rom, 0x08000000), (10, off_itcm, itcm, 0)):
+        out += struct.pack("<IIIIIIIIII", name, 1, flags, addr, off, len(data), 0, 0, 4, 0)
+    out += struct.pack("<IIIIIIIIII", 18, 3, 0, 0, off_str, len(shstr), 0, 0, 1, 0)
+    path.write_bytes(bytes(out))
+    return path
+
+
+def test_flash_samples_skip_code_copied_to_itcm(tmp_path):
+    """Code a Keil scatter file runs from ITCM or RAM is flashed elsewhere and copied at startup,
+    so it is not sampled at its run address: that gave a false mismatch on a matching image."""
+    samples = flash_samples(keil_like_elf(tmp_path / "keil.axf"))
+    assert samples == [(0x08000000, bytes(range(64)))]
+
+
 def test_identity_problems_never_block(sim):
     with make_target("tcp", sim.tcp_address, mcus=mcus(identity="no_such_var")) as t:
         ident = t.mcus["main"].identity
