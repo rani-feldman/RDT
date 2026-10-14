@@ -1,0 +1,43 @@
+# RDT watch list for examples/sim_bench.rdtw: the watch tabs, their items and the chart.
+# Import it into another workspace with File > Import > Watch list, or
+#   rdt -w OTHER.rdtw watchlist import examples/sim_bench.watch.toml
+
+# Watch tabs: each tab is its own watch list. Every tab keeps polling, not only the one shown.
+[[tab]]
+name = "Motor"
+
+  [[tab.watch]]
+  expr    = "main:motor.speed"
+  unit    = "rpm"
+  poll    = 100                 # this item every 100 ms; "global" (the default) or "manual"
+
+  [[tab.watch]]
+  expr    = "main:motor.target"
+  unit    = "rpm"
+  min     = 0                   # write limits, in shown units
+  max     = 3000
+  confirm = true                # ask before writing
+
+  [[tab.watch]]
+  expr    = "main:motor.current_ma"
+  scale   = 0.001               # shown = raw * scale + offset
+  unit    = "A"
+
+  [[tab.watch]]
+  expr      = "main:motor.mode"
+  read_only = true
+
+[[tab]]
+name = "System"
+
+  [[tab.watch]]
+  expr    = "main:tick_count"
+  format  = "hex"               # dec | hex | bin | char
+
+  [[tab.watch]]
+  expr    = "motorctl:temperature"
+  unit    = "degC"
+  poll    = "manual"
+
+  [[tab.watch]]
+  expr = "main:motor.mode"    # an item can be in several tabs; its settings are given once
