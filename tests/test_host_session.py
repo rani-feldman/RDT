@@ -43,6 +43,7 @@ def test_read_values_on_each_mcu(target):
 
 
 def test_large_read_on_a_secondary_mcu(target, device):
+    device.mcus[1].frames = 0           # not counting the flash check on connect (SYM-8)
     data = target.read("motorctl", 0x20000000, 140)
     assert data[:4] == bytes.fromhex("01000200")
     assert device.mcus[1].frames == 3  # the main MCU split it into 64-byte frames
@@ -121,7 +122,8 @@ def test_max_response_comes_from_the_profile_only(two_mcus):
         t.session.protocol.send = lambda command: (sent.append(command), send(command))[1]
         with t:
             assert t.max_response == 32
-            assert sent == []                 # nothing is sent on connect, not even *IDN?
+            assert all(c.startswith("MEMory:READ?") for c in sent)   # only the flash check, no *IDN?
+            sent.clear()
             assert len(t.read("main", 0x20000000, 236)) == 236   # 8 reads, none over 32 bytes
 
 
@@ -155,6 +157,7 @@ def test_small_reads_ask_for_whole_aligned_words(two_mcus):
         t = make_target("tcp", s.tcp_address)
         sent = _record(t)
         with t:
+            sent.clear()                                                  # the flash check on connect
             assert t.read_value("@main:0x20000008:i16") == -120          # 2 bytes in the word at 20000008
             assert t.read("main", 0x20000001, 2) == bytes.fromhex("00C0")
             assert t.read("main", 0x20000002, 4) == t.read("main", 0x20000000, 8)[2:6]   # straddles two words

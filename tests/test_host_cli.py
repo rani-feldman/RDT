@@ -88,7 +88,7 @@ def test_silent_mcu(sim):
     rdt(sim, "send", "SIM:MCU:SIL", "1,ON")
     code, out = rdt(sim, "read", "@motorctl:0x20000084:u32", "@main:0x20000010:u32")
     assert code == 1
-    assert "MCU motorctl is not responding (3 timeouts in a row)" in out
+    assert "MCU motorctl is not responding" in out   # found silent by the flash check on connect
     assert "@main:0x20000010:u32 = 305419896" in out
 
 
