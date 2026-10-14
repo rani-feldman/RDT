@@ -64,6 +64,8 @@ class Device:
         self.error_reply = error_reply
         self.errors: deque[ScpiError] = deque()
         self.lock = threading.Lock()
+        self.frozen = False          # a hung board: nothing answers, the port stays open
+        self.frozen_until = 0.0      # set by SIMulation:FREEze {seconds}
 
         p = self.profile
         # (template, handler, replies). Profile templates come first, so a user command wins over
@@ -80,6 +82,7 @@ class Device:
             ("SIMulation:MCU:SILent {mcu},{state}", self._set_silent, False),
             ("SIMulation:MCU:SILent? {mcu}", lambda a: "1" if self._mcu(a).silent else "0", True),
             ("SIMulation:MCU:LIST?", self._list_mcus, True),
+            ("SIMulation:FREEze {seconds}", self._freeze, False),
         ]
         self.commands = [(CommandPattern(t), fn, replies) for t, fn, replies in commands if t]
 
@@ -89,6 +92,9 @@ class Device:
         """Run one command line. Returns the reply without its terminator, or None for no reply."""
         line = line.strip()
         if not line:
+            return None
+        if self.frozen or time.monotonic() < self.frozen_until:
+            log.debug("%s  %s  ->  (frozen, no reply)", client, line)
             return None
         with self.lock:
             reply = self._dispatch(line)
@@ -209,6 +215,14 @@ class Device:
         if mcu.is_main:
             raise _illegal_value("the main MCU owns the link and cannot be silent")
         mcu.silent = state in ("1", "ON")
+
+    def _freeze(self, args: dict) -> None:
+        """Answer nothing for a while, like a hung board whose COM port stays open."""
+        try:
+            seconds = float(args["seconds"])
+        except ValueError:
+            raise _data_type(args["seconds"]) from None
+        self.frozen_until = time.monotonic() + seconds
 
     def _list_mcus(self, args: dict) -> str:
         return ",".join(f'{m.id},"{m.name}"' for m in sorted(self.mcus.values(), key=lambda m: m.id))
