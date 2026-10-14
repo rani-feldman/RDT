@@ -977,3 +977,35 @@ def test_dark_theme_is_remembered(qtbot, win):
     assert not is_dark() and win.chart.axis_text == "#404040"
     win.set_theme("system")
     assert QApplication.palette().base().color().name() == system and win.ui.value("ui/theme") == "system"
+
+
+def test_drag_and_drop_to_tabs_and_chart(qtbot, win):
+    from PySide6.QtCore import QEvent, QPoint, QPointF
+    from PySide6.QtGui import QDragEnterEvent, QDropEvent
+    from rdt.gui.dnd import MIME, exprs_from
+    sym = win.symbols.list
+    items = [sym.topLevelItem(i) for i in range(sym.topLevelItemCount())]
+    gains = next(i for i in items if i.text(0) == "gains")
+    data = sym.mimeData([gains])
+    assert data.hasFormat(MIME) and exprs_from(data) == ["main:gains"]
+
+    def drop(widget, mime):
+        enter = QDragEnterEvent(QPoint(5, 5), Qt.CopyAction, mime, Qt.LeftButton, Qt.NoModifier)
+        QApplication.sendEvent(widget, enter)
+        ev = QDropEvent(QPointF(5, 5), Qt.CopyAction, mime, Qt.LeftButton, Qt.NoModifier, QEvent.Drop)
+        QApplication.sendEvent(widget, ev)
+        return ev.isAccepted()
+
+    win.show()
+
+    from PySide6.QtWidgets import QApplication
+    tree = win.watch_tree
+    assert drop(tree.viewport(), data) and "main:gains" in tree.states
+    assert drop(tree.viewport(), data) and list(tree.states).count("main:gains") == 1   # not twice
+    connect(qtbot, win)
+    speed = sym.mimeData([next(i for i in items if i.text(0) == "tick_count")])
+    drop(win.chart.plot.viewport(), speed)    # not watched in this tab: added, then charted after a read
+    qtbot.waitUntil(lambda: "main:tick_count" in win.chart.series, timeout=5000)
+    drop(win.chart.plot.viewport(), data)     # an array is not a number
+    qtbot.waitUntil(lambda: not win.chart_pending, timeout=5000)
+    assert "main:gains" not in win.chart.series

@@ -21,6 +21,7 @@ from ..stats import StatsBook, numeric
 from ..symbols import Location, load_symbols
 from ..workspace import Reading, Shown, Tab, Watch, Workspace
 from .device import describe_error
+from .dnd import DragTree, DropTarget
 from .style import FLASH_S, TAG_ROLE, TagDelegate, flash_color, mcu_tag, split_expr
 
 COL_NAME, COL_VALUE, COL_TYPE, COL_ADDR, COL_RATE, COL_MIN, COL_MAX, COL_MEAN, COL_COUNT = range(9)
@@ -53,7 +54,7 @@ class _ItemState:
     force: bool = True              # read at the next tick whatever the interval
 
 
-class WatchTree(QTreeWidget):
+class WatchTree(DragTree):
     """Debugger-style watch tree for one watch tab. Top-level rows are the tab's items; structs and
     arrays open to every field and cell. A collapsed struct or array is not read. The trees don't
     poll on their own: the tabs widget reads what every tree has due in one poll."""
@@ -84,6 +85,7 @@ class WatchTree(QTreeWidget):
         self.itemChanged.connect(self._item_changed)
         self.itemExpanded.connect(self._expanded)
         self.setItemDelegateForColumn(COL_NAME, TagDelegate(self))
+        DropTarget(self.viewport(), self.dropped, ignore=self)
         self.states: dict[str, _ItemState] = {}
         self.flashing: dict[str, tuple[QTreeWidgetItem, float]] = {}   # path: (row, when to stop)
         self.stats = StatsBook()
@@ -122,6 +124,12 @@ class WatchTree(QTreeWidget):
         self._add_row(w)
         self.changed.emit()
         return w
+
+    def dropped(self, exprs: list[str]) -> None:
+        """Expressions dragged onto this tab (GUI-15): add those it doesn't have yet."""
+        for e in exprs:
+            if not self.tab.watch(e):
+                self.add_watch(e)
 
     def remove_watch(self, expr: str) -> None:
         st = self.states.pop(expr, None)
@@ -540,6 +548,7 @@ class WatchTabs(QTabWidget):
         self.setMovable(True)
         self.setDocumentMode(True)
         self.tabBar().tabMoved.connect(self._moved)
+        DropTarget(self.tabBar(), lambda exprs: self.main.watch_tree.dropped(exprs), on_hover=self._drag_over_tab)
         self.tabBar().tabBarDoubleClicked.connect(lambda i: self.rename_tab(i) if i >= 0 else self.new_tab())
         self.tabBar().setContextMenuPolicy(Qt.CustomContextMenu)
         self.tabBar().customContextMenuRequested.connect(self._menu)
@@ -652,6 +661,12 @@ class WatchTabs(QTabWidget):
         menu.exec(self.tabBar().mapToGlobal(pos))
 
     # --- across every tab --------------------------------------------------------------------
+
+    def _drag_over_tab(self, pos) -> None:
+        """A drag held over a tab's title shows that tab, so the drop goes there (GUI-15)."""
+        i = self.tabBar().tabAt(pos)
+        if i >= 0 and i != self.currentIndex():
+            self.setCurrentIndex(i)
 
     def states(self):
         """Every (tree, item state) pair, in tab order."""
@@ -849,7 +864,7 @@ class SymbolBrowser(QWidget):
         top.addWidget(self.mcu)
         top.addWidget(self.search, 1)
         layout.addLayout(top)
-        self.list = QTreeWidget()
+        self.list = DragTree()
         self.list.setHeaderLabels(["Name", "Type", "Size", "Address"])
         self.list.setRootIsDecorated(False)
         self.list.setUniformRowHeights(True)

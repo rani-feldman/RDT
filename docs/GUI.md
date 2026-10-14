@@ -30,7 +30,7 @@ Started with no file, `rdt-gui` reopens the workspace you last opened or saved. 
 
 ## Variable view
 
-The **Variables** panel lists an MCU's globals from its ELF. Type in the search box to filter (`motor*`, `*count`), then double-click a variable or select several and press **Add to watch list**; they go to the watch tab in front. **Watch > Add expression** (Ctrl+E) takes any expression the CLI takes, such as `main:motor.speed`, `main:gains[2]`, `main:*ptr` or `@main:0x20000000:u32`.
+The **Variables** panel lists an MCU's globals from its ELF. Type in the search box to filter (`motor*`, `*count`), then double-click a variable or select several and press **Add to watch list**; they go to the watch tab in front. You can also **drag** them: drop on a watch tab to add them there (hold the drag over a tab's title to switch to that tab first), or on the chart to watch and chart them in one go. Rows of a watch tree drag the same way: onto another tab (the item is shared, as with **Also show in tab**) or onto the chart. A dropped value is charted after its first read; one that is not a number is not charted and the status bar says so. **Watch > Add expression** (Ctrl+E) takes any expression the CLI takes, such as `main:motor.speed`, `main:gains[2]`, `main:*ptr` or `@main:0x20000000:u32`.
 
 ### Watch tabs
 
