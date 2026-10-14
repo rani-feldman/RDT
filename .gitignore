@@ -7,5 +7,5 @@ dist/
 .pytest_cache/
 
 # Your own default configs (python -m sim and rdt pick them up from the current folder)
-sim.toml
-rdt.toml
+/sim.toml
+/rdt.toml
