@@ -29,6 +29,7 @@ rdt-gui = "rdt.gui.app:main"
 include = ["rdt*", "sim*"]
 
 [tool.setuptools.package-data]
+rdt = ["gui/assets/*"]
 sim = ["examples/*.toml", "examples/firmware/*"]
 
 [tool.pytest.ini_options]
