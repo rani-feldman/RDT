@@ -39,11 +39,8 @@ SETTINGS: dict[str, type] = {
 }
 STATE: dict[str, type] = {
     "session/last_workspace": str,   # not a setting: never exported, kept on import
-    "session/mode": str,             # the window's mode when it was closed (GUI-14)
-    "session/layout_watch": str,     # each mode's panel layout, as QMainWindow.saveState in base64
-    "session/layout_scope": str,
-    "session/layout_memory": str,
-    "session/layout_console": str,
+    "session/layout": str,           # the panels' layout, as QMainWindow.saveState in base64 (GUI-14)
+    "session/watch_shown": bool,     # whether the watch tabs were shown
 }
 KNOWN = {**SETTINGS, **STATE}
 
