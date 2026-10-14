@@ -123,6 +123,7 @@ def test_console(sim, monkeypatch):
 
 def test_mcus_on_the_command_line(sim, tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)        # no rdt.toml here
+    monkeypatch.setenv("RDT_UI_FILE", str(tmp_path / "ui.toml"))    # nor in the workspace folder
     out = io.StringIO()
     elf = ROOT / "sim" / "examples" / "firmware" / "motorctl.elf"
     code = main(["--tcp", "%s:%d" % sim.tcp_address, "--mcu", "main=0", "--mcu", f"motor=1:{elf}",
@@ -132,6 +133,7 @@ def test_mcus_on_the_command_line(sim, tmp_path, monkeypatch):
 
 def test_no_mcus_is_an_error(capsys, tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)        # no rdt.toml here
+    monkeypatch.setenv("RDT_UI_FILE", str(tmp_path / "ui.toml"))    # nor in the workspace folder
     assert main(["--tcp", "127.0.0.1:1", "info"]) == 1
     assert "no MCUs" in capsys.readouterr().err
 
@@ -139,6 +141,17 @@ def test_no_mcus_is_an_error(capsys, tmp_path, monkeypatch):
 def test_rdt_toml_in_the_current_folder_is_the_default(sim, tmp_path, monkeypatch):
     (tmp_path / "rdt.toml").write_text(EXAMPLE_TARGET.read_text().replace('"../', f'"{ROOT.as_posix()}/'))
     monkeypatch.chdir(tmp_path)
+    out = io.StringIO()
+    code = main(["--tcp", "%s:%d" % sim.tcp_address, "read", "main:motor.target"], out=out)
+    assert code == 0 and out.getvalue().startswith("main:motor.target = ")
+
+
+def test_rdt_toml_in_the_workspace_folder_is_the_next_default(sim, tmp_path, monkeypatch):
+    home = tmp_path / "rdt"
+    home.mkdir()
+    (home / "rdt.toml").write_text(EXAMPLE_TARGET.read_text().replace('"../', f'"{ROOT.as_posix()}/'))
+    monkeypatch.setenv("RDT_UI_FILE", str(home / "ui.toml"))
+    monkeypatch.chdir(tmp_path)        # no rdt.toml here
     out = io.StringIO()
     code = main(["--tcp", "%s:%d" % sim.tcp_address, "read", "main:motor.target"], out=out)
     assert code == 0 and out.getvalue().startswith("main:motor.target = ")

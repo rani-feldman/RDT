@@ -27,8 +27,8 @@ from ..errors import ConfigError, LinkDown
 from ..profile import Profile
 from ..session import LinkState
 from ..target import ConnectionConfig, McuConfig, TargetConfig
-from ..ui_settings import SETTINGS, UiSettings
-from ..workspace import Workspace
+from ..ui_settings import SETTINGS, UiSettings, workspace_dir
+from ..workspace import Workspace, default_target
 from .chart import ChartPanel
 from .device import Device, describe_error
 from .panels import CONSOLE_KEYS, Console, McuDialog, MemoryView, ProfileDialog, mono
@@ -44,6 +44,16 @@ BAUDS = ("9600", "19200", "38400", "57600", "115200", "230400", "460800", "92160
 
 def new_workspace() -> Workspace:
     return Workspace(TargetConfig(mcus=[McuConfig(0, "main")]))
+
+
+def workspaces_folder() -> Path:
+    """The folder the Open and Save dialogs start in: %LOCALAPPDATA%\\rdt, beside ui.toml."""
+    folder = workspace_dir()
+    try:
+        folder.mkdir(parents=True, exist_ok=True)
+    except OSError:
+        pass
+    return folder
 
 
 def load_ui() -> UiSettings:
@@ -576,7 +586,7 @@ class MainWindow(QMainWindow):
     def open_file(self) -> None:
         if not self._maybe_save():
             return
-        path, _ = QFileDialog.getOpenFileName(self, "Open workspace", "", FILTER)
+        path, _ = QFileDialog.getOpenFileName(self, "Open workspace", str(workspaces_folder()), FILTER)
         if path:
             self.open_path(path)
 
@@ -626,7 +636,8 @@ class MainWindow(QMainWindow):
         return self._save_to(self.ws.path)
 
     def save_as(self) -> bool:
-        path, _ = QFileDialog.getSaveFileName(self, "Save workspace", str(self.ws.path or "bench.rdtw"),
+        name = self.ws.path.name if self.ws.path else "bench.rdtw"
+        path, _ = QFileDialog.getSaveFileName(self, "Save workspace", str(workspaces_folder() / name),
                                               "RDT workspace (*.rdtw)")
         if not path:
             return False
@@ -1092,8 +1103,8 @@ def main(argv: list[str] | None = None) -> int:
     win = MainWindow()
     if argv:
         win.open_path(argv[0])
-    elif not win.reopen_last() and Path("rdt.toml").is_file():
-        win.open_path("rdt.toml")         # the CLI's default target file, as a starting point
+    elif not win.reopen_last() and (local := default_target()) is not None:
+        win.open_path(local)              # the CLI's default target file, as a starting point
     win.show()
     return app.exec()
 

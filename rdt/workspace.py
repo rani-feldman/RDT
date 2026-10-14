@@ -7,7 +7,7 @@ file loads as a workspace with no tabs, and a workspace works anywhere a target 
 
 The watch tabs and chart are kept in their own watch list file, and the known commands in their
 own commands file; the ``.rdtw`` names them (``watch_file``, ``commands_file``), so opening it loads
-everything. By default they sit next to it, named after it::
+everything. They sit next to it, named after it, and saving always writes them there::
 
     bench.rdtw               connection, profile, MCUs, polling, read-only default
     bench.watch.toml         [[tab]] / [[tab.watch]] and [chart]
@@ -16,6 +16,8 @@ everything. By default they sit next to it, named after it::
 Each can be imported into another workspace or exported on its own. A workspace from before the
 split (tabs and commands inside the ``.rdtw``) still opens, and is split when it is saved; so
 does one whose commands are in a CSV file (bench.commands.csv), which becomes bench.commands.toml.
+New workspaces are saved by default in the per-user folder (``workspace_dir``: %LOCALAPPDATA%\\rdt
+on Windows), next to ui.toml.
 
 An expression may be in several tabs. It is still one item: its settings are the same in every
 tab, and it is read once per poll.
@@ -53,7 +55,6 @@ POLL_KINDS = ("global", "manual")
 DEFAULT_POLL_MS = 500
 WATCH_SUFFIX = ".watch.toml"        # bench.rdtw keeps its watch tabs in bench.watch.toml
 COMMANDS_SUFFIX = ".commands.toml"  # and its known commands in bench.commands.toml
-OLD_COMMANDS_SUFFIX = ".commands.csv"   # where they were before; read, and turned into TOML on save
 
 
 def canonical(expr: str) -> str:
@@ -278,17 +279,15 @@ class Workspace:
         return d
 
     def save(self, path: str | Path | None = None) -> Path:
-        """Save the workspace, its watch list file and its commands file. A file the workspace
-        does not have yet is made next to it, named after it; so is one named after the
-        workspace's old name when it is saved under a new one. A file named otherwise (one shared
-        by several workspaces, say) stays where it is."""
+        """Save the workspace, its watch list file and its commands file. The two files always go
+        next to the ``.rdtw``, named after it (bench.watch.toml, bench.commands.toml), so a
+        workspace is one folder's files (rani, 2026-10-14). A file it was loaded from elsewhere,
+        or under another name, is left as it was."""
         path = Path(path) if path is not None else self.path
         if path is None:
             raise ConfigError("the workspace has no file yet; give a path to save it to")
-        watch_path = _own_file(self.watch_path, self.path, path, WATCH_SUFFIX,
-                               bool(self.tabs or self.chart))
-        commands_path = _own_file(_as_toml(self.commands_path, self.path), self.path, path, COMMANDS_SUFFIX,
-                                  bool(self.commands))
+        watch_path = _beside(path, WATCH_SUFFIX) if self.tabs or self.chart else None
+        commands_path = _beside(path, COMMANDS_SUFFIX) if self.commands else None
         if watch_path is not None:
             write_watch_file(watch_path, self.tabs, self.chart)
         if commands_path is not None:
@@ -673,17 +672,6 @@ def _file_key(raw: dict, key: str) -> str | None:
     return v
 
 
-def _own_file(current: Path | None, old_ws: Path | None, new_ws: Path, suffix: str, needed: bool) -> Path | None:
-    """Where the workspace saved at ``new_ws`` keeps one of its files: where it is now, unless it
-    is named after the workspace's old name (then it follows the new name); next to the
-    workspace when it has none yet but has something to keep. None when there is nothing."""
-    if current is None:
-        return _beside(new_ws, suffix) if needed else None
-    if old_ws is not None and Path(current) == _beside(old_ws, suffix):
-        return _beside(new_ws, suffix)
-    return current
-
-
 def _beside(ws_path: Path, suffix: str) -> Path:
     """bench.rdtw -> bench.watch.toml, next to it."""
     return ws_path.with_name(ws_path.stem + suffix)
@@ -693,17 +681,6 @@ def _write_atomic(path: Path, write: Callable[[Path], None]) -> None:
     tmp = path.with_name(path.name + ".tmp")
     write(tmp)
     os.replace(tmp, path)
-
-
-def _as_toml(current: Path | None, ws_path: Path | None) -> Path | None:
-    """The commands file a workspace saves to: an old CSV one (bench.commands.csv) becomes the
-    TOML file of the same name (bench.commands.toml); the CSV file is left as it is."""
-    if current is None or Path(current).suffix.lower() == ".toml":
-        return current
-    current = Path(current)
-    if current.name.lower().endswith(OLD_COMMANDS_SUFFIX):
-        return current.with_name(current.name[:-len(OLD_COMMANDS_SUFFIX)] + COMMANDS_SUFFIX)
-    return current.with_suffix(".toml")
 
 
 def write_commands_file(path: str | Path, commands: list[SavedCommand]) -> None:
@@ -839,3 +816,13 @@ def _profile_dict(p: Profile) -> dict:
         if v != getattr(default, f.name) or f.name == "name":
             d[f.name] = "" if v is None else _num(v)
     return d
+
+
+def default_target() -> Path | None:
+    """The target file used when none is given: rdt.toml in the current folder, else rdt.toml in
+    the workspace folder (%LOCALAPPDATA%\\rdt). None when neither exists."""
+    from .ui_settings import workspace_dir
+    for path in (Path("rdt.toml"), workspace_dir() / "rdt.toml"):
+        if path.is_file():
+            return path
+    return None
