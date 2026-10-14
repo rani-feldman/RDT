@@ -193,7 +193,7 @@ Each requirement links to its design section.
 | WSP-1 | A workspace holds the connection, the SCPI profile, the MCUs and their ELFs, the watch tabs with every item's settings, and the chart layout (2026-10-05); since 2026-10-14 the watch tabs, chart and commands are in separate files the workspace names (WSP-4) | Done | [D-WSP-1](#d-wsp-1-workspace-file) |
 | WSP-2 | Workspaces from older versions still open | Done | [D-WSP-2](#d-wsp-2-older-workspaces) |
 | WSP-3 | The last workspace reopens when the GUI starts (2026-10-12) | Done | [D-WSP-3](#d-wsp-3-reopen-last-workspace) |
-| WSP-4 | The settings are split into separate files: the watched variables and watch tabs in one file, the imported commands in another, both opened with the workspace (2026-10-14); the commands file is a TOML file the workspace names, and the `.rdtw` and its files sit together, by default in `%LOCALAPPDATA%\rdt` (2026-10-14) | In review (PR #83) | [D-WSP-4](#d-wsp-4-split-files) |
+| WSP-4 | The settings are split into separate files: the watched variables and watch tabs in one file, the imported commands in another, both opened with the workspace (2026-10-14); the commands file is a TOML file the workspace names, and the `.rdtw` and its files sit together, by default in `%LOCALAPPDATA%\rdt` (2026-10-14) | Done | [D-WSP-4](#d-wsp-4-split-files) |
 | WSP-5 | The interface settings are kept in their own file, per user, not in the workspace (2026-10-14) | Done | [D-WSP-5](#d-wsp-5-interface-settings-file) |
 | WSP-6 | The watch list, the commands and the interface settings can each be imported and exported (2026-10-14) | Done | [D-WSP-6](#d-wsp-6-import-and-export) |
 
