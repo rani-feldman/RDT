@@ -1,0 +1,228 @@
+"""The workspace split into files: watch list, known commands and interface settings, each with
+import and export, from the workspace API and the CLI."""
+
+import io
+import tomllib
+from pathlib import Path
+
+import pytest
+
+from rdt import ConfigError
+from rdt.cli import main
+from rdt.console import SavedCommand
+from rdt.scaling import Display
+from rdt.target import McuConfig, TargetConfig
+from rdt.ui_settings import UiSettings, ui_path
+from rdt.workspace import Tab, Watch, Workspace
+
+ROOT = Path(__file__).resolve().parent.parent
+
+OLD = '''poll_ms = 250
+
+[connection]
+transport = "tcp"
+address = "127.0.0.1:5025"
+
+[[mcu]]
+id = 0
+name = "main"
+
+[[tab]]
+name = "Motor"
+
+  [[tab.watch]]
+  expr = "main:motor.speed"
+  unit = "rpm"
+
+[chart]
+window_s = 10
+
+[[command]]
+command = "MOT:SPE?"
+name = "Speed"
+'''
+
+
+def bench() -> Workspace:
+    return Workspace(TargetConfig(mcus=[McuConfig(0, "main")]),
+                     [Tab("Motor", [Watch("main:motor.speed", Display(unit="rpm"))]), Tab("System")],
+                     chart={"window_s": 10},
+                     commands=[SavedCommand("MOT:SPE?", "Speed")])
+
+
+def test_save_writes_three_files(tmp_path):
+    path = bench().save(tmp_path / "bench.rdtw")
+    raw = tomllib.loads(path.read_text())
+    assert raw["watch_file"] == "bench.watch.toml" and raw["commands_file"] == "bench.commands.csv"
+    assert not {"tab", "watch", "chart", "command"} & set(raw)
+    watch = tomllib.loads((tmp_path / "bench.watch.toml").read_text())
+    assert [t["name"] for t in watch["tab"]] == ["Motor", "System"] and watch["chart"] == {"window_s": 10}
+    assert (tmp_path / "bench.commands.csv").read_text(encoding="utf-8-sig").splitlines()[1] == "MOT:SPE?,Speed,,"
+    back = Workspace.load(path)
+    assert [t.name for t in back.tabs] == ["Motor", "System"] and back.watches[0].display.unit == "rpm"
+    assert back.chart == {"window_s": 10} and back.commands == [SavedCommand("MOT:SPE?", "Speed")]
+    assert back.warnings == []
+
+
+def test_nothing_to_keep_makes_no_files(tmp_path):
+    path = Workspace(TargetConfig(mcus=[McuConfig(0, "main")])).save(tmp_path / "empty.rdtw")
+    assert "_file" not in path.read_text() and sorted(p.name for p in tmp_path.iterdir()) == ["empty.rdtw"]
+
+
+def test_an_old_single_file_workspace_is_split_on_save(tmp_path):
+    path = tmp_path / "old.rdtw"
+    path.write_text(OLD)
+    ws = Workspace.load(path)
+    assert ws.watch_path is None and ws.tabs[0].watches[0].expr == "main:motor.speed" and ws.commands
+    ws.save()
+    text = path.read_text()
+    assert "[[tab" not in text and "[chart]" not in text and "[[command]]" not in text
+    assert (tmp_path / "old.watch.toml").is_file() and (tmp_path / "old.commands.csv").is_file()
+    back = Workspace.load(path)
+    assert back.tabs[0].watches[0].display.unit == "rpm" and back.chart == {"window_s": 10}
+    assert back.commands == [SavedCommand("MOT:SPE?", "Speed")] and back.poll_ms == 250
+
+
+def test_save_as_takes_its_own_files_along(tmp_path):
+    ws = bench()
+    ws.save(tmp_path / "a.rdtw")
+    shared = tmp_path / "shared.csv"
+    ws.commands_path = shared                  # a commands file several workspaces use
+    ws.save()
+    ws.save(tmp_path / "b.rdtw")
+    raw = tomllib.loads((tmp_path / "b.rdtw").read_text())
+    assert raw["watch_file"] == "b.watch.toml"   # named after the workspace: follows its new name
+    assert raw["commands_file"] == "shared.csv"   # named otherwise: stays
+    assert (tmp_path / "a.watch.toml").is_file() and (tmp_path / "b.watch.toml").is_file()
+
+
+def test_files_in_another_folder(tmp_path):
+    (tmp_path / "lists").mkdir()
+    (tmp_path / "lists" / "cmds.csv").write_text("*IDN?\n")
+    (tmp_path / "w.rdtw").write_text('commands_file = "lists/cmds.csv"\n')
+    ws = Workspace.load(tmp_path / "w.rdtw")
+    assert ws.commands == [SavedCommand("*IDN?")]
+    ws.commands.append(SavedCommand("MOT:SPE?"))
+    ws.save()
+    assert "MOT:SPE?" in (tmp_path / "lists" / "cmds.csv").read_text(encoding="utf-8-sig")
+    assert 'commands_file = "lists/cmds.csv"' in (tmp_path / "w.rdtw").read_text()
+
+
+def test_a_missing_file_is_a_warning(tmp_path):
+    (tmp_path / "w.rdtw").write_text('watch_file = "gone.watch.toml"\ncommands_file = "gone.csv"\n')
+    ws = Workspace.load(tmp_path / "w.rdtw")
+    assert ws.tabs == [] and ws.commands == []
+    assert any("gone.watch.toml is missing" in w for w in ws.warnings)
+    assert any("gone.csv is missing" in w for w in ws.warnings)
+
+
+def test_both_places_is_an_error(tmp_path):
+    (tmp_path / "w.rdtw").write_text('watch_file = "w.watch.toml"\n\n[[tab]]\nname = "A"\n')
+    with pytest.raises(ConfigError, match="keep the watch tabs in one place"):
+        Workspace.load(tmp_path / "w.rdtw")
+    (tmp_path / "w.rdtw").write_text('commands_file = "c.csv"\n\n[[command]]\ncommand = "*IDN?"\n')
+    with pytest.raises(ConfigError, match="keep the commands in one place"):
+        Workspace.load(tmp_path / "w.rdtw")
+
+
+def test_watch_list_import_and_export(tmp_path):
+    src = bench()
+    src.tabs[0].watches.append(Watch("main:motor.mode", read_only=True))
+    out = src.export_watches(tmp_path / "motor.watch.toml")
+    assert "connection" not in out.read_text()
+
+    ws = Workspace(tabs=[Tab("Motor", [Watch("main:motor.speed", Display(unit="rad/s"))]), Tab("Mine")],
+                   chart={"window_s": 3})
+    assert ws.import_watches(out) == (1, 1)        # speed is already in Motor: skipped
+    assert [t.name for t in ws.tabs] == ["Motor", "Mine", "System"]
+    assert [w.expr for w in ws.tab("Motor").watches] == ["main:motor.speed", "main:motor.mode"]
+    assert ws.watch("main:motor.speed").display.unit == "rad/s"   # kept its settings here
+    assert ws.chart == {"window_s": 3}             # adding keeps the chart
+
+    assert ws.import_watches(out, replace=True) == (2, 0)
+    assert [t.name for t in ws.tabs] == ["Motor", "System"] and ws.chart == {"window_s": 10}
+
+    old = tmp_path / "old.rdtw"                     # another workspace works too, old or new
+    old.write_text(OLD)
+    ws = Workspace()
+    assert ws.import_watches(old) == (1, 0) and ws.tabs[0].name == "Motor"
+
+    bad = tmp_path / "bad.toml"
+    bad.write_text('[connection]\ntransport = "tcp"\n')
+    with pytest.raises(ConfigError, match="unknown keys connection"):
+        ws.import_watches(bad)
+
+
+def test_commands_import_and_export(tmp_path):
+    ws = bench()
+    out = ws.export_commands(tmp_path / "c.csv")
+    other = Workspace(commands=[SavedCommand("*IDN?")])
+    assert other.import_commands(out) == (1, 0)
+    assert [c.command for c in other.commands] == ["*IDN?", "MOT:SPE?"]
+    assert other.import_commands(out, replace=True) == (1, 0) and len(other.commands) == 1
+
+
+# --- interface settings ---------------------------------------------------------------------
+
+def test_ui_settings_file(tmp_path):
+    assert ui_path() == tmp_path / "ui.toml"       # next to the console history
+    ui = UiSettings.load()
+    assert not ui.exists() and ui.value("console/font_size", 9) == 9
+    ui.set_value("console/font_size", 12)
+    ui.set_value("session/last_workspace", "C:/bench.rdtw")
+    other = UiSettings.load()                       # a second window
+    other.set_value("memory/kind", "float")
+    ui.set_value("console/wrap", True)              # re-reads first: keeps the other window's change
+    back = UiSettings.load()
+    assert back.values == {"console/font_size": 12, "console/wrap": True, "memory/kind": "float",
+                           "session/last_workspace": "C:/bench.rdtw"}
+    text = ui_path().read_text()
+    assert "[console]" in text and "font_size = 12" in text
+
+    exported = back.export(tmp_path / "mine.toml")
+    assert "last_workspace" not in exported.read_text()
+    fresh = UiSettings(tmp_path / "fresh.toml", {"console/font_size": 20, "session/last_workspace": "x.rdtw"})
+    assert fresh.import_file(exported) == ["console/font_size", "console/wrap", "memory/kind"]
+    assert fresh.values["console/font_size"] == 12 and fresh.values["session/last_workspace"] == "x.rdtw"
+
+    bad = tmp_path / "bad.toml"
+    bad.write_text("[console]\nfont_size = \"big\"\n")
+    with pytest.raises(ConfigError, match="font_size must be a whole number"):
+        fresh.import_file(bad)
+    bad.write_text("[session]\nlast_workspace = \"x\"\n")
+    with pytest.raises(ConfigError, match="not an interface setting"):
+        fresh.import_file(bad)
+    ui_path().write_text("not toml [")
+    assert UiSettings.load().values == {}           # a broken file: the defaults
+
+
+# --- CLI ------------------------------------------------------------------------------------
+
+def run(*argv):
+    out = io.StringIO()
+    return main(["--tcp", "127.0.0.1:1", *argv], out=out), out.getvalue()
+
+
+def test_cli_watchlist_and_ui(tmp_path, capsys):
+    a, b = tmp_path / "a.rdtw", tmp_path / "b.rdtw"
+    bench().save(a)
+    Workspace(TargetConfig(mcus=[McuConfig(0, "main")])).save(b)
+    exported = tmp_path / "x.watch.toml"
+    assert run("-w", str(a), "watchlist", "export", str(exported)) == \
+        (0, f"wrote 2 tabs (1 watched items) to {exported}\n")
+    assert run("-w", str(b), "watchlist", "import", str(exported)) == (0, f"imported 1 items; {b} now has 2 tabs\n")
+    assert (tmp_path / "b.watch.toml").is_file()
+    assert run("-w", str(b), "watchlist", "import", str(exported))[1].startswith(
+        "imported 0 items, skipped 1 already in their tab")
+    assert run("-w", str(b), "watchlist", "import", str(exported), "--replace")[0] == 0
+    assert run("-w", str(b), "watchlist", "import", str(tmp_path / "nope.toml"))[0] == 1
+    assert "cannot read watch list" in capsys.readouterr().err
+
+    code, out = run("ui", "show")
+    assert code == 0 and "not made yet" in out and "console/font_size" in out
+    src = tmp_path / "src.toml"
+    src.write_text("[console]\nfont_size = 14\nwrap = true\n")
+    assert run("ui", "import", str(src))[0] == 0
+    assert "console/font_size  14" in run("ui", "show")[1]
+    assert run("ui", "export", str(tmp_path / "back.toml"))[0] == 0
+    assert tomllib.loads((tmp_path / "back.toml").read_text()) == {"console": {"font_size": 14, "wrap": True}}

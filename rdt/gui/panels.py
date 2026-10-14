@@ -3,13 +3,12 @@ profile and the MCU list."""
 
 from __future__ import annotations
 
-import csv
 from collections import deque
 from dataclasses import fields, replace
 from datetime import datetime
 from pathlib import Path
 
-from PySide6.QtCore import QEvent, QObject, QSettings, QStringListModel, Qt, QTimer
+from PySide6.QtCore import QEvent, QObject, QStringListModel, Qt, QTimer
 from PySide6.QtGui import QColor, QFont, QFontDatabase, QKeySequence, QShortcut, QTextCharFormat, QTextCursor
 from PySide6.QtWidgets import (
     QAbstractItemView, QApplication, QCheckBox, QComboBox, QCompleter, QDialog, QDialogButtonBox, QFileDialog, QFormLayout, QHBoxLayout,
@@ -17,8 +16,7 @@ from PySide6.QtWidgets import (
     QSplitter, QTableWidgetItem, QTextEdit, QToolButton, QTreeWidget, QTreeWidgetItem, QVBoxLayout, QWidget,
 )
 
-from ..console import (CommandHistory, SessionLog, completions, hex_to_text, history_path, merge_commands, read_commands,
-                       text_to_hex, write_commands)
+from ..console import CommandHistory, SessionLog, completions, hex_to_text, text_to_hex
 from ..errors import ConfigError, RdtError, WriteRefused
 from ..memfmt import INT_TYPES, MemFormat
 from ..profile import Profile, align_span, parse_int
@@ -216,11 +214,10 @@ class CommandsPanel(QWidget):
                     return False
                 replace = box.clickedButton() is rep
         try:
-            new = read_commands(path)
-        except (OSError, ValueError, csv.Error) as e:
+            added, skipped = self.ws.import_commands(path, replace)
+        except ConfigError as e:
             QMessageBox.warning(self, "Import commands", f"Cannot import {path}: {e}")
             return False
-        self.ws.commands, added, skipped = merge_commands(self.ws.commands, new, replace)
         self.refresh()
         self.console.main.set_dirty()
         self.console.note(f"imported {added} commands from {Path(path).name}"
@@ -233,9 +230,9 @@ class CommandsPanel(QWidget):
             if not path:
                 return False
         try:
-            write_commands(path, self.ws.commands)
-        except OSError as e:
-            QMessageBox.warning(self, "Export commands", f"Cannot write {path}: {e}")
+            self.ws.export_commands(path)
+        except ConfigError as e:
+            QMessageBox.warning(self, "Export commands", str(e))
             return False
         self.console.note(f"exported {len(self.ws.commands)} commands to {Path(path).name}")
         return True
@@ -257,8 +254,7 @@ class Console(QWidget):
         layout = QVBoxLayout(self)
         layout.setContentsMargins(4, 4, 4, 4)
         layout.setSpacing(2)
-        # per-user view settings (CON-11), next to the console history
-        self.settings = QSettings(str(history_path().parent / "console.ini"), QSettings.IniFormat)
+        self.ui = main.ui   # per-user view settings (CON-11), in ui.toml next to the console history
         self.commands = CommandsPanel(self)
         self.commands.hide()
         self.history_panel = HistoryPanel(self)
@@ -317,7 +313,12 @@ class Console(QWidget):
                            ("Ctrl++", lambda: self.zoom(1)), ("Ctrl+-", lambda: self.zoom(-1)),
                            ("Ctrl+0", lambda: self.set_font_size(mono().pointSize()))):
             QShortcut(QKeySequence(keys), self, slot, context=Qt.WidgetWithChildrenShortcut)
-        self.set_font_size(self.settings.value("font_size", mono().pointSize(), type=int))
+        self.apply_settings()
+
+    def apply_settings(self) -> None:
+        """Show the text size and wrapping kept in the interface settings."""
+        self.set_font_size(int(self.ui.value("console/font_size", mono().pointSize())))
+        self.wrap.setChecked(bool(self.ui.value("console/wrap", False)))
         self.set_wrap(self.wrap.isChecked())
 
     def _tool_row(self) -> QHBoxLayout:
@@ -341,7 +342,7 @@ class Console(QWidget):
         self.timestamps.toggled.connect(lambda _on: self.rerender())
         self.wrap = QCheckBox("Wrap")
         self.wrap.setToolTip("Wrap long lines; off, they scroll sideways")
-        self.wrap.setChecked(self.settings.value("wrap", False, type=bool))
+        self.wrap.setChecked(bool(self.ui.value("console/wrap", False)))
         self.wrap.toggled.connect(self.set_wrap)
         self.log_button = QPushButton("Log to file")
         self.log_button.setCheckable(True)
@@ -375,11 +376,11 @@ class Console(QWidget):
             f = w.font()
             f.setPointSize(size)
             w.setFont(f)
-        self.settings.setValue("font_size", size)
+        self.ui.set_value("console/font_size", size)
 
     def set_wrap(self, on: bool) -> None:
         self.output.setLineWrapMode(QPlainTextEdit.WidgetWidth if on else QPlainTextEdit.NoWrap)
-        self.settings.setValue("wrap", on)
+        self.ui.set_value("console/wrap", on)
 
     # --- hex and text ------------------------------------------------------------------------
 
@@ -790,17 +791,21 @@ class MemoryView(QWidget):
         s = self.main.settings()
         try:
             return MemFormat(str(s.value("memory/kind", "unsigned")), str(s.value("memory/type", "Char")),
-                             str(s.value("memory/decimal", "false")).lower() == "true")
+                             bool(s.value("memory/decimal", False)))
         except ValueError:
             return MemFormat()
+
+    def apply_settings(self) -> None:
+        """Show the display format kept in the interface settings."""
+        self.set_format(self._load_format())
 
     def set_format(self, fmt: MemFormat) -> None:
         """Show the cells in another format, and remember it for the next start."""
         self.format = fmt
         s = self.main.settings()
-        s.setValue("memory/kind", fmt.kind)
-        s.setValue("memory/type", fmt.type)
-        s.setValue("memory/decimal", "true" if fmt.decimal else "false")
+        s.set_value("memory/kind", fmt.kind)
+        s.set_value("memory/type", fmt.type)
+        s.set_value("memory/decimal", fmt.decimal)
         self._layout_columns()
         if self.base is not None:
             self._show((self._shown_mcu, self.base, self.data, self.order))
