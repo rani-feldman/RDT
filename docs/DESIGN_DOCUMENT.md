@@ -164,6 +164,7 @@ Each requirement links to its design section.
 | GUI-5 | A memory view: hex and ASCII dump of any range, editable | Done | [D-GUI-5](#d-gui-5-memory-view) |
 | GUI-6 | The GUI never blocks on the device | Done | [D-GUI-6](#d-gui-6-device-worker-thread) |
 | GUI-7 | The memory view offers display formats from a right-click menu: a Decimal toggle; Unsigned and Signed submenus with Char, Int, Short and Long; Ascii, Float and Double. The current choice has a check mark, and hex bytes (unsigned Char in hex) stay the default (2026-10-14) | Done | [D-GUI-7](#d-gui-7-memory-display-formats) |
+| GUI-8 | The memory view's ASCII column follows the chosen display format: each cell's bytes show as one group in the order of the value (2026-10-14) | In review (PR #52) | [D-GUI-7](#d-gui-7-memory-display-formats) |
 
 ### 2.12 Live chart
 
@@ -854,6 +855,7 @@ Right-click the memory view's dump to choose how its cells show memory (GUI-7).
 - **Menu:** a **Decimal** toggle (only for the integer formats), an **Unsigned** and a **Signed** submenu with **Char**, **Int**, **Short** and **Long**, then **Ascii**, **Float** and **Double**. The current choice has a check mark. The default is unsigned Char in hex, the plain hex bytes of D-GUI-5.
 - **Formats:** `MemFormat(kind, type, decimal)` in `rdt/memfmt.py`, which has no Qt so the tests use it directly. Element sizes follow ARM C: Char 1 byte, Short 2, Int 4, Long 4; Ascii 1, Float 4, Double 8. `to_text` shows one cell in the MCU's byte order (D-SCPI-11); integers show in upper-case hex, or in decimal when Decimal is on.
 - **Layout:** `MemoryView` in `rdt/gui/panels.py` shows 16/size cells per row, each headed by its byte offset, plus the ASCII column. A cell only partly inside the bytes read stays blank. The status line names the format, such as `as Signed Short, decimal`.
+- **ASCII column (GUI-8):** follows the chosen format. `MemFormat.to_ascii` gives each cell's bytes as one group in the order of the value, most significant byte first, so they line up with the cell's hex digits: an Unsigned Long cell `30000003` reads `0...`. Groups are separated by a space when cells are wider than a byte, and cells not read stay blank here too. For hex bytes and Ascii the column is the same as before.
 - **Writing:** double-click a cell and type a value in the shown format; a hex `0x` prefix is accepted in decimal too. `from_text` turns it into bytes and refuses text that is not a number or does not fit the type, naming the type's range. The cell is written as one element through `Target.write`, so aligned words and read-modify-write apply as usual (D-SCPI-10), and the write is confirmed by read-back.
 - **Saved:** the choice is kept in `gui.ini` (`memory/kind`, `memory/type`, `memory/decimal`) and comes back at the next start.
 
@@ -1268,6 +1270,7 @@ The application is built against the simulator. As soon as the firmware has the 
 | 2026-10-13 | Read replies are comma-separated 4-byte words in bare hex (`30303030,2F30302F`), decoded in each MCU's byte order; the run-of-bytes reply is removed, at rani's request after connecting to the real target (SCPI-11) |
 | 2026-10-13 | Console: the list of matches opens while typing, and Tab or Enter takes the highlighted command (CON-15); COM ports are listed with their descriptions (LNK-8), at rani's request |
 | 2026-10-14 | The memory view gets right-click display formats: signed and unsigned Char, Short, Int and Long in hex or decimal, Ascii, Float and Double, with hex bytes as the default (GUI-7), at rani's request |
+| 2026-10-14 | The memory view's ASCII column follows the chosen display format, each cell's bytes shown in the order of the value (GUI-8), at rani's request |
 
 ## 9. Appendix: binary protocol (planned)
 
