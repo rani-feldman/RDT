@@ -49,6 +49,7 @@ The read, write and error commands come from the SCPI profile, the same `[scpi]`
 | `SIMulation:MCU:SILent <mcu>,ON\|OFF` | none. Makes a secondary MCU stop answering |
 | `SIMulation:MCU:SILent? <mcu>` | `1` or `0` |
 | `SIMulation:MCU:LIST?` | `0,"main",1,"motorctl"` |
+| `SIMulation:FREEze <seconds>` | none. The whole device answers nothing for that long while the port or socket stays open, like a hung board |
 
 Long and short header forms both work, in any case (`MEMORY:READ?`, `mem:read?`).
 
