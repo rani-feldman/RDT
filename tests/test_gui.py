@@ -758,6 +758,11 @@ def test_elf_identity(qtbot, win, tmp_path, monkeypatch):
     connect(qtbot, win)
     qtbot.waitUntil(lambda: "firmware_name matches" in win.console.output.toPlainText(), timeout=3000)
     assert not win.allow_action.isEnabled()
+    assert "main: ELF matches the firmware; motorctl: ELF not checked" in win.message.text()
+    assert "MCU motorctl: no identity variable or build ID" in win.console.output.toPlainText()
+    win.device.target.mcus["main"].identity_stale = True   # the link came back: checked again by itself
+    qtbot.waitUntil(lambda: win.console.output.toPlainText().count("firmware_name matches") == 2, timeout=3000)
+    assert win.device.target.stale_identities() == []
     elf = tmp_path / "main.elf"
     elf.write_bytes(win.ws.config.mcus[0].elf.read_bytes().replace(b"rdt-main\0", b"rdt-mXin\0"))
     win.ws.config.mcus[0].elf = elf

@@ -24,7 +24,7 @@ Started with no file, `rdt-gui` reopens the workspace you last opened or saved. 
 
 **Target > MCUs and ELF files** sets each MCU's id, name, ELF file, timeout and identity variable. MCU 0 is the main MCU and is required.
 
-**ELF identity.** On connect, RDT compares each MCU's identity variable (a constant that changes with every build, such as a version string; or the GNU build ID when the linker put it in memory) on the device with its ELF file, and notes the result in the console. When they differ, the status bar says so in red and every write to that MCU is refused, so a stale ELF can't write to the wrong address. **Target > Allow writes despite ELF mismatch** lets writes through until the next check. **Target > Check ELF identity** checks again, such as after flashing; it also runs after an ELF is rebuilt.
+**ELF identity.** On connect, RDT compares each MCU's identity variable (a constant that changes with every build, such as a version string; or the GNU build ID when the linker put it in memory) on the device with its ELF file. The status bar says whether the ELF matches, does not match, or was not checked (nothing to compare), and the console has the detail. When they differ, the status bar is red and every write to that MCU is refused, so a stale ELF can't write to the wrong address. **Target > Allow writes despite ELF mismatch** lets writes through until the next check. **Target > Check ELF identity** checks again, such as after flashing while the link stays open; it also runs after an ELF is rebuilt and when the link or an MCU comes back after a drop. How to add a build ID to your firmware: [Use your own ELF](use-your-own-elf.md#check-that-the-device-runs-this-elf).
 
 ## Variable view
 

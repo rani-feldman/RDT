@@ -136,6 +136,7 @@ class Mcu:
         self._failed_stamp: tuple[int, int] | None = None
         self.identity: Identity | None = None     # set by Target.check_identity
         self.allow_mismatch = False               # the user chose to write despite a mismatch
+        self.identity_stale = False               # the link or MCU came back: check again before writing
         self._load()
 
     def _load(self) -> None:
@@ -204,8 +205,11 @@ class Mcu:
 ELF_SETTLE_S = 0.5
 
 
-def _show_bytes(data: bytes) -> str:
-    """Short text for identity bytes: the string when printable, else hex."""
+def _show_bytes(data: bytes, build_id: bool = False) -> str:
+    """Short text for identity bytes: the string when printable, else hex. A GNU build-ID note is
+    shown as its hash, as ``readelf -n`` prints it, since the 16-byte header is the same in every build."""
+    if build_id and len(data) > 16:
+        return data[16:].hex()
     text = data.rstrip(b"\0")
     if text and all(32 <= b < 127 for b in text):
         return repr(text.decode("ascii"))
@@ -248,6 +252,7 @@ class Target:
         self.session = Session(self.transport, self.profile, mcu_timeouts_ms=timeouts, mcu_names=names,
                                byte_order_of=lambda i: by_id[i].byte_order if i in by_id else self.profile.byte_order,
                                auto_reconnect=auto_reconnect)
+        self.session.add_listener(self._link_event)
 
     @classmethod
     def from_file(cls, path: str | Path, **kw) -> Target:
@@ -275,6 +280,27 @@ class Target:
 
     # --- ELF identity (SYM-8) -----------------------------------------------------------------
 
+    def _link_event(self, event: str, info: dict) -> None:
+        """The firmware may have been flashed while the link was down or the MCU was silent (a
+        reset drops a USB COM port), so its identity is checked again before the next write. An
+        MCU with nothing to compare is left alone."""
+        if event == "link" and info["state"] is LinkState.DOWN:
+            gone = list(self.mcus.values())
+        elif event == "mcu" and info["silent"]:
+            gone = [m for m in self.mcus.values() if m.id == info["mcu"]]
+        else:
+            return
+        for m in gone:
+            if m.identity is None or m.identity.status != "unchecked":
+                m.identity_stale = True
+
+    def stale_identities(self) -> list[str]:
+        """MCUs to check again now: the link went down or the MCU went silent since the last
+        check, and it answers again."""
+        if not self.session.is_up:
+            return []
+        return [m.name for m in self.mcus.values() if m.identity_stale and not self.is_silent(m)]
+
     def check_identity(self, mcu: str | Mcu | None = None) -> list[Identity]:
         """Compare each MCU's ELF with the firmware it runs: read the identity bytes from the
         device and from the ELF file. A mismatch makes writes to that MCU refused until
@@ -282,6 +308,7 @@ class Target:
         out = []
         for m in [self.mcu(mcu)] if mcu is not None else self.mcus.values():
             m.identity = self._identity(m)
+            m.identity_stale = m.identity.status == "unread"   # try again when it answers
             m.allow_mismatch = False
             out.append(m.identity)
             if m.identity.status == "mismatch":
@@ -305,8 +332,9 @@ class Target:
             return Identity(m.name, "unread", f"{what} could not be read: {e}")
         if actual == expected:
             return Identity(m.name, "match", f"{what} matches {m.elf.path.name}")
+        bid = not m._cfg.identity
         return Identity(m.name, "mismatch", f"{what} differs from {m.elf.path.name}: "
-                                            f"device {_show_bytes(actual)}, ELF {_show_bytes(expected)}")
+                                            f"device {_show_bytes(actual, bid)}, ELF {_show_bytes(expected, bid)}")
 
     def allow_mismatch(self, mcu: str | Mcu) -> None:
         """Let writes through to an MCU whose ELF does not match, until the next check."""
@@ -359,6 +387,8 @@ class Target:
         """Write raw bytes and confirm them by reading them back."""
         m = self.mcu(mcu)
         self._check(m, addr, len(data), write=True)
+        if m.identity_stale and self.session.is_up:
+            self.check_identity(m)
         if m.identity is not None and m.identity.status == "mismatch" and not m.allow_mismatch:
             raise WriteRefused(f"MCU {m.name}: writes are refused because its ELF does not match the firmware "
                                f"({m.identity.detail}); load the right ELF, or allow writes anyway")
