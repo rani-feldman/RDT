@@ -14,7 +14,7 @@ from datetime import datetime
 from pathlib import Path
 
 from PySide6.QtCore import QSettings, Qt, QTimer
-from PySide6.QtGui import QAction, QColor, QIcon, QKeySequence, QPainter, QPen, QPixmap
+from PySide6.QtGui import QAction, QActionGroup, QColor, QIcon, QKeySequence, QPainter, QPen, QPixmap
 from PySide6.QtWidgets import (
     QAbstractItemView, QApplication, QCheckBox, QComboBox, QDialog, QDialogButtonBox, QDockWidget, QFileDialog, QLabel,
     QLineEdit, QMainWindow, QMessageBox, QPushButton, QSpinBox, QTableWidget, QTableWidgetItem, QToolBar,
@@ -32,6 +32,7 @@ from ..workspace import Workspace, default_target
 from .chart import ChartPanel
 from .device import Device, describe_error
 from .panels import CONSOLE_KEYS, Console, McuDialog, MemoryView, ProfileDialog, mono
+from .style import THEMES, apply_theme, is_dark
 from .variables import SymbolBrowser, WatchTabs, WatchTree
 
 FILTER = "RDT workspace (*.rdtw);;Target file (*.toml);;All files (*)"
@@ -421,6 +422,7 @@ class MainWindow(QMainWindow):
         self.resizeDocks([self.docks["Chart"]], [300], Qt.Vertical)
         self.resizeDocks([self.docks["Variables"]], [250], Qt.Horizontal)
         self._menus()
+        self.set_theme()
         self.message = QLabel()
         self.statusBar().addWidget(self.message, 1)
         self.log_label = QLabel()
@@ -501,6 +503,14 @@ class MainWindow(QMainWindow):
         m.addSeparator()
         stats = action(m, "&Statistics columns", self.watch_tabs.show_stats, "Ctrl+T")
         stats.setCheckable(True)
+        sub = m.addMenu("&Theme")
+        group = QActionGroup(self)
+        self.theme_actions = {}
+        for name, text in THEMES.items():
+            a = action(sub, text, lambda _=False, n=name: self.set_theme(n))
+            a.setCheckable(True)
+            group.addAction(a)
+            self.theme_actions[name] = a
         m = self.menuBar().addMenu("&Help")
         action(m, "&Keyboard shortcuts", self.show_shortcuts, "F1")
 
@@ -599,6 +609,16 @@ class MainWindow(QMainWindow):
             ws.path = None   # a target file opens as a new workspace; don't overwrite it on save
         self.load(ws)
         return True
+
+    def set_theme(self, name: str | None = None) -> None:
+        """Use a theme and remember it in ui.toml; with no name, the one ui.toml has (GUI-14)."""
+        if name is None:
+            name = str(self.ui.value("ui/theme", "system"))
+        elif name != self.ui.value("ui/theme", "system"):
+            self.ui.set_value("ui/theme", name)
+        name = apply_theme(name)
+        self.theme_actions[name].setChecked(True)
+        self.chart.set_dark(is_dark())
 
     def settings(self) -> UiSettings:
         """Per-user interface settings (ui.toml), next to the console history."""
@@ -717,6 +737,7 @@ class MainWindow(QMainWindow):
             return False
         self.console.apply_settings()
         self.memory.apply_settings()
+        self.set_theme()
         self.status(f"Imported the interface settings from {Path(path).name}")
         return True
 

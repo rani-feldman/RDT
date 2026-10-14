@@ -198,11 +198,8 @@ class ChartPanel(QWidget):
         pi.vb.disableAutoRange(axis=pg.ViewBox.XAxis)
         pi.vb.sigResized.connect(self._sync_views)
         pi.vb.sigRangeChangedManually.connect(lambda *_: self.pause_button.setChecked(True))
-        for axis in self.axes:
-            axis.setPen(pg.mkPen("#606060"))
-            axis.setTextPen(pg.mkPen("#404040"))
-        self.plot.getAxis("bottom").setPen(pg.mkPen("#606060"))
-        self.plot.getAxis("bottom").setTextPen(pg.mkPen("#404040"))
+        self.axis_text = "#404040"
+        self.set_dark(False)
         self.cursors = []
         for name, color in (("C1", "#c03030"), ("C2", "#3050c0")):
             line = pg.InfiniteLine(angle=90, movable=True, pen=pg.mkPen(color, width=1, style=Qt.DashLine),
@@ -322,6 +319,16 @@ class ChartPanel(QWidget):
         used = {s.axis for s in self.series.values()}
         return next((a for a in range(1, MAX_AXES + 1) if a not in used), MAX_AXES)
 
+    def set_dark(self, dark: bool) -> None:
+        """Plot colours for the dark or the light theme (GUI-14)."""
+        self.plot.setBackground("#1a1b1e" if dark else "w")
+        line, self.axis_text = ("#80858d", "#c8ccd2") if dark else ("#606060", "#404040")
+        for axis in self.axes + [self.plot.getAxis("bottom")]:
+            axis.setPen(pg.mkPen(line))
+            axis.setTextPen(pg.mkPen(self.axis_text))
+        if hasattr(self, "hint"):   # built: label the axes in the new colour
+            self._update_axes()
+
     def _update_axes(self) -> None:
         for k, axis in enumerate(self.axes, start=1):
             on = [s for s in self.series.values() if s.axis == k]
@@ -329,7 +336,7 @@ class ChartPanel(QWidget):
                 axis.setVisible(bool(on))
             units = sorted({s.unit for s in on if s.unit})
             label = ", ".join(units) if units else (on[0].path if len(on) == 1 else "")
-            axis.setLabel(label, color=on[0].color if on else "#404040")
+            axis.setLabel(label, color=on[0].color if on else self.axis_text)
         self.hint.setVisible(not self.series)
 
     def _window_changed(self) -> None:
