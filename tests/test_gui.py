@@ -182,6 +182,18 @@ def test_console_and_memory(qtbot, win):
     cell.setText("7F")
     qtbot.waitUntil(lambda: mem.data[:1] == b"\x7f", timeout=3000)
 
+    # MEM-1: signed shorts in decimal; columns are 2-byte cells, and a typed value writes 2 bytes
+    from rdt.memfmt import MemFormat
+    mem.set_format(MemFormat("signed", "Short", decimal=True))
+    assert mem.table.columnCount() == 9 and mem.table.horizontalHeaderItem(1).text() == "2"
+    cell = mem.table.item(0, 2)        # gains, as a short
+    assert cell.text() == str(int.from_bytes(mem.data[:2], "little", signed=True))
+    cell.setText("-2")
+    qtbot.waitUntil(lambda: mem.data[:2] == b"\xfe\xff", timeout=3000)
+    mem.set_format(MemFormat("float"))
+    assert mem.table.columnCount() == 5
+    assert mem.main.settings().value("memory/kind") == "float"
+
 
 def test_console_history_and_completion(qtbot, win):
     from PySide6.QtTest import QTest
