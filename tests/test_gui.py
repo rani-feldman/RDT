@@ -192,6 +192,7 @@ def test_console_and_memory(qtbot, win):
     cell.setText("-2")
     qtbot.waitUntil(lambda: mem.data[:2] == b"\xfe\xff", timeout=3000)
     assert mem.table.isColumnHidden(8)               # ASCII column only beside hex bytes
+    assert not mem.table.horizontalHeader().stretchLastSection()   # last value column not stretched
     mem.set_format(MemFormat("float"))
     assert mem.table.columnCount() == 5
     mem.set_format(MemFormat())
