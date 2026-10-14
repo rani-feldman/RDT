@@ -165,6 +165,58 @@ def elf_bytes(path: str | Path, addr: int, size: int) -> bytes | None:
     return None
 
 
+FLASH_SAMPLE_BLOCK = 64     # bytes per sampled block
+FLASH_SAMPLE_SPREAD = 32    # blocks spread evenly over all read-only sections, besides each one's ends
+
+
+def flash_samples(path: str | Path, block: int = FLASH_SAMPLE_BLOCK,
+                  spread: int = FLASH_SAMPLE_SPREAD) -> list[tuple[int, bytes]]:
+    """Blocks of the firmware image to compare with the device: the start and end of every
+    read-only section the ELF holds bytes for (code, constants, the vector table), plus
+    ``spread`` blocks spread evenly over all of them. Returns (address, bytes in the ELF) in
+    address order, overlapping blocks merged, each trimmed to whole 4-byte words."""
+    from elftools.common.exceptions import ELFError
+    from elftools.elf.constants import SH_FLAGS
+    from elftools.elf.elffile import ELFFile
+
+    try:
+        with open(path, "rb") as f:
+            secs = [(sec["sh_addr"], sec.data()) for sec in ELFFile(f).iter_sections()
+                    if sec["sh_flags"] & SH_FLAGS.SHF_ALLOC and not sec["sh_flags"] & SH_FLAGS.SHF_WRITE
+                    and sec["sh_type"] != "SHT_NOBITS" and sec["sh_size"]]
+    except OSError as e:
+        raise ConfigError(f"cannot read ELF {path}: {e.strerror}") from None
+    except ELFError as e:
+        raise ConfigError(f"{path} is not a valid ELF file: {e}") from None
+    total = sum(len(d) for _, d in secs)
+    if not total:
+        return []
+    picks = {i: [0, max(0, len(d) - block)] for i, (_, d) in enumerate(secs)}
+    step = total / spread
+    for k in range(spread):
+        at = int(step * k + step / 2)                       # the middle of each stretch
+        for i, (_, d) in enumerate(secs):
+            if at < len(d):
+                picks[i].append(max(0, min(at - at % 4, len(d) - block)))
+                break
+            at -= len(d)
+    out = []
+    for i, (start, d) in enumerate(secs):
+        spans = []
+        for off in sorted(set(picks[i])):
+            end = min(off + block, len(d))
+            if spans and off <= spans[-1][1]:
+                spans[-1][1] = max(spans[-1][1], end)
+            else:
+                spans.append([off, end])
+        for lo, hi in spans:   # whole aligned words inside the section, so no read reaches a gap after it
+            lo += -(start + lo) % 4
+            hi -= (start + hi) % 4
+            if hi > lo:
+                out.append((start + lo, bytes(d[lo:hi])))
+    return sorted(out)
+
+
 def build_id_note(path: str | Path) -> tuple[int, int] | None:
     """Address and size of the GNU build-ID note, when the linker placed it in the firmware's
     memory (an allocated section); None otherwise."""

@@ -64,9 +64,13 @@ The RDT GUI checks the ELF every second while connected and loads the new one by
 
 ## Check that the device runs this ELF
 
-RDT can tell whether the firmware on the device is the build your ELF came from, and refuses writes when it is not, so a stale ELF can't write to the wrong address. It reads a few bytes from the device and compares them with the same bytes in the ELF file.
+RDT can tell whether the firmware on the device is the build your ELF came from. When it is not, RDT refuses reads and writes to that MCU, so a stale ELF can't read or write the wrong address.
 
-**The GNU build ID (recommended).** The linker computes a SHA-1 hash over the whole linked image, so any change to code or data gives a new one. Nothing to set in RDT; it finds the build ID in the ELF by itself.
+**With no setup: a flash sample (any toolchain, Keil included).** The ELF holds the exact bytes of everything in flash: code, constants and the vector table. On Connect, RDT reads the start and end of each read-only section plus 32 blocks of 64 bytes spread over them (about 4 KB for a large image) and compares them with the ELF. Code and constants shift after almost any rebuild, so an outdated image is caught in practice; a change of a single constant could slip through. Nothing to set in the firmware, the build or RDT.
+
+If the firmware has a build ID or an identity variable (below), RDT compares that instead, which catches every change.
+
+**The GNU build ID (GCC and clang).** The linker computes a SHA-1 hash over the whole linked image, so any change to code or data gives a new one. Nothing to set in RDT; it finds the build ID in the ELF by itself.
 
 1. Link with `-Wl,--build-id`. In STM32CubeIDE: Project > Properties > C/C++ Build > Settings > MCU GCC Linker > Miscellaneous > Other flags.
 2. Keep the build ID in flash. In the linker script (`STM32H7xx_FLASH.ld`), add this section right after `.isr_vector`:
@@ -87,12 +91,12 @@ RDT can tell whether the firmware on the device is the build your ELF came from,
 
 **When RDT checks:**
 
-- On Connect. The status bar says `ELF matches the firmware`, `ELF does NOT match the firmware` (in red), or `ELF not checked` when there is no build ID or identity variable to compare. The console has the detail; a mismatch shows both build IDs, as `readelf -n` prints them.
+- On Connect. The toolbar's image box, next to the connection status, shows `Image ✓ verified` (green), `Image ✗ mismatch` (red), `Image: checking`, `Image ? not read` (the MCU did not answer) or `Image not checked` (nothing to compare); its tooltip has each MCU's result. The status bar and the console say the same, with the detail: the first flash address that differs, or both build IDs.
 - When the link comes back after a drop, such as a reset over a native USB port, and before the next write if the link dropped meanwhile.
 - When the GUI loads a rebuilt ELF.
 - From **Target > Check ELF identity**. Use it after flashing over ST-LINK while the COM port stays open, since then the link never drops and RDT can't tell the firmware changed.
 
-On a mismatch, reads still work and writes are refused until you load the right ELF or choose **Target > Allow writes despite ELF mismatch** (`--allow-mismatch` on the command line).
+On a mismatch, every read and write to that MCU is refused, including polling and the memory view, until you load the matching ELF (or flash the matching firmware) and connect or check again. The GUI has no way around it; on the command line, `--allow-mismatch` lets a single command through. The console still sends commands you type.
 
 ## Other MCUs
 
