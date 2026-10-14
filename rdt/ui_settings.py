@@ -49,6 +49,13 @@ def ui_path() -> Path:
     return history_path().parent / "ui.toml"
 
 
+def workspace_dir() -> Path:
+    """Where workspaces are kept by default: the folder of ui.toml (%LOCALAPPDATA%\\rdt on
+    Windows), so a workspace's .rdtw, .watch.toml and .commands.toml sit beside the user's
+    settings (rani, 2026-10-14)."""
+    return ui_path().parent
+
+
 class UiSettings:
     def __init__(self, path: str | Path | None = None, values: dict | None = None):
         self.path = Path(path) if path is not None else ui_path()
