@@ -240,7 +240,7 @@ MODES = {"watch": "&Watch", "scope": "&Scope", "memory": "&Memory", "console": "
 
 
 class ModeBar(QToolBar):
-    """The mode tabs at the left of the toolbar: Watch, Scope, Memory, Console (GUI-17)."""
+    """The mode tabs at the left of the toolbar: Watch, Scope, Memory, Console (GUI-14)."""
 
     def __init__(self, main):
         super().__init__("Modes")
@@ -412,7 +412,7 @@ class MainWindow(QMainWindow):
         self.watch_tabs.sampled.connect(self.chart.feed)
         self.watch_tabs.sampled.connect(self._log_readings)
         self.watch_tabs.chart_requested.connect(self.add_to_chart)
-        self.chart_pending: set[str] = set()   # dropped on the chart, charted once read (GUI-15)
+        self.chart_pending: set[str] = set()   # dropped on the chart, charted once read (GUI-16)
         self.watch_tabs.sampled.connect(lambda _: self._chart_dropped())
         for w in (self.chart.plot.viewport(), self.chart.list.viewport()):
             DropTarget(w, self.drop_on_chart)
@@ -639,7 +639,7 @@ class MainWindow(QMainWindow):
         self.load(ws)
         return True
 
-    # --- modes (GUI-17) ------------------------------------------------------------------------
+    # --- modes (GUI-14) ------------------------------------------------------------------------
 
     def set_mode(self, name: str, remember: bool = True) -> None:
         """Lay the window out for one job: Watch (watch tabs, cards, chart below), Scope (a large
@@ -707,7 +707,7 @@ class MainWindow(QMainWindow):
             self.resizeDocks([d["Target"], d["Memory"]], [300, max(400, width - 300)], Qt.Horizontal)
 
     def set_theme(self, name: str | None = None) -> None:
-        """Use a theme and remember it in ui.toml; with no name, the one ui.toml has (GUI-14)."""
+        """Use a theme and remember it in ui.toml; with no name, the one ui.toml has (GUI-15)."""
         if name is None:
             name = str(self.ui.value("ui/theme", "system"))
         elif name != self.ui.value("ui/theme", "system"):
@@ -1018,7 +1018,7 @@ class MainWindow(QMainWindow):
 
     def _show_mismatch(self, up: bool) -> None:
         """An ELF that does not match its firmware shows in the error bar (SYM-8); each MCU's
-        result shows on its card (GUI-16)."""
+        result shows on its card (GUI-14)."""
         t = self.device.target
         if not up or t is None:
             self.banner.show_mismatch([])
@@ -1109,7 +1109,7 @@ class MainWindow(QMainWindow):
         self.docks["Memory"].raise_()
 
     def drop_on_chart(self, exprs: list[str]) -> None:
-        """Expressions dragged onto the chart (GUI-15). One not watched yet goes to the tab in
+        """Expressions dragged onto the chart (GUI-16). One not watched yet goes to the tab in
         front first, since the chart plots what the watch tabs read; each is charted after its
         first read, when RDT knows whether it is a number."""
         watched = set(self.watch_tabs.exprs())

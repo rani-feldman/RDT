@@ -1,4 +1,4 @@
-"""Drag and drop of watch expressions (GUI-15): from the variables list or a watch tree onto a
+"""Drag and drop of watch expressions (GUI-16): from the variables list or a watch tree onto a
 watch tab, a tab's title, or the chart."""
 
 from __future__ import annotations

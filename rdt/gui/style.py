@@ -1,4 +1,4 @@
-"""MCU tags (GUI-12), the change highlight (GUI-13) and the light and dark themes (GUI-14): the
+"""MCU tags (GUI-12), the change highlight (GUI-13) and the light and dark themes (GUI-15): the
 coloured short name drawn before a watched item's name, the colour of a value that just changed,
 and the window's colours."""
 
