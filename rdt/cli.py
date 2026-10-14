@@ -14,7 +14,7 @@
     rdt -w bench.rdtw watchlist export motor.watch.toml
     rdt ui export my-ui.toml
 
-Without -t or -w, rdt uses rdt.toml in the current folder when there is one.
+Without -t or -w, rdt uses rdt.toml in the current folder, else rdt.toml in %LOCALAPPDATA%\\rdt.
 Without a target file, give the link and the MCUs on the command line:
 
     rdt --tcp 192.168.1.20:5025 --profile fw.toml --mcu main=0:main.elf --mcu motorctl=1:motorctl.elf info
@@ -40,7 +40,7 @@ from .symbols.types import ArrayType, EnumType, StructType, Type, is_char_array
 from .scaling import FORMATS
 from .target import ConnectionConfig, McuConfig, Target, TargetConfig
 from .ui_settings import SETTINGS, UiSettings
-from .workspace import Reading, Shown, Watch, Workspace
+from .workspace import Reading, Shown, Watch, Workspace, default_target
 
 
 def _int(text: str) -> int:
@@ -71,7 +71,7 @@ def build_parser() -> argparse.ArgumentParser:
     g = ap.add_argument_group("target")
     g.add_argument("-w", "--workspace", "-t", "--target", dest="target", type=Path, metavar="FILE",
                    help="workspace (.rdtw) or target file: connection, profile, MCUs and the watch list "
-                        "(default: rdt.toml in the current folder, if there is one)")
+                        "(default: rdt.toml in the current folder, else in %%LOCALAPPDATA%%\\rdt)")
     link = g.add_mutually_exclusive_group()
     link.add_argument("--tcp", metavar="HOST:PORT", help="connect over LAN TCP")
     link.add_argument("--udp", metavar="HOST:PORT", help="connect over LAN UDP")
@@ -183,10 +183,12 @@ def build_parser() -> argparse.ArgumentParser:
     cmds = p.add_subparsers(dest="commands_cmd", metavar="ACTION", required=True)
     q = cmds.add_parser("list", help="show the list, by group")
     q.add_argument("text", nargs="?", default="", help="only commands, names or descriptions containing this")
-    q = cmds.add_parser("import", help="add commands from a CSV or text file, skipping ones already listed")
+    q = cmds.add_parser("import", help="add commands from a commands file (.toml), a CSV or a text file, "
+                                       "skipping ones already listed")
     q.add_argument("file", type=Path)
     q.add_argument("--replace", action="store_true", help="replace the list instead of adding to it")
-    cmds.add_parser("export", help="write the list to a CSV file").add_argument("file", type=Path)
+    cmds.add_parser("export", help="write the list to a commands file (.toml) or, for any other name, CSV"
+                    ).add_argument("file", type=Path)
     cmds.add_parser("clear", help="empty the list")
 
     p = sub.add_parser("watchlist", help="import or export the workspace's watch tabs and chart (no device needed)")
@@ -205,12 +207,9 @@ def build_parser() -> argparse.ArgumentParser:
     return ap
 
 
-LOCAL_TARGET = Path("rdt.toml")     # used when no -w/-t is given and the current folder has one
-
-
 def load_workspace(args: argparse.Namespace) -> Workspace:
-    if args.target is None and LOCAL_TARGET.is_file():
-        args.target = LOCAL_TARGET
+    if args.target is None:
+        args.target = default_target()
     ws = Workspace.load(args.target) if args.target else Workspace()
     cfg = ws.config
     if args.profile:
@@ -231,7 +230,7 @@ def load_workspace(args: argparse.Namespace) -> Workspace:
     if args.mcu:
         cfg.mcus = [McuConfig(m.id, m.name, m.elf.resolve() if m.elf else None) for m in args.mcu]
     if not cfg.mcus:
-        raise ConfigError("no MCUs: give a workspace (-w), put an rdt.toml in the current folder, "
+        raise ConfigError("no MCUs: give a workspace (-w), put an rdt.toml in the current folder or %LOCALAPPDATA%\\rdt, "
                           "or give --mcu NAME=ID[:ELF], such as --mcu main=0:main.elf")
     return ws
 

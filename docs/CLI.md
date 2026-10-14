@@ -113,7 +113,7 @@ A bit field is written by reading the word that holds it, changing the field and
 `rdt console` sends each line you type as an SCPI command; a query (header ending in `?`) waits for its reply. Lines starting with `.` are RDT's own commands (`.help` lists them).
 
 - **History.** Every SCPI command sent is saved, per user, in `%LOCALAPPDATA%\rdt\console_history.txt` (the last 500; set `RDT_HISTORY_FILE` to use another file). The GUI console shares it. In a terminal, Up and Down walk through it. `.history` lists the last 20 numbered (`.history 50` the last 50), `!N` sends entry N again, and `.history clear` empties it. `rdt history` does the same without a device.
-- **Known commands.** A workspace can hold a list of the device's commands (`[[command]]` tables). `rdt commands import FILE` fills it from a CSV file with the columns `command`, `name`, `group` and `description` (a header row names them in any order; without one they are taken in that order; commas, semicolons or tabs separate them), or from a text file with one command per line; lines starting with `#` are skipped. Commands already listed (ignoring case) are skipped, and `--replace` replaces the list. `rdt commands export FILE` writes it as CSV, `rdt commands list [TEXT]` shows it by group, and in the console `.commands [TEXT]` does the same.
+- **Known commands.** A workspace can hold a list of the device's commands (`[[command]]` tables). `rdt commands import FILE` fills it from a commands file (`.toml`, as a workspace saves them), a CSV file with the columns `command`, `name`, `group` and `description` (a header row names them in any order; without one they are taken in that order; commas, semicolons or tabs separate them), or from a text file with one command per line; lines starting with `#` are skipped. Commands already listed (ignoring case) are skipped, and `--replace` replaces the list. `rdt commands export FILE` writes it as a commands file when FILE ends in `.toml`, otherwise as CSV, `rdt commands list [TEXT]` shows it by group, and in the console `.commands [TEXT]` does the same.
 - **`.info`** shows what `rdt info` shows, **`.reconnect`** closes the link and opens it again (after a board reset, for example), and **`.break`** sends a 250 ms break on a COM port link.
 - **Tab completion.** Tab completes the line from the history, the imported known commands and the console's own `.` commands; pressed twice it lists the choices. This needs line editing: on Windows RDT installs `pyreadline3` for it.
 - **`--timestamps`** starts every line with the time to the millisecond, and echoes each command as `> COMMAND` so it has a time too.
@@ -174,7 +174,7 @@ A target file is also a workspace with no watch tabs; see [Workspace](#workspace
 
 ### Default files
 
-Without `-t` or `-w`, `rdt` uses `rdt.toml` from the current folder when there is one, so with your own bench in it, `rdt info` and `rdt read main:motor` need no options. Command-line options still override it. It can be a target file or a workspace; `add`, `remove` and `tab` save their changes into it, as for any workspace. `rdt-gui` opens it too when there is no last workspace to reopen. To start one for an STM32H7, from the repository root:
+Without `-t` or `-w`, `rdt` uses `rdt.toml` from the current folder when there is one, else `rdt.toml` from the workspace folder (`%LOCALAPPDATA%\rdt`, beside `ui.toml`), so with your own bench in it, `rdt info` and `rdt read main:motor` need no options. Command-line options still override it. It can be a target file or a workspace; `add`, `remove` and `tab` save their changes into it, as for any workspace. `rdt-gui` opens it too when there is no last workspace to reopen. To start one for an STM32H7, from the repository root:
 
 ```
 copy examples\stm32h7_interface.rdtw rdt.toml
@@ -184,7 +184,7 @@ and change `profile` to `"sim/examples/default_profile.toml"` (paths are relativ
 
 ## Workspace
 
-A workspace (`.rdtw`) is a target file plus everything set up on top of it: the watch tabs, each a named watch list, with each item's format, scaling, polling and write safety, the chart layout, and the device's known commands. The tabs and chart are kept in a watch list file and the commands in a CSV file, both named by the `.rdtw` (see [Files of a workspace](#files-of-a-workspace)). Give it with `-w` (`-t` is the same option). [`examples/sim_bench.rdtw`](../examples/sim_bench.rdtw) is one for the simulator, with the tabs `Motor` and `System`:
+A workspace (`.rdtw`) is a target file plus everything set up on top of it: the watch tabs, each a named watch list, with each item's format, scaling, polling and write safety, the chart layout, and the device's known commands. The tabs and chart are kept in a watch list file and the commands in a commands file, both named by the `.rdtw` (see [Files of a workspace](#files-of-a-workspace)). Give it with `-w` (`-t` is the same option). [`examples/sim_bench.rdtw`](../examples/sim_bench.rdtw) is one for the simulator, with the tabs `Motor` and `System`:
 
 ```
 rdt -w examples/sim_bench.rdtw read                 # every watched item, scaled
@@ -201,7 +201,7 @@ Start one from a target file or command-line options with `rdt init bench.rdtw`,
 profile = "fw_profile.toml"   # or an inline [scpi] table, as in a target file
 poll_ms = 500                 # global polling interval; 0 turns polling off
 watch_file    = "bench.watch.toml"     # the watch tabs and chart
-commands_file = "bench.commands.csv"   # the known commands
+commands_file = "bench.commands.toml"  # the known commands
 
 [connection]                  # and [[mcu]] tables: the same as a target file
 ...
@@ -234,10 +234,13 @@ name = "Overview"
 [chart]                       # the GUI's chart layout; kept as written
 ```
 
-```
-# bench.commands.csv: the device's known commands, for the console's list
-command,name,group,description
-MOTor:SPEed?,Speed,Motor,Motor speed in rpm
+```toml
+# bench.commands.toml: the device's known commands, for the console's list
+[[command]]
+command     = "MOTor:SPEed?"
+name        = "Speed"         # name, group and description are optional
+group       = "Motor"
+description = "Motor speed in rpm"
 ```
 
 Every key in a `[[tab.watch]]` but `expr` is optional, and so are a command's name, group and description.
@@ -250,9 +253,9 @@ A workspace is three files, next to each other and named after it:
 | --- | --- | --- |
 | `bench.rdtw` | Connection, SCPI profile, MCUs and ELF files, `poll_ms`, `read_only`, and the names of the other two | TOML |
 | `bench.watch.toml` | The watch tabs (`[[tab]]`, `[[tab.watch]]`) and the chart layout (`[chart]`) | TOML |
-| `bench.commands.csv` | The known commands: `command,name,group,description` | CSV, UTF-8, opens in Excel |
+| `bench.commands.toml` | The known commands: one `[[command]]` table each, with `command`, `name`, `group`, `description` | TOML |
 
-Opening the `.rdtw` loads all of them. A file is made only once there is something to keep in it. Saving under a new name (`Save as`) takes the files named after the workspace along to the new name; a file named otherwise, such as a commands list several workspaces share (`commands_file = "../gac_commands.csv"`), stays where it is and both workspaces use it. A file the workspace names but that is missing gives a warning and an empty list, and is made again on the next save.
+Opening the `.rdtw` loads all of them. A file is made only once there is something to keep in it. The `.rdtw` and its files always sit in one folder: saving writes `bench.watch.toml` and `bench.commands.toml` beside the `.rdtw`, named after it, and Save as writes them under the new name. A workspace that names a file elsewhere (`commands_file = "../gac_commands.toml"`) still opens with it; the next save writes that list beside the `.rdtw` and leaves the other file as it was. Workspaces are kept by default in `%LOCALAPPDATA%\rdt`, the folder of `ui.toml`; the GUI's Open and Save dialogs start there. A file the workspace names but that is missing gives a warning and an empty list, and is made again on the next save. A workspace whose commands are in a CSV file (`bench.commands.csv`, as the first version of the split saved them) still opens; the next save writes them to `bench.commands.toml` and points the `.rdtw` at it, leaving the CSV file as it was.
 
 Each part can also be moved between workspaces:
 
@@ -260,8 +263,8 @@ Each part can also be moved between workspaces:
 rdt -w bench.rdtw watchlist export motor.watch.toml     # the tabs and chart
 rdt -w other.rdtw watchlist import motor.watch.toml     # adds its tabs; --replace replaces them
 rdt -w other.rdtw watchlist import bench.rdtw           # another workspace works too
-rdt -w bench.rdtw commands export gac.csv
-rdt -w other.rdtw commands import gac.csv
+rdt -w bench.rdtw commands export gac.toml              # or gac.csv, to open in Excel
+rdt -w other.rdtw commands import gac.toml              # .toml, .csv or a text list
 rdt ui export my-ui.toml                                 # the GUI's look, per user
 rdt ui import my-ui.toml
 ```

@@ -156,8 +156,10 @@ class CommandsPanel(QWidget):
         layout.addWidget(self.tree, 1)
         row = QHBoxLayout()
         # Lambdas, so the button's checked flag is not passed on as the file path.
-        for text, tip, slot in (("Import...", "Add commands from a CSV or text file", lambda: self.import_file()),
-                                ("Export...", "Write the list to a CSV file", lambda: self.export_file()),
+        for text, tip, slot in (("Import...", "Add commands from a commands file (.toml), a CSV file or a text file",
+                                 lambda: self.import_file()),
+                                ("Export...", "Write the list to a commands file (.toml) or a CSV file",
+                                 lambda: self.export_file()),
                                 ("Clear", "Empty the list", lambda: self.clear())):
             b = QPushButton(text, toolTip=tip)
             b.clicked.connect(slot)
@@ -197,7 +199,7 @@ class CommandsPanel(QWidget):
     def import_file(self, path: str | Path | None = None, replace: bool | None = None) -> bool:
         if path is None:
             path, _ = QFileDialog.getOpenFileName(self, "Import commands", "",
-                                                  "Command lists (*.csv *.txt);;All files (*)")
+                                                  "Command lists (*.toml *.csv *.txt);;All files (*)")
             if not path:
                 return False
         if replace is None:
@@ -226,7 +228,8 @@ class CommandsPanel(QWidget):
 
     def export_file(self, path: str | Path | None = None) -> bool:
         if path is None:
-            path, _ = QFileDialog.getSaveFileName(self, "Export commands", "commands.csv", "CSV files (*.csv)")
+            path, _ = QFileDialog.getSaveFileName(self, "Export commands", "commands.toml",
+                                                  "Commands file (*.toml);;CSV files (*.csv)")
             if not path:
                 return False
         try:
