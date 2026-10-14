@@ -193,7 +193,7 @@ Each requirement links to its design section.
 | WSP-1 | A workspace holds the connection, the SCPI profile, the MCUs and their ELFs, the watch tabs with every item's settings, and the chart layout (2026-10-05); since 2026-10-14 the watch tabs, chart and commands are in separate files the workspace names (WSP-4) | Done | [D-WSP-1](#d-wsp-1-workspace-file) |
 | WSP-2 | Workspaces from older versions still open | Done | [D-WSP-2](#d-wsp-2-older-workspaces) |
 | WSP-3 | The last workspace reopens when the GUI starts (2026-10-12) | Done | [D-WSP-3](#d-wsp-3-reopen-last-workspace) |
-| WSP-4 | The settings are split into separate files: the watched variables and watch tabs in one file, the imported commands in another, both opened with the workspace (2026-10-14); the commands file is a TOML file the workspace names (2026-10-14) | In review (PR #83) | [D-WSP-4](#d-wsp-4-split-files) |
+| WSP-4 | The settings are split into separate files: the watched variables and watch tabs in one file, the imported commands in another, both opened with the workspace (2026-10-14); the commands file is a TOML file the workspace names, and the `.rdtw` and its files sit together, by default in `%LOCALAPPDATA%\rdt` (2026-10-14) | In review (PR #83) | [D-WSP-4](#d-wsp-4-split-files) |
 | WSP-5 | The interface settings are kept in their own file, per user, not in the workspace (2026-10-14) | Done | [D-WSP-5](#d-wsp-5-interface-settings-file) |
 | WSP-6 | The watch list, the commands and the interface settings can each be imported and exported (2026-10-14) | Done | [D-WSP-6](#d-wsp-6-import-and-export) |
 
@@ -1024,7 +1024,7 @@ Every key in a `[[tab.watch]]` except `expr` is optional. Saving rewrites the fi
 
 #### D-WSP-3 Reopen last workspace
 
-The GUI remembers the last workspace file it opened or saved, as `session/last_workspace` in `ui.toml` next to the console history (`%LOCALAPPDATA%\rdt` on Windows, D-WSP-5), and opens it when `rdt-gui` starts with no file named. A file given on the command line wins. If the remembered file is gone, the GUI starts with a new workspace and says so in the status bar. A target file (`.toml`) opened as a new workspace is not remembered, since it is not a workspace. Code: `MainWindow.remember()` and `reopen_last()` in `rdt/gui/app.py`.
+The GUI remembers the last workspace file it opened or saved, as `session/last_workspace` in `ui.toml` next to the console history (`%LOCALAPPDATA%\rdt` on Windows, D-WSP-5), and opens it when `rdt-gui` starts with no file named. A file given on the command line wins. If the remembered file is gone, the GUI opens the default target (D-WSP-4) if there is one, else starts with a new workspace, and says so in the status bar. A target file (`.toml`) opened as a new workspace is not remembered, since it is not a workspace. Code: `MainWindow.remember()` and `reopen_last()` in `rdt/gui/app.py`.
 
 #### D-WSP-4 Split files
 
@@ -1034,7 +1034,10 @@ rani asked on 2026-10-14 for the imported commands, the watched variables and wa
 - **`bench.watch.toml`:** the `[[tab]]` and `[[tab.watch]]` tables and `[chart]` (`read_watch_file` and `write_watch_file` in `rdt/workspace.py`).
 - **`bench.commands.toml`:** the known commands, one `[[command]]` table each with `command`, `name`, `group` and `description` (`write_commands_file` in `rdt/workspace.py`). rani asked on 2026-10-14 for it to be a TOML file the `.rdtw` points to, like the watch list; it was a CSV file at first (D-WSP-2).
 
-Opening the `.rdtw` loads all three (`Workspace.watch_path`, `Workspace.commands_path`). A file is only made once it has something in it. If a named file is missing, the workspace still opens with a warning and that list is empty. Naming a file and also having the same tables inline is a `ConfigError`. Save As takes the files named after the workspace along to the new name (`bench.watch.toml` becomes `new.watch.toml`); a file with any other name, such as a commands file shared between workspaces, stays where it is and keeps being used. Example: [`examples/sim_bench.rdtw`](../examples/sim_bench.rdtw) with `sim_bench.watch.toml`.
+Opening the `.rdtw` loads all three (`Workspace.watch_path`, `Workspace.commands_path`). A file is only made once it has something in it. If a named file is missing, the workspace still opens with a warning and that list is empty. Naming a file and also having the same tables inline is a `ConfigError`. The files are always saved beside the `.rdtw`, named after it (`_beside` in `rdt/workspace.py`), and Save As writes them under the new name (`bench.watch.toml` becomes `new.watch.toml`). A workspace that names a file in another folder (`commands_file = "../gac_commands.toml"`) still loads it; the next save writes the list beside the `.rdtw`, points the `.rdtw` at it and leaves the other file alone. rani asked on 2026-10-14 for the `.rdtw` and its `.toml` files all to be in one place, `%LOCALAPPDATA%\rdt`. This replaces the first version, where a file named otherwise stayed where it was.
+
+- **Default folder:** the GUI's Open and Save as dialogs start in `%LOCALAPPDATA%\rdt`, the folder of `ui.toml` (`workspace_dir` in `rdt/ui_settings.py`).
+- **Default target:** with no `-t` or `-w`, `rdt` and `rdt-gui` use `./rdt.toml`, else `%LOCALAPPDATA%\rdt\rdt.toml` (`default_target` in `rdt/workspace.py`); `rdt-gui` falls back to it when there is no last workspace to reopen (D-WSP-3). Example: [`examples/sim_bench.rdtw`](../examples/sim_bench.rdtw) with `sim_bench.watch.toml`.
 
 #### D-WSP-5 Interface settings file
 
@@ -1360,6 +1363,7 @@ The application is built against the simulator. As soon as the firmware has the 
 | 2026-10-14 | The link shows as down when the port or socket breaks (checked every second, with no bytes sent) or when the device answers none of 3 reads in a row, so the status box no longer stays green after the connection is lost (LNK-9). Reported by rani; the behaviour is the thread's default, not yet confirmed by rani |
 | 2026-10-14 | The status box and the Connect / Disconnect button become one button showing the link state; a click connects, disconnects or cancels, and disconnected shows blue instead of grey `Closed` (GUI-11). rani picked this from mockups |
 | 2026-10-14 | The known commands are kept in a TOML file the `.rdtw` names (`bench.commands.toml`, `[[command]]` tables) instead of CSV; an old CSV commands file still loads and becomes TOML on the next save; export writes TOML by default, CSV on request (WSP-4, D-CON-7), at rani's request |
+| 2026-10-14 | A workspace's `.watch.toml` and `.commands.toml` are always saved beside its `.rdtw`; workspaces live by default in `%LOCALAPPDATA%\rdt` (Open and Save as start there), and the default target is `./rdt.toml`, else `%LOCALAPPDATA%\rdt\rdt.toml` (WSP-4), at rani's request |
 
 ## 9. Appendix: binary protocol (planned)
 
