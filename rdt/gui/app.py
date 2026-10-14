@@ -18,7 +18,7 @@ from PySide6.QtGui import QAction, QColor, QIcon, QKeySequence, QPainter, QPen, 
 from PySide6.QtWidgets import (
     QAbstractItemView, QApplication, QCheckBox, QComboBox, QDialog, QDialogButtonBox, QDockWidget, QFileDialog, QLabel,
     QLineEdit, QMainWindow, QMessageBox, QPushButton, QSpinBox, QTableWidget, QTableWidgetItem, QToolBar,
-    QVBoxLayout,
+    QHBoxLayout, QSizePolicy, QVBoxLayout, QWidget,
 )
 
 from ..console import history_path
@@ -198,6 +198,59 @@ class ConnectionBar(QToolBar):
 
 
 # The connection status box: text, border and background for each link state.
+class MismatchBanner(QToolBar):
+    """A large red banner across the top of the window while an MCU's ELF does not match its
+    firmware (SYM-8), so the refused reads and writes can't go unnoticed. It can't be moved or
+    hidden by the user; it goes away once every MCU matches again."""
+
+    def __init__(self, main):
+        super().__init__("ELF check")
+        self.setObjectName("mismatch_banner")
+        self.setMovable(False)
+        self.setFloatable(False)
+        self.toggleViewAction().setVisible(False)       # not in the toolbar context menu
+        box = QWidget()
+        box.setObjectName("banner")
+        box.setStyleSheet("#banner { background: #b3261e; border-radius: 4px; }"
+                          "QLabel { color: white; background: transparent; }"
+                          "QPushButton { color: #b3261e; background: white; border: none; border-radius: 4px;"
+                          " padding: 6px 14px; font-weight: bold; }")
+        lay = QHBoxLayout(box)
+        lay.setContentsMargins(14, 10, 14, 10)
+        text = QVBoxLayout()
+        self.title = QLabel()
+        font = self.title.font()
+        font.setPointSizeF(font.pointSizeF() * 1.6)
+        font.setBold(True)
+        self.title.setFont(font)
+        self.detail = QLabel()
+        self.detail.setWordWrap(True)
+        text.addWidget(self.title)
+        text.addWidget(self.detail)
+        lay.addLayout(text, 1)
+        self.load_button = QPushButton("Load ELF...")
+        self.load_button.setToolTip("Choose the ELF file that matches the firmware on the device")
+        self.load_button.clicked.connect(main.edit_mcus)
+        self.check_button = QPushButton("Check again")
+        self.check_button.setToolTip("Compare the ELF with the device again, such as after flashing")
+        self.check_button.clicked.connect(lambda: main.check_identity())
+        lay.addWidget(self.load_button)
+        lay.addWidget(self.check_button)
+        self.addWidget(box)
+        box.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
+        self.setVisible(False)
+
+    def show_mismatch(self, results) -> None:
+        """Show the banner for the MCUs whose ELF does not match, or hide it when none."""
+        bad = [r for r in results if r.status == "mismatch"]
+        if bad:
+            names = ", ".join(r.mcu for r in bad)
+            self.title.setText(f"\u26a0  ELF does not match the firmware on {names}")
+            self.detail.setText("Reads and writes to it are refused. Load the matching ELF, or flash the "
+                                "matching image and check again.\n" + "\n".join(r.detail for r in bad))
+        self.setVisible(bool(bad))
+
+
 STATE_COLORS = {
     "up": ("#3ccf7a", "#1f7a46", "#0d1f15"),
     "busy": ("#e0a030", "#8a6418", "#211a0c"),
@@ -287,6 +340,9 @@ class MainWindow(QMainWindow):
         self.memory = MemoryView(self)
         self.bar = ConnectionBar(self)
         self.addToolBar(self.bar)
+        self.addToolBarBreak()
+        self.banner = MismatchBanner(self)
+        self.addToolBar(self.banner)
         self.docks = {}
         for title, widget, area in (("Variables", self.symbols, Qt.LeftDockWidgetArea),
                                     ("Chart", self.chart, Qt.BottomDockWidgetArea),
@@ -698,8 +754,10 @@ class MainWindow(QMainWindow):
         shown = up and t is not None
         self.bar._image.setVisible(shown)
         if not shown:
+            self.banner.show_mismatch([])
             return
         results = [m.identity for m in t.mcus.values() if m.identity is not None]
+        self.banner.show_mismatch(results)
         checking = self.device.busy("identity") or bool(t.stale_identities())
         key = image_state(results, checking)
         if any(r.status == "mismatch" and id(r) not in self._shown_identities for r in results):
