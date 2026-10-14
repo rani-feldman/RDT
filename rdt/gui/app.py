@@ -967,6 +967,8 @@ class MainWindow(QMainWindow):
         if dlg.exec() != QDialog.Accepted:
             return
         self.ws.config.mcus = dlg.result_mcus()
+        for tree in self.watch_tabs.trees:
+            tree.retag()
         self.symbols.set_workspace(self.ws)
         self.memory.set_workspace(self.ws)
         self.set_dirty()

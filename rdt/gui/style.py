@@ -1,0 +1,92 @@
+"""MCU tags (GUI-12) and the change highlight (GUI-13): the coloured short name drawn before a
+watched item's name, and the colour of a value that just changed."""
+
+from __future__ import annotations
+
+from PySide6.QtCore import QRectF, Qt
+from PySide6.QtGui import QColor, QFont, QPainter
+from PySide6.QtWidgets import QApplication, QStyle, QStyledItemDelegate
+
+from ..target import McuConfig, mcu_color, mcu_short
+
+TAG_ROLE = Qt.UserRole + 1      # (short name, colour) on a row that shows its MCU as a tag
+FLASH_S = 1.0                   # how long a changed value stays highlighted
+
+
+def split_expr(expr: str) -> tuple[str, str]:
+    """``Control_CM7:motor.speed`` is ("Control_CM7", "motor.speed"); ``@m:0x20000000:u32`` is
+    ("m", "0x20000000:u32"). Without an MCU, the MCU is ""."""
+    mcu, sep, rest = expr.lstrip("@").partition(":")
+    return (mcu, rest) if sep and mcu and rest else ("", expr)
+
+
+def mcu_tag(mcus: list[McuConfig], name: str) -> tuple[str, str] | None:
+    for m in mcus:
+        if m.name == name:
+            return mcu_short(m), mcu_color(m)
+    return None
+
+
+def is_dark() -> bool:
+    return QApplication.palette().base().color().lightness() < 128
+
+
+def flash_color() -> QColor:
+    return QColor("#5a4c12") if is_dark() else QColor("#fff1a8")
+
+
+class TagDelegate(QStyledItemDelegate):
+    """Draws a row's MCU tag, a rounded pill with the short name, before its text."""
+
+    PAD = 4
+
+    def paint(self, p: QPainter, opt, idx) -> None:
+        tag = idx.data(TAG_ROLE)
+        if not tag:
+            super().paint(p, opt, idx)
+            return
+        short, color = tag
+        font = QFont(opt.font)
+        font.setPointSizeF(max(6.0, font.pointSizeF() * 0.8))
+        font.setBold(True)
+        width = self._tag_width(font, short)
+        self.initStyleOption(opt, idx)
+        text = opt.text
+        opt.text = ""
+        style = opt.widget.style() if opt.widget else QApplication.style()
+        style.drawControl(QStyle.CE_ItemViewItem, opt, p, opt.widget)   # background and selection only
+        r = opt.rect
+        p.save()
+        p.setRenderHint(QPainter.Antialiasing)
+        pill = QRectF(r.left() + 2, r.top() + 3, width - 2, max(8, r.height() - 6))
+        p.setPen(Qt.NoPen)
+        p.setBrush(QColor(color))
+        p.drawRoundedRect(pill, 4, 4)
+        p.setFont(font)
+        p.setPen(QColor("white"))
+        p.drawText(pill, Qt.AlignCenter, short)
+        p.setFont(opt.font)
+        selected = opt.state & QStyle.State_Selected
+        fg = opt.palette.highlightedText().color() if selected else opt.palette.text().color()
+        brush = idx.data(Qt.ForegroundRole)
+        if brush is not None and not selected:
+            fg = brush.color()
+        p.setPen(fg)
+        rest = r.adjusted(width + self.PAD, 0, -2, 0)
+        p.drawText(rest, Qt.AlignVCenter | Qt.AlignLeft, opt.fontMetrics.elidedText(text, Qt.ElideRight, rest.width()))
+        p.restore()
+
+    def sizeHint(self, opt, idx):
+        size = super().sizeHint(opt, idx)
+        tag = idx.data(TAG_ROLE)
+        if tag:
+            font = QFont(opt.font)
+            font.setPointSizeF(max(6.0, font.pointSizeF() * 0.8))
+            font.setBold(True)
+            size.setWidth(size.width() + self._tag_width(font, tag[0]) + self.PAD)
+        return size
+
+    @staticmethod
+    def _tag_width(font: QFont, text: str) -> int:
+        from PySide6.QtGui import QFontMetrics
+        return QFontMetrics(font).horizontalAdvance(text) + 12

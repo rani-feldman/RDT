@@ -144,6 +144,8 @@ id   = 0                          # MCU 0 is the main MCU, which owns the link
 name = "main"
 elf  = "build/main.elf"
 identity = "firmware_version"     # optional: a constant that changes with every build, checked on connect
+short = "MAIN"                    # optional: the GUI's tag for this MCU, 1 to 6 letters or digits
+color = "#7b61d6"                 # optional: the tag's colour
 
   [[mcu.ranges]]                  # memory with no ELF section behind it, such as peripherals
   name     = "GPIOA"

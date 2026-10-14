@@ -265,6 +265,10 @@ class Workspace:
                 md["timeout_ms"] = _num(m.timeout_ms)
             if m.identity:
                 md["identity"] = m.identity
+            if m.short:
+                md["short"] = m.short
+            if m.color:
+                md["color"] = m.color
             if m.byte_order:
                 md["byte_order"] = m.byte_order
             if m.ranges:
