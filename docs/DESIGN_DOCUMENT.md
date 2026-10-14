@@ -59,8 +59,9 @@ Each requirement links to its design section.
 | LNK-4 | More channels can be added later as plug-in transports, with nothing above the transport changing | Done | [D-LNK-4](#d-lnk-4-plug-in-transports) |
 | LNK-5 | On link loss RDT reconnects on its own; values grey out and writes are refused while the link is down (2026-10-05) | Done | [D-LNK-5](#d-lnk-5-auto-reconnect) |
 | LNK-6 | Other tools may use the firmware's SCPI port over LAN at the same time as RDT (2026-10-05) | Done | [D-LNK-6](#d-lnk-6-sharing-the-link-with-other-tools) |
-| LNK-7 | Connected means the COM port or socket opened; RDT sends nothing to the device on connect or reconnect (no `*IDN?`), and the link goes down only when the port or socket breaks (2026-10-14) | Done | [D-LNK-7](#d-lnk-7-connect-without-a-probe) |
+| LNK-7 | Connected means the COM port or socket opened; RDT sends nothing to the device on connect or reconnect (no `*IDN?`) and sends no probe; when the link shows as down is LNK-9 (2026-10-14) | Done | [D-LNK-7](#d-lnk-7-connect-without-a-probe) |
 | LNK-8 | The GUI lists each COM port with its description, such as `COM3 - GAC serial port (COM3)` (2026-10-13) | Done | [D-LNK-1](#d-lnk-1-com-port) |
+| LNK-9 | The link shows as down (red `Link down · COM3`) when the port or socket breaks, noticed within a second even with polling off, or when the device answers none of 3 reads in a row from any MCU while the port stays open ("no reply"). While the link is down the image box is hidden and writes are refused, and the ELFs are checked again when it comes back (2026-10-14; the default chosen in the thread "Status box on lost connection", not yet confirmed by rani) | In review (PR #78) | [D-LNK-9](#d-lnk-9-noticing-a-lost-link) |
 
 ### 2.3 SCPI commands
 
@@ -358,7 +359,7 @@ Every transport subclasses `Transport` in `rdt/transport/base.py`: `open()`, `cl
 
 #### D-LNK-5 Auto-reconnect
 
-The session (`rdt/session.py`) has three link states: up, down and closed. The link goes down only when the COM port or socket breaks. A device that stops answering gives read timeouts, not link down, over UDP too (D-LNK-7).
+The session (`rdt/session.py`) has four link states: up, down, no reply and closed. The link goes down when the COM port or socket breaks, and is "no reply" when the device answers none of 3 reads in a row while the port stays open (D-LNK-9).
 
 - **While the link is down:** every access fails at once with `LinkDown`, so writes are refused. The GUI shows `link down` in grey with the last values kept, and the CSV log and the chart mark the gap.
 - **Reconnecting:** a background thread reconnects with growing delays of 0.25, 0.5, 1, 2, 4 and then 5 s, until the port or socket opens again (D-LNK-7).
@@ -381,8 +382,19 @@ A simulator test runs a second SCPI client against the device while RDT polls.
 
 rani set this on 2026-10-14: RDT sends nothing to the device to check it. Connect and every reconnect only open the COM port or socket, and the link is up once it is open. Over UDP that means the socket opened, since nothing is received until a command is sent.
 
-- **Link down:** only when the port or socket breaks (D-LNK-5). A device that stops answering gives read timeouts (`CommandTimeout`), and its values show the error, but the link stays up.
+- **Link down:** when the port or socket breaks, or the device stops answering reads (D-LNK-9). Neither check sends anything of its own: the idle check sends no bytes, and the reads that detect "no reply" are the normal poll and user reads.
 - **Removed:** the profile's `probe` key (default `*IDN?`), `Target.idn`, the device identity after "Connected" in the GUI, and the Device line of `rdt info` (RM-8). A profile that still has `probe` loads with it ignored.
+
+#### D-LNK-9 Noticing a lost link
+
+rani reported on 2026-10-14 that the status box stayed green `Connected · COM3` after the connection was lost. The thread "Status box on lost connection" chose this behaviour as the default; rani has not confirmed it yet.
+
+- **Idle check:** `Session._watch_loop` (thread `rdt-linkwatch`) calls `Transport.check()` every `WATCH_S` = 1 s while the session lock is free. Serial reads `in_waiting`, which fails once a USB COM port is unplugged (`ClearCommError` on Windows, `EIO` on Linux). TCP does a non-blocking `recv(1, MSG_PEEK)`, where EOF or a reset means broken. UDP has nothing to check. A failure goes through the usual link-down and auto-reconnect path (D-LNK-5). No bytes are sent.
+- **No reply:** `LinkState.NO_REPLY` in `rdt/session.py`. `_device_unanswered` counts read pieces that got no reply at all (`NO_REPLY_AFTER` = 3), and `_device_answered` resets the count and goes back to up. Reads still go out, since they act as the probe. Writes raise `LinkDown(... write refused)`. The port stays open and nothing reconnects.
+- **GUI:** both cases show the red `Link down` status box (GUI-9), with the tooltip saying which. The image box is hidden while the link is down.
+- **ELF check:** `Target._link_event` marks every identity stale on down and on no reply, so the GUI runs the image check again when the link comes back up (D-SYM-8).
+- **Known limits:** with its port open and polling off, a hung board is noticed only at the next read (Poll now, F6), because RDT sends no probe. Three bad-address reads in a row also count as no reply, because the firmware does not reply on errors (D-SCPI-5).
+- **Simulator:** `Device.frozen` and `SIMulation:FREEze <seconds>` make the simulated board stop answering with the port open ([SIMULATOR.md](SIMULATOR.md)).
 
 ### 4.3 SCPI commands
 
@@ -428,7 +440,7 @@ The firmware sends nothing back when a command fails; the error goes only to the
 
 1. A read that times out is sent again with a growing delay, up to `retries` times, and then fails with `CommandTimeout`.
 2. RDT never sends `SYSTem:ERRor?` on its own: no hint after a timeout or a failed write (rani, 2026-10-14). The queue is shared with other tools (D-LNK-6), so its entries could not be trusted anyway.
-3. A timeout never takes the link down (D-LNK-7).
+3. A single timeout does not take the link down. 3 reads in a row with no reply from any MCU give the "no reply" state (D-LNK-9); a reply from any MCU, a `-240` error reply included, resets the count. Console timeouts don't count, but console replies do.
 
 A `-240` error reply marks a secondary MCU silent (D-MCU-6). In the console, a query with no reply shows `(no reply)`; to see why, type `SYST:ERR?` by hand.
 
@@ -834,7 +846,7 @@ The poll collects what every tab has due, not only the tab in front. Each expres
 
 - **Transport:** `tcp` or `udp` with an IP address and port, or `serial` with a COM port and baud rate.
 - **Profile:** a button that opens the profile editor and shows the profile's name.
-- **Connect / Disconnect** (F5), with a status box before it (GUI-9) that shows `<state> · <link>`, the link being the COM port or IP:port: green `Connected · COM3` with a Disconnect button, grey `Closed · COM3` with a Connect button (blue border, plug icon), red `Link down` while RDT reconnects, and amber `Connecting`. Connected means the port or socket opened (D-LNK-7). The colours are `STATE_COLORS` in `rdt/gui/app.py`.
+- **Connect / Disconnect** (F5), with a status box before it (GUI-9) that shows `<state> · <link>`, the link being the COM port or IP:port: green `Connected · COM3` with a Disconnect button, grey `Closed · COM3` with a Connect button (blue border, plug icon), red `Link down` while RDT reconnects or while the device answers nothing ("no reply", D-LNK-9; the tooltip says which), and amber `Connecting`. Connected means the port or socket opened (D-LNK-7). The colours are `STATE_COLORS` in `rdt/gui/app.py`.
 - **Poll:** the global interval (D-POLL-1).
 - **Log CSV** (Ctrl+L): starts and stops the CSV log (D-CSV-1).
 
@@ -1335,6 +1347,7 @@ The application is built against the simulator. As soon as the firmware has the 
 | 2026-10-14 | An ELF mismatch shows a large red banner across the top of the main window, with Load ELF... and Check again buttons, which can't be hidden while the mismatch lasts (SYM-8), at rani's request after missing the status bar line |
 | 2026-10-14 | The workspace is split into the `.rdtw`, a watch list file and a commands CSV; interface settings move to a per-user `ui.toml` that replaces `gui.ini` and `console.ini`; each of the three can be imported and exported (WSP-4 to WSP-6), at rani's request |
 | 2026-10-14 | The large ELF mismatch banner becomes one slim red error bar under the toolbar that holds every error: the mismatch and the latest failed action, which has a close button. The status bar no longer shows errors (GUI-10, SYM-8), at rani's request |
+| 2026-10-14 | The link shows as down when the port or socket breaks (checked every second, with no bytes sent) or when the device answers none of 3 reads in a row, so the status box no longer stays green after the connection is lost (LNK-9). Reported by rani; the behaviour is the thread's default, not yet confirmed by rani |
 
 ## 9. Appendix: binary protocol (planned)
 
