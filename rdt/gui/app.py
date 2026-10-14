@@ -236,31 +236,31 @@ class ConnectionBar(QToolBar):
         return ConnectionConfig(kind, f"{host}:{self.port.value()}")
 
 
-MODES = {"watch": "&Watch", "scope": "&Scope", "memory": "&Memory", "console": "&Console"}
+PANELS = {"watch": "&Watch", "scope": "&Scope", "memory": "&Memory", "console": "&Console"}
+PANEL_DOCK = {"scope": "Chart", "memory": "Memory", "console": "Console"}   # Watch is the central watch tabs
 
 
 class ModeBar(QToolBar):
-    """The mode tabs at the left of the toolbar: Watch, Scope, Memory, Console (GUI-14)."""
+    """The panel buttons at the left of the toolbar: Watch, Scope, Memory, Console. Each one shows
+    or hides its own panel (GUI-14)."""
 
     def __init__(self, main):
-        super().__init__("Modes")
+        super().__init__("Panels")
         self.setObjectName("modes")
         self.setMovable(False)
         holder = QWidget()
         row = QHBoxLayout(holder)
         row.setContentsMargins(0, 0, 6, 0)
         row.setSpacing(0)
-        self.group = QButtonGroup(self)
         self.buttons = {}
-        for k, (name, text) in enumerate(MODES.items(), start=1):
+        for k, (name, text) in enumerate(PANELS.items(), start=1):
             b = QToolButton()
             b.setText(text.replace("&", ""))
             b.setCheckable(True)
             b.setAutoRaise(False)
-            b.setToolTip(f"{b.text()} mode (Ctrl+{k})")
-            b.setObjectName("first" if k == 1 else "last" if k == len(MODES) else "mid")
-            b.clicked.connect(lambda _=False, n=name: main.set_mode(n))
-            self.group.addButton(b)
+            b.setToolTip(f"Show or hide the {b.text()} panel (Ctrl+{k})")
+            b.setObjectName("first" if k == 1 else "last" if k == len(PANELS) else "mid")
+            b.clicked.connect(lambda _=False, n=name: main.toggle_panel(n))
             row.addWidget(b)
             self.buttons[name] = b
         self.addWidget(holder)
@@ -271,8 +271,8 @@ class ModeBar(QToolBar):
             "QToolButton#first { border-top-left-radius: 4px; border-bottom-left-radius: 4px; }"
             "QToolButton#last { border-top-right-radius: 4px; border-bottom-right-radius: 4px; }")
 
-    def show_mode(self, name: str) -> None:
-        self.buttons[name].setChecked(True)
+    def show_panel(self, name: str, shown: bool) -> None:
+        self.buttons[name].setChecked(shown)
 
 
 class ErrorBanner(QToolBar):
@@ -444,10 +444,12 @@ class MainWindow(QMainWindow):
         self.docks["Chart"].raise_()
         self.resizeDocks([self.docks["Chart"]], [300], Qt.Vertical)
         self.resizeDocks([self.docks["Target"]], [300], Qt.Horizontal)
-        self.mode = "watch"
+        for dock in self.docks.values():   # a tab brought to the front or a panel shown or hidden by hand
+            dock.visibilityChanged.connect(lambda _=False: QTimer.singleShot(0, self.sync_panel_buttons))
+        self.tabifiedDockWidgetActivated.connect(lambda _=None: QTimer.singleShot(0, self.sync_panel_buttons))
         self._menus()
         self.set_theme()
-        self.set_mode(str(self.ui.value("session/mode", "watch")), remember=False)
+        self.restore_layout()
         self.message = QLabel()
         self.statusBar().addWidget(self.message, 1)
         self.log_label = QLabel()
@@ -523,12 +525,12 @@ class MainWindow(QMainWindow):
         self.read_only_action = action(m, "All items &read-only", self.set_read_only)
         self.read_only_action.setCheckable(True)
         m = self.menuBar().addMenu("&View")
-        for k, (name, text) in enumerate(MODES.items(), start=1):
-            action(m, f"{text} mode", lambda _=False, n=name: self.set_mode(n), f"Ctrl+{k}")
-        action(m, "Reset this mode's layout", self.reset_layout)
+        for k, (name, text) in enumerate(PANELS.items(), start=1):
+            action(m, f"Show or hide {text}", lambda _=False, n=name: self.toggle_panel(n), f"Ctrl+{k}")
+        m.addAction(self.docks["Target"].toggleViewAction())
+        action(m, "&Save layout", self.save_layout, "Ctrl+Shift+S")
+        action(m, "Reset layout", self.reset_layout)
         m.addSeparator()
-        for dock in self.docks.values():
-            m.addAction(dock.toggleViewAction())
         m.addSeparator()
         stats = action(m, "&Statistics columns", self.watch_tabs.show_stats, "Ctrl+T")
         stats.setCheckable(True)
@@ -639,72 +641,71 @@ class MainWindow(QMainWindow):
         self.load(ws)
         return True
 
-    # --- modes (GUI-14) ------------------------------------------------------------------------
+    # --- panels (GUI-14) -----------------------------------------------------------------------
 
-    def set_mode(self, name: str, remember: bool = True) -> None:
-        """Lay the window out for one job: Watch (watch tabs, cards, chart below), Scope (a large
-        chart beside the watch tabs), Memory (the cards and a large memory view) or Console (the
-        console alone). Each mode keeps the panel sizes it was left with."""
-        if name not in MODES:
-            name = "watch"
-        if remember and name != self.mode:
-            self._keep_layout()
-        self.mode = name
-        self.modes.show_mode(name)
-        self._default_layout(name)
-        saved = self.ui.value(f"session/layout_{name}", "")
+    def toggle_panel(self, name: str, on: bool | None = None) -> None:
+        """Show or hide one panel: the watch tabs, the chart (Scope), the memory view or the
+        console. A panel behind another tab is brought to the front instead of hidden."""
+        if name == "watch":
+            on = self.centralWidget().isHidden() if on is None else on
+            self.centralWidget().setVisible(on)
+            self.modes.show_panel("watch", on)
+        else:
+            dock = self.docks[PANEL_DOCK[name]]
+            on = (not self._in_front(dock)) if on is None else on
+            dock.setVisible(on)
+            if on:
+                dock.raise_()
+        self.save_layout()
+
+    def save_layout(self) -> None:
+        """Remember which panels are shown and where they sit and how big they are."""
+        self.ui.set_value("session/layout", bytes(self.saveState().toBase64()).decode())
+        self.ui.set_value("session/watch_shown", not self.centralWidget().isHidden())
+
+    def restore_layout(self) -> None:
+        saved = self.ui.value("session/layout", "")
         if saved:
             self.restoreState(QByteArray.fromBase64(saved.encode()))
-            self.modes.show()
-            self.bar.show()
-        self.centralWidget().setVisible(name in ("watch", "scope"))
-        if remember:
-            self.ui.set_value("session/mode", name)
+        self.centralWidget().setVisible(bool(self.ui.value("session/watch_shown", True)))
+        self.sync_panel_buttons()
 
-    def _keep_layout(self) -> None:
-        """Remember the panel layout of the mode in front, for the next time it is chosen."""
-        self.ui.set_value(f"session/layout_{self.mode}", bytes(self.saveState().toBase64()).decode())
+    def sync_panel_buttons(self) -> None:
+        self.modes.show_panel("watch", not self.centralWidget().isHidden())
+        for name, title in PANEL_DOCK.items():
+            self.modes.show_panel(name, self._in_front(self.docks[title]))
+
+    def _in_front(self, dock) -> bool:
+        """Whether a panel is on screen: shown, and not behind another tab."""
+        if dock.isHidden():
+            return False
+        return dock.visibleRegion().isEmpty() is False if self.isVisible() else True
+
+    def showEvent(self, event) -> None:
+        super().showEvent(event)
+        QTimer.singleShot(0, self.sync_panel_buttons)
 
     def reset_layout(self) -> None:
-        """Put the panels of the mode in front back where they start."""
-        self.ui.values.pop(f"session/layout_{self.mode}", None)
+        """Show every panel again, where they start."""
+        for key in ("session/layout", "session/watch_shown"):
+            self.ui.values.pop(key, None)
         self.ui.save()
-        self._default_layout(self.mode)
-
-    def _default_layout(self, name: str) -> None:
         d = self.docks
         for dock in d.values():   # take every panel out first, or Qt leaves stale tab bars behind
             dock.setFloating(False)
             self.removeDockWidget(dock)
-        if name == "watch":
-            self.addDockWidget(Qt.LeftDockWidgetArea, d["Target"])
-            for t in ("Chart", "Console", "Memory"):
-                self.addDockWidget(Qt.BottomDockWidgetArea, d[t])
-            self.tabifyDockWidget(d["Chart"], d["Console"])
-            self.tabifyDockWidget(d["Console"], d["Memory"])
-            shown = ("Target", "Chart", "Console", "Memory")
-            front = "Chart"
-        elif name == "scope":
-            self.addDockWidget(Qt.LeftDockWidgetArea, d["Chart"])
-            shown, front = ("Chart",), "Chart"
-        elif name == "memory":
-            self.addDockWidget(Qt.LeftDockWidgetArea, d["Target"])
-            self.addDockWidget(Qt.RightDockWidgetArea, d["Memory"])
-            shown, front = ("Target", "Memory"), "Memory"
-        else:
-            self.addDockWidget(Qt.RightDockWidgetArea, d["Console"])
-            shown, front = ("Console",), "Console"
-        for title, dock in d.items():
-            dock.setVisible(title in shown)
-        d[front].raise_()
-        width = self.width()
-        if name == "watch":
-            self.resizeDocks([d["Target"], d["Chart"]], [300, 300], Qt.Horizontal)
-            self.resizeDocks([d["Chart"]], [300], Qt.Vertical)
-        elif name == "scope":
-            self.resizeDocks([d["Chart"]], [int(width * 0.7)], Qt.Horizontal)
-        elif name == "memory":
-            self.resizeDocks([d["Target"], d["Memory"]], [300, max(400, width - 300)], Qt.Horizontal)
+        self.addDockWidget(Qt.LeftDockWidgetArea, d["Target"])
+        for t in ("Chart", "Console", "Memory"):
+            self.addDockWidget(Qt.BottomDockWidgetArea, d[t])
+        self.tabifyDockWidget(d["Chart"], d["Console"])
+        self.tabifyDockWidget(d["Console"], d["Memory"])
+        for dock in d.values():
+            dock.setVisible(True)
+        self.centralWidget().setVisible(True)
+        d["Chart"].raise_()
+        self.resizeDocks([d["Target"], d["Chart"]], [300, 300], Qt.Horizontal)
+        self.resizeDocks([d["Chart"]], [300], Qt.Vertical)
+        self.sync_panel_buttons()
 
     def set_theme(self, name: str | None = None) -> None:
         """Use a theme and remember it in ui.toml; with no name, the one ui.toml has (GUI-15)."""
@@ -855,7 +856,7 @@ class MainWindow(QMainWindow):
         if not self._maybe_save():
             event.ignore()
             return
-        self._keep_layout()
+        self.save_layout()
         for t in (self.poll_timer, self.state_timer, self.elf_timer, self.memory.timer, self.chart.timer):
             t.stop()
         self.stop_log()

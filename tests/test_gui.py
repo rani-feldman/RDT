@@ -1038,23 +1038,24 @@ def test_mcu_cards(qtbot, win):
     assert win.memory.mcu.currentText() == "motorctl"
 
 
-def test_modes(qtbot, win):
-    """The mode tabs lay the window out for one job and keep each mode's layout (GUI-14)."""
+def test_panel_buttons(qtbot, win):
+    """Each panel button shows or hides its own panel, and the layout is kept (GUI-14)."""
     win.show()
-    assert win.mode == "watch" and win.modes.buttons["watch"].isChecked()
-    win.modes.buttons["scope"].click()
-    assert win.mode == "scope" and win.ui.value("session/mode") == "scope"
-    assert win.docks["Chart"].isVisible() and not win.docks["Target"].isVisible()
-    assert win.centralWidget().isVisible()
-    shortcut = next(a for a in win.findChildren(QAction) if a.shortcut().toString() == "Ctrl+3")
+    btn = win.modes.buttons
+    qtbot.waitUntil(lambda: btn["scope"].isChecked() and not btn["console"].isChecked())   # console and memory are tabs behind the chart
+    assert btn["watch"].isChecked()
+    btn["scope"].click()                       # the chart is in front of the console and memory tabs: hides
+    assert win.docks["Chart"].isHidden() and not btn["scope"].isChecked()
+    assert win.docks["Target"].isVisible() and win.centralWidget().isVisible()
+    btn["scope"].click()
+    qtbot.waitUntil(lambda: not win.docks["Chart"].isHidden() and btn["scope"].isChecked())
+    btn["watch"].click()
+    assert win.centralWidget().isHidden() and not btn["watch"].isChecked()
+    shortcut = next(a for a in win.findChildren(QAction) if a.shortcut().toString() == "Ctrl+4")
+    shortcut.trigger()                         # Console is behind the chart: comes to the front
+    qtbot.waitUntil(lambda: btn["console"].isChecked() and not win.docks["Console"].visibleRegion().isEmpty())
     shortcut.trigger()
-    assert win.mode == "memory" and win.docks["Memory"].isVisible() and not win.centralWidget().isVisible()
-    win.set_mode("console")
-    assert win.docks["Console"].isVisible() and not win.docks["Chart"].isVisible()
-    win.docks["Console"].hide()          # changed by hand: kept for the next time
-    win.set_mode("watch")
-    assert win.ui.value("session/layout_console") and win.docks["Target"].isVisible()
-    win.set_mode("console")
-    assert not win.docks["Console"].isVisible()
+    qtbot.waitUntil(lambda: win.docks["Console"].isHidden() and not btn["console"].isChecked())
+    assert win.ui.value("session/layout") and win.ui.value("session/watch_shown") is False
     win.reset_layout()
-    assert win.docks["Console"].isVisible()
+    assert win.centralWidget().isVisible() and btn["watch"].isChecked() and btn["scope"].isChecked()
