@@ -1,7 +1,7 @@
 """SCPI profile: the user-defined command templates and reply format.
 
 Nothing about the firmware's commands is hard-coded. The profile says how to spell a read, a
-write and the error query. Addresses and values in commands are always bare hex with no
+and a write. Addresses and values in commands are always bare hex with no
 prefix: address 0x11AABBCCDD is sent as ``11AABBCCDD`` (rani, 2026-10-12). A read reply is one
 bare hex value per 4-byte word, comma-separated, such as ``3FC00000,00000101`` (rani, 2026-10-13). Every read and write covers whole 4-byte aligned words (``align``, rani, 2026-10-12):
 a 2-byte variable is read as its 4-byte word and trimmed. The simulator reads the same ``[scpi]`` table, so one file describes both sides.
@@ -20,7 +20,7 @@ from .errors import BadReply, ConfigError, DeviceError
 # Keys older profiles may still have, ignored on load (rani, 2026-10-12): there is no size query,
 # since the largest read reply is the profile's max_response; and addresses, values and reply data
 # are always bare hex, so their format keys are gone.
-RETIRED_KEYS = {"size_query", "addr_format", "value_format", "data_format"}
+RETIRED_KEYS = {"size_query", "addr_format", "value_format", "data_format", "error_query", "probe"}
 _HEX_SPEC = re.compile(r"^0?\d*X$")
 TEMPLATE_FIELDS = {"read": {"mcu", "addr", "len"}, "write": {"mcu", "addr", "value", "size"}}
 
@@ -114,8 +114,6 @@ class Profile:
     reply_regex: str | None = None         # optional; group "data" (or group 1) holds the hex data
     byte_order: str = "little"             # used for an MCU without an ELF
     max_response: int = 1024               # bytes of data one read reply can carry; set here only
-    error_query: str | None = "SYSTem:ERRor?"
-    probe: str | None = "*IDN?"            # sent on connect and reconnect to check the device answers
     terminator: str = "\n"
     timeout_ms: float = 500
     retries: int = 2                       # extra attempts after a read times out

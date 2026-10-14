@@ -39,7 +39,7 @@ def test_example_target_file():
 def test_info(sim):
     code, out = rdt(sim, "info")
     assert code == 0
-    assert "RDT,Simulator" in out
+    assert "Link:          tcp 127.0.0.1:" in out and "Device:" not in out
     assert "MCU 1 motorctl (motorctl.elf, little endian)" in out
     assert "0x48000000      1024  rw  peripheral  GPIOA" in out
 
@@ -75,21 +75,20 @@ def test_dump_and_poke(sim):
     assert out.strip() == "20000020  D8 FF FF FF 48 65 6C 6C 6F 00 00 00 00 00 00 00  |....Hello.......|"
 
 
-def test_send_and_errors(sim):
+def test_send(sim):
     assert rdt(sim, "send", "*IDN?")[1].startswith("RDT,Simulator")
     code, out = rdt(sim, "send", "MEM:READ?", "0,30000000,4")
-    assert code == 1 and out.startswith('(no reply; error queue: -222,"Data out of range')
+    assert code == 1 and out.strip() == "(no reply)"
     rdt(sim, "send", "FOO", "1")
-    rdt(sim, "send", "BAR", "2")
-    code, out = rdt(sim, "errors")
-    assert out.splitlines() == ['-113,"Undefined header;FOO"', '-113,"Undefined header;BAR"', '0,"No error"']
+    code, out = rdt(sim, "send", "SYST:ERR?")         # the error queue is still there to ask by hand
+    assert out.strip().startswith("-222,")
 
 
 def test_silent_mcu(sim):
     rdt(sim, "send", "SIM:MCU:SIL", "1,ON")
     code, out = rdt(sim, "read", "@motorctl:0x20000084:u32", "@main:0x20000010:u32")
     assert code == 1
-    assert 'MCU motorctl is not responding (-240,"MCU not responding")' in out
+    assert "MCU motorctl is not responding (3 timeouts in a row)" in out
     assert "@main:0x20000010:u32 = 305419896" in out
 
 
@@ -113,14 +112,13 @@ def test_watch_logs_csv(sim, tmp_path):
 
 
 def test_console(sim, monkeypatch):
-    monkeypatch.setattr("sys.stdin", io.StringIO("*IDN?\nNOPE?\n.err\n.read @main:0x20000000:f32\n.quit\n"))
+    monkeypatch.setattr("sys.stdin", io.StringIO("*IDN?\nNOPE?\n.read @main:0x20000000:f32\n.quit\n"))
     code, out = rdt(sim, "console")
     assert code == 0
     lines = out.splitlines()
     assert lines[1].startswith("RDT,Simulator")
-    assert lines[2] == '(no reply; error queue: -113,"Undefined header;NOPE?")'
-    assert lines[3] == '0,"No error"'
-    assert lines[4] == "@main:0x20000000:f32 = 1.5"
+    assert lines[2] == "(no reply)"
+    assert lines[3] == "@main:0x20000000:f32 = 1.5"
 
 
 def test_mcus_on_the_command_line(sim, tmp_path, monkeypatch):
@@ -279,10 +277,10 @@ def test_console_log(sim, monkeypatch, tmp_path):
     lines = [re.sub(r"^\d{4}-\d\d-\d\d \d\d:\d\d:\d\d\.\d{3} ", "", line)
              for line in log.read_text(encoding="utf-8").splitlines()]
     assert lines[0] == "# log started"
-    assert lines[1].startswith("# Connected to RDT,Simulator")
+    assert lines[1].startswith("# Connected to tcp 127.0.0.1:")
     assert lines[2] == "> *IDN?" and lines[3].startswith("< RDT,Simulator")
     assert lines[4] == "> NOPE?"
-    assert lines[5] == '! (no reply; error queue: -113,"Undefined header;NOPE?")'
+    assert lines[5] == "! (no reply)"
     assert lines[6:] == ["> .quit", "# log stopped"]
 
 
@@ -302,7 +300,7 @@ def test_console_info_reconnect_break(sim, monkeypatch):
     code, out = rdt(sim, "console")
     lines = out.splitlines()
     assert lines[1].startswith("Link:") and any(line.startswith("MCU 1 motorctl") for line in lines)
-    i = next(i for i, line in enumerate(lines) if line.startswith("reconnected to RDT,Simulator"))
+    i = next(i for i, line in enumerate(lines) if line.startswith("reconnected to tcp 127.0.0.1:"))
     assert lines[i + 1].startswith("RDT,Simulator")
     assert lines[i + 2] == "error: tcp %s:%d: a break can only be sent on a COM port" % sim.tcp_address
 

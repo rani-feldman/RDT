@@ -23,7 +23,7 @@ import tomllib
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from .errors import AccessRefused, ConfigError, DeviceError, RdtError, SymbolError, WriteRefused
+from .errors import AccessRefused, ConfigError, RdtError, SymbolError, WriteRefused
 from .memmap import ElfInfo, MemoryMap, build_id_note, elf_bytes, load_elf_sections
 from .profile import Profile, Range
 from .session import LinkState, Session
@@ -327,10 +327,6 @@ class Target:
         return self.session.state
 
     @property
-    def idn(self) -> str | None:
-        return self.session.idn
-
-    @property
     def max_response(self) -> int:
         return self.session.max_response
 
@@ -481,6 +477,3 @@ class Target:
     def command(self, text: str, expect_reply: bool | None = None, timeout_ms: float | None = None) -> str | None:
         """Send any SCPI command by hand and return its reply, if it is a query and one came."""
         return self.session.command(text, expect_reply, timeout_ms)
-
-    def error_query(self) -> DeviceError | None:
-        return self.session.error_query()
