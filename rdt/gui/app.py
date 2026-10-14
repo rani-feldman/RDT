@@ -229,60 +229,72 @@ class ConnectionBar(QToolBar):
         return ConnectionConfig(kind, f"{host}:{self.port.value()}")
 
 
-# The connection status box: text, border and background for each link state.
-class MismatchBanner(QToolBar):
-    """A large red banner across the top of the window while an MCU's ELF does not match its
-    firmware (SYM-8), so the refused reads and writes can't go unnoticed. It can't be moved or
-    hidden by the user; it goes away once every MCU matches again."""
+class ErrorBanner(QToolBar):
+    """One slim red bar under the toolbar for every error: an MCU whose ELF does not match its
+    firmware (SYM-8; stays until it matches again) and the latest failed action (stays until
+    closed, replaced, or a later action succeeds). It can't be moved or hidden by the user."""
 
     def __init__(self, main):
-        super().__init__("ELF check")
-        self.setObjectName("mismatch_banner")
+        super().__init__("Errors")
+        self.setObjectName("error_banner")
         self.setMovable(False)
         self.setFloatable(False)
         self.toggleViewAction().setVisible(False)       # not in the toolbar context menu
+        self.mismatch = ""
+        self.error = ""
         box = QWidget()
         box.setObjectName("banner")
-        box.setStyleSheet("#banner { background: #b3261e; border-radius: 4px; }"
+        box.setStyleSheet("#banner { background: #b3261e; border-radius: 3px; }"
                           "QLabel { color: white; background: transparent; }"
-                          "QPushButton { color: #b3261e; background: white; border: none; border-radius: 4px;"
-                          " padding: 6px 14px; font-weight: bold; }")
+                          "QPushButton { color: #b3261e; background: white; border: none; border-radius: 3px;"
+                          " padding: 1px 8px; }"
+                          "QPushButton#close { color: white; background: transparent; font-weight: bold; }")
         lay = QHBoxLayout(box)
-        lay.setContentsMargins(14, 10, 14, 10)
-        text = QVBoxLayout()
-        self.title = QLabel()
-        font = self.title.font()
-        font.setPointSizeF(font.pointSizeF() * 1.6)
-        font.setBold(True)
-        self.title.setFont(font)
-        self.detail = QLabel()
-        self.detail.setWordWrap(True)
-        text.addWidget(self.title)
-        text.addWidget(self.detail)
-        lay.addLayout(text, 1)
+        lay.setContentsMargins(8, 2, 4, 2)
+        lay.setSpacing(6)
+        self.text = QLabel()
+        self.text.setTextInteractionFlags(Qt.TextSelectableByMouse)
+        self.text.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Preferred)   # a long error never widens the window
+        lay.addWidget(self.text, 1)
         self.load_button = QPushButton("Load ELF...")
         self.load_button.setToolTip("Choose the ELF file that matches the firmware on the device")
         self.load_button.clicked.connect(main.edit_mcus)
         self.check_button = QPushButton("Check again")
         self.check_button.setToolTip("Compare the ELF with the device again, such as after flashing")
         self.check_button.clicked.connect(lambda: main.check_identity())
-        lay.addWidget(self.load_button)
-        lay.addWidget(self.check_button)
+        self.close_button = QPushButton("\u2715")
+        self.close_button.setObjectName("close")
+        self.close_button.setToolTip("Dismiss this error")
+        self.close_button.clicked.connect(lambda: self.show_error(""))
+        for b in (self.load_button, self.check_button, self.close_button):
+            lay.addWidget(b)
         self.addWidget(box)
-        box.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
-        self.setVisible(False)
+        box.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Maximum)
+        self._update()
 
     def show_mismatch(self, results) -> None:
-        """Show the banner for the MCUs whose ELF does not match, or hide it when none."""
+        """Show the MCUs whose ELF does not match, or drop that line when none."""
         bad = [r for r in results if r.status == "mismatch"]
-        if bad:
-            names = ", ".join(r.mcu for r in bad)
-            self.title.setText(f"\u26a0  ELF does not match the firmware on {names}")
-            self.detail.setText("Reads and writes to it are refused. Load the matching ELF, or flash the "
-                                "matching image and check again.\n" + "\n".join(r.detail for r in bad))
-        self.setVisible(bool(bad))
+        self.mismatch = ("\u26a0 ELF does not match the firmware on " + ", ".join(r.mcu for r in bad) +
+                         "; reads and writes to it are refused") if bad else ""
+        self.setToolTip("\n".join(r.detail for r in bad))
+        self._update()
+
+    def show_error(self, msg: str) -> None:
+        """Show the latest error, or clear it with an empty message."""
+        self.error = msg
+        self._update()
+
+    def _update(self) -> None:
+        lines = [x for x in (self.mismatch, self.error) if x]
+        self.text.setText("\n".join(lines))
+        self.load_button.setVisible(bool(self.mismatch))
+        self.check_button.setVisible(bool(self.mismatch))
+        self.close_button.setVisible(bool(self.error))
+        self.setVisible(bool(lines))
 
 
+# The connection status box: text, border and background for each link state.
 STATE_COLORS = {
     "up": ("#3ccf7a", "#1f7a46", "#0d1f15"),
     "busy": ("#e0a030", "#8a6418", "#211a0c"),
@@ -374,7 +386,7 @@ class MainWindow(QMainWindow):
         self.bar = ConnectionBar(self)
         self.addToolBar(self.bar)
         self.addToolBarBreak()
-        self.banner = MismatchBanner(self)
+        self.banner = ErrorBanner(self)
         self.addToolBar(self.banner)
         self.docks = {}
         for title, widget, area in (("Variables", self.symbols, Qt.LeftDockWidgetArea),
@@ -534,8 +546,10 @@ class MainWindow(QMainWindow):
         self.setWindowTitle(f"{name}{' *' if dirty else ''} - RDT")
 
     def status(self, msg: str, error: bool = False) -> None:
-        self.message.setText(msg)
-        self.message.setStyleSheet("color: #c03030" if error else "")
+        """Errors go to the red bar under the toolbar; other messages to the status bar, and
+        they clear an earlier error since the later action went through."""
+        self.banner.show_error(msg if error else "")
+        self.message.setText("" if error else msg)
 
     def _maybe_save(self) -> bool:
         """Ask to save unsaved changes. False when the user cancels."""
@@ -789,8 +803,7 @@ class MainWindow(QMainWindow):
     def _opened(self, t) -> None:
         self._connecting = False
         results = [m.identity for m in t.mcus.values() if m.identity is not None]
-        self.status(f"Connected to {self.ws.config.connection.describe()}; " + identity_summary(results),
-                    error=any(r.status == "mismatch" for r in results))
+        self.status(f"Connected to {self.ws.config.connection.describe()}; " + identity_summary(results))
         self.show_identity(results)
         self.read_all()
         self._show_state()
@@ -798,15 +811,12 @@ class MainWindow(QMainWindow):
     # --- ELF identity (SYM-8) ------------------------------------------------------------------
 
     def show_identity(self, results) -> None:
-        """Note each MCU's identity check in the console; a mismatch also goes to the status bar.
-        There is no way around a mismatch in the GUI: load the ELF that matches the firmware."""
+        """Note each MCU's identity check in the console; a mismatch also shows in the error bar
+        (see _show_image). There is no way around a mismatch in the GUI: load the matching ELF."""
         self._shown_identities = {id(r) for r in results}
         for r in results:
             self.console.log(str(r), "error" if r.status == "mismatch" else "note")
-        bad = [r for r in results if r.status == "mismatch"]
-        if bad:
-            self.status("ELF does not match the firmware on " + ", ".join(r.mcu for r in bad) +
-                        "; reads and writes to it are refused until its ELF matches", error=True)
+        self.banner.show_mismatch(results)
 
     def check_identity(self, mcus: list[str] | None = None) -> None:
         """Compare the ELFs with the firmware again, such as after flashing. Also runs by itself
