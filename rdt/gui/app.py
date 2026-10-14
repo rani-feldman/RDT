@@ -446,6 +446,7 @@ class MainWindow(QMainWindow):
         self.resizeDocks([self.docks["Target"]], [300], Qt.Horizontal)
         self.mode = "watch"
         self._menus()
+        self._menu_icon()
         self.set_theme()
         self.set_mode(str(self.ui.value("session/mode", "watch")), remember=False)
         self.message = QLabel()
@@ -466,6 +467,15 @@ class MainWindow(QMainWindow):
         self.show_workspace()
 
     # --- menus -------------------------------------------------------------------------------
+
+    def _menu_icon(self) -> None:
+        """The app icon in front of File, in the menu row."""
+        label = self.menu_icon = QLabel()      # kept so Python does not delete it
+        label.setPixmap(QPixmap(str(Path(__file__).parent / "assets" / "rdt.png")).scaled(
+            22, 22, Qt.KeepAspectRatio, Qt.SmoothTransformation))
+        label.setContentsMargins(8, 0, 4, 0)
+        self.menuBar().setCornerWidget(label, Qt.TopLeftCorner)
+        label.show()
 
     def _menus(self) -> None:
         def action(menu, text, slot, shortcut=None):
@@ -599,7 +609,8 @@ class MainWindow(QMainWindow):
     def set_dirty(self, dirty: bool = True) -> None:
         self.dirty = dirty
         name = self.ws.path.name if self.ws.path else "untitled"
-        self.setWindowTitle(f"{name}{' *' if dirty else ''} - RDT")
+        self.doc_title = f"{name}{' *' if dirty else ''} - RDT"
+        self.setWindowTitle(" ")              # the title bar shows only the icon (rani, 2026-10-14)
 
     def status(self, msg: str, error: bool = False) -> None:
         """Errors go to the red bar under the toolbar; other messages to the status bar, and
