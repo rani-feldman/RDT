@@ -152,10 +152,12 @@ def test_flash_samples_without_an_identity(sim, tmp_path):
         assert 2000 < sum(len(b) for _, b in big) < 8000 and all(a % 4 == 0 and len(b) % 4 == 0 for a, b in big)
 
 
-def keil_like_elf(path: Path) -> Path:
+def keil_like_elf(path: Path, one_segment: bool = False) -> Path:
     """A tiny ARM ELF laid out as a Keil scatter file does it: ER_IROM1 runs from flash at
-    0x08000000, ER_ITCM runs from ITCM at 0x00000000 but is flashed at 0x08000100 and copied
-    there at startup (its segment's physical address is the load address)."""
+    0x08000000, ER_ITCM runs from ITCM at 0x00000000 but is flashed right after it, at
+    0x08000040, and copied there at startup. Its own segment's physical address is the load
+    address; or, as armlink also does (``one_segment``), there is only the flash segment, which
+    holds both sections' bytes."""
     import struct
     rom, itcm = bytes(range(64)), bytes(range(100, 132))
     shstr = b"\0ER_IROM1\0ER_ITCM\0.shstrtab\0"
@@ -166,10 +168,13 @@ def keil_like_elf(path: Path) -> Path:
     off_sh = off_str + len(shstr)
     off_sh += -off_sh % 4
     out = bytearray(b"\x7fELF\x01\x01\x01" + bytes(9))
+    segs = ([(off_rom, rom + itcm, 0x08000000, 0x08000000)] if one_segment else
+            [(off_rom, rom, 0x08000000, 0x08000000), (off_itcm, itcm, 0, 0x08000040)])
     out += struct.pack("<HHIIIIIHHHHHH", 2, 40, 1, 0x08000001, ehsize, off_sh, 0x05000000,
                        ehsize, phsize, 2, shsize, 4, 3)
-    for off, data, vaddr, paddr in ((off_rom, rom, 0x08000000, 0x08000000), (off_itcm, itcm, 0, 0x08000100)):
-        out += struct.pack("<IIIIIIII", 1, off, vaddr, paddr, len(data), len(data), 5, 4)
+    segs += [(0, b"", 0, 0)] * (2 - len(segs))      # an empty PT_NULL keeps the header count
+    for off, data, vaddr, paddr in segs:
+        out += struct.pack("<IIIIIIII", 1 if data else 0, off, vaddr, paddr, len(data), len(data), 5, 4)
     out += rom + itcm + shstr
     out += bytes(off_sh - len(out))
     out += bytes(shsize)
@@ -185,6 +190,10 @@ def test_flash_samples_skip_code_copied_to_itcm(tmp_path):
     """Code a Keil scatter file runs from ITCM or RAM is flashed elsewhere and copied at startup,
     so it is not sampled at its run address: that gave a false mismatch on a matching image."""
     samples = flash_samples(keil_like_elf(tmp_path / "keil.axf"))
+    assert samples == [(0x08000000, bytes(range(64)))]
+    # armlink with one segment for all of flash: ITCM code at 0x0 sits in it, at 0x08000040 (rani's
+    # Control_CM7: ER_IROM2 at 0x00000000 in the 0x08040000 segment; 8 ITCM blocks "differed")
+    samples = flash_samples(keil_like_elf(tmp_path / "keil1.axf", one_segment=True))
     assert samples == [(0x08000000, bytes(range(64)))]
 
 

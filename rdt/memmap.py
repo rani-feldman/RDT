@@ -172,10 +172,19 @@ FLASH_SAMPLE_SPREAD = 32    # blocks spread evenly over all read-only sections, 
 def _runs_where_flashed(elf, sec) -> bool:
     """False for a section that runs from another address than it is flashed at, such as code
     a Keil scatter file places in ITCM or RAM: the startup code copies it there from flash, so
-    its ELF address holds nothing until then and may be changed after. Its load segment's
-    physical address (where it sits in the HEX) differs from the virtual one (where it runs)."""
-    for seg in elf.iter_segments():
-        if seg["p_type"] == "PT_LOAD" and seg["p_vaddr"] <= sec["sh_addr"] < seg["p_vaddr"] + max(seg["p_memsz"], 1):
+    its ELF address holds nothing until then and may be changed after.
+
+    Where it is flashed comes from the load segment holding its bytes in the file: the segment's
+    physical address plus the section's place in it. armlink may put such a section's bytes in
+    the flash segment with no segment of its own (ER_IROM2 at 0x00000000 inside the segment at
+    0x08040000), so the section's file offset is what finds its segment, not its address."""
+    loads = [seg for seg in elf.iter_segments() if seg["p_type"] == "PT_LOAD"]
+    off = sec["sh_offset"]
+    for seg in loads:
+        if seg["p_filesz"] and seg["p_offset"] <= off < seg["p_offset"] + seg["p_filesz"]:
+            return seg["p_paddr"] + (off - seg["p_offset"]) == sec["sh_addr"]
+    for seg in loads:   # no bytes in the file for it: judge by the segment it runs in
+        if seg["p_vaddr"] <= sec["sh_addr"] < seg["p_vaddr"] + max(seg["p_memsz"], 1):
             return seg["p_paddr"] == seg["p_vaddr"]
     return True
 
