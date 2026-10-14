@@ -31,6 +31,7 @@ from ..ui_settings import SETTINGS, UiSettings, workspace_dir
 from ..workspace import Workspace, default_target
 from .chart import ChartPanel
 from .device import Device, describe_error
+from .dnd import DropTarget
 from .panels import CONSOLE_KEYS, Console, McuDialog, MemoryView, ProfileDialog, mono
 from .style import THEMES, apply_theme, is_dark
 from .variables import SymbolBrowser, WatchTabs, WatchTree
@@ -396,6 +397,10 @@ class MainWindow(QMainWindow):
         self.watch_tabs.sampled.connect(self.chart.feed)
         self.watch_tabs.sampled.connect(self._log_readings)
         self.watch_tabs.chart_requested.connect(self.add_to_chart)
+        self.chart_pending: set[str] = set()   # dropped on the chart, charted once read (GUI-15)
+        self.watch_tabs.sampled.connect(lambda _: self._chart_dropped())
+        for w in (self.chart.plot.viewport(), self.chart.list.viewport()):
+            DropTarget(w, self.drop_on_chart)
         self.setCentralWidget(self.watch_tabs)
         self.symbols = SymbolBrowser(self)
         self.symbols.add_requested.connect(lambda expr: self.watch_tabs.add_watch(expr))
@@ -1016,6 +1021,35 @@ class MainWindow(QMainWindow):
         self.chart.add(path, unit)
         self.docks["Chart"].show()
         self.docks["Chart"].raise_()
+
+    def drop_on_chart(self, exprs: list[str]) -> None:
+        """Expressions dragged onto the chart (GUI-15). One not watched yet goes to the tab in
+        front first, since the chart plots what the watch tabs read; each is charted after its
+        first read, when RDT knows whether it is a number."""
+        watched = set(self.watch_tabs.exprs())
+        for e in exprs:
+            if any(tree.chartable(e) for tree in self.watch_tabs.trees):   # a value already shown
+                self.chart_pending.add(e)
+                continue
+            if e not in watched and self.watch_tree.add_watch(e) is None:
+                continue
+            self.chart_pending.add(e)
+            for tree in self.watch_tabs.trees:
+                tree.read_now(e)
+        self._chart_dropped()
+
+    def _chart_dropped(self) -> None:
+        for e in list(self.chart_pending):
+            for tree in self.watch_tabs.trees:
+                if tree.chartable(e):
+                    self.chart_pending.discard(e)
+                    tree.chart(e)
+                    break
+                st = tree.states.get(e)
+                if st is not None and st.shown.get(e) is not None:   # read, but not a number
+                    self.chart_pending.discard(e)
+                    self.status(f"{e} is not a number, so it can't be charted")
+                    break
 
     def chart_selected(self) -> None:
         paths = [p for p in self.watch_tree.selected_paths() if self.watch_tree.chartable(p)]
