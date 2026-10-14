@@ -182,7 +182,7 @@ def test_console_and_memory(qtbot, win):
     cell.setText("7F")
     qtbot.waitUntil(lambda: mem.data[:1] == b"\x7f", timeout=3000)
 
-    # MEM-1: signed shorts in decimal; columns are 2-byte cells, and a typed value writes 2 bytes
+    # GUI-7: signed shorts in decimal; columns are 2-byte cells, and a typed value writes 2 bytes
     from rdt.memfmt import MemFormat
     mem.set_format(MemFormat("signed", "Short", decimal=True))
     assert mem.table.columnCount() == 9 and mem.table.horizontalHeaderItem(1).text() == "2"

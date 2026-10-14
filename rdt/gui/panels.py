@@ -742,7 +742,7 @@ class Console(QWidget):
 
 class MemoryView(QWidget):
     """Dump of raw memory, 16 bytes per row with their ASCII. Right-click picks how the cells show the
-    bytes (MEM-1): hex bytes by default, unsigned or signed C integers in hex or decimal, characters,
+    bytes (GUI-7): hex bytes by default, unsigned or signed C integers in hex or decimal, characters,
     floats or doubles. Typing a new value in a cell writes it."""
 
     def __init__(self, main):
