@@ -67,11 +67,9 @@ def test_reply_size_must_match():
         Profile().decode_data(b"zz00C03F", 4)
 
 
-def test_reply_regex():
-    p = Profile(reply_regex=r"DATA=(?P<data>[0-9A-F]+);")
-    assert p.decode_data(b"OK DATA=3FC00000;", 4) == bytes.fromhex("0000C03F")
-    with pytest.raises(BadReply):
-        p.decode_data(b"3FC00000", 4)
+def test_retired_keys_are_ignored():
+    p = Profile.from_dict({"reply_regex": "DATA=(.*)", "error_query": "SYST:ERR?", "probe": "*IDN?"})
+    assert p.decode_data(b"3FC00000", 4) == bytes.fromhex("0000C03F")
 
 
 def test_error_replies():
