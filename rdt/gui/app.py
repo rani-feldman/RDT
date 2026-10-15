@@ -503,7 +503,6 @@ class MainWindow(QMainWindow):
         m = self.menu_bar.addMenu("&Target")
         action(m, "&Connect or disconnect", self.toggle_connection, "F5")
         action(m, "SCPI &profile...", self.edit_profile)
-        action(m, "Load profile file...", self.load_profile)
         action(m, "&MCUs and ELF files...", self.edit_mcus)
         m.addSeparator()
         action(m, "Check ELF &identity", lambda: self.check_identity())
@@ -1053,26 +1052,17 @@ class MainWindow(QMainWindow):
     # --- target settings ---------------------------------------------------------------------
 
     def edit_profile(self) -> None:
-        dlg = ProfileDialog(self.ws.config.profile, self.device, self)
+        dlg = ProfileDialog(self.ws.config.profile, self.device, self, self.ws.config.profile_path)
         if dlg.exec() != QDialog.Accepted:
             return
-        self.apply_profile(dlg.result_profile())
+        self.apply_profile(dlg.result_profile(), dlg.result_path())
 
     def apply_profile(self, profile: Profile, path: Path | None = None) -> None:
         self.ws.config.profile = profile
-        self.ws.config.profile_path = path   # an edited profile is saved inside the workspace
+        self.ws.config.profile_path = path   # None: the profile is saved inside the workspace
         self.bar.show_profile(self.ws)
         self.set_dirty()
         self.reconnect()
-
-    def load_profile(self) -> None:
-        path, _ = QFileDialog.getOpenFileName(self, "Load SCPI profile", "", "Profile (*.toml);;All files (*)")
-        if not path:
-            return
-        try:
-            self.apply_profile(Profile.load(path), Path(path))
-        except ConfigError as e:
-            QMessageBox.warning(self, "Load profile", str(e))
 
     def edit_mcus(self) -> None:
         dlg = McuDialog(self.ws.config.mcus, self)
