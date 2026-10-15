@@ -959,15 +959,28 @@ def _unescape(s: str) -> str:
 
 class ProfileDialog(QDialog):
     """Edit the SCPI profile: the command templates and the reply format. The preview shows the
-    commands as they will be sent; Test sends a read with the edited profile."""
+    commands as they will be sent; Test sends a read with the edited profile. Load from file fills
+    the fields from a profile file; OK left unedited then keeps the workspace pointing at
+    that file."""
 
-    def __init__(self, profile: Profile, device, parent=None):
+    def __init__(self, profile: Profile, device, parent=None, path: Path | None = None):
         super().__init__(parent)
         self.setWindowTitle("SCPI profile")
         self.device = device
         self.ranges = profile.ranges
+        self.path = path              # the profile file the fields came from, if any
+        self.loaded = profile
         self.edits: dict[str, QWidget] = {}
         outer = QVBoxLayout(self)
+        file_row = QHBoxLayout()
+        self.file_label = QLabel()
+        self.file_label.setTextInteractionFlags(Qt.TextSelectableByMouse)
+        self.load_button = QPushButton("Load from file...")
+        self.load_button.setToolTip("Fill the fields from a profile file (.toml with an [scpi] table)")
+        self.load_button.clicked.connect(self.load_file)
+        file_row.addWidget(self.file_label, 1)
+        file_row.addWidget(self.load_button)
+        outer.addLayout(file_row)
         form = QFormLayout()
         outer.addLayout(form)
         tips = {
@@ -1031,6 +1044,39 @@ class ProfileDialog(QDialog):
         outer.addWidget(buttons)
         self._preview()
 
+    def set_profile(self, profile: Profile) -> None:
+        for name, w in self.edits.items():
+            value = getattr(profile, name)
+            if isinstance(w, QComboBox):
+                w.setCurrentText(str(value))
+            elif name == "terminator":
+                w.setText(_escape(value))
+            else:
+                w.setText("" if value is None else f"{value:g}" if isinstance(value, float) else str(value))
+        self.ranges = profile.ranges
+
+    def load_file(self, path: str | None = None) -> None:
+        if not path:
+            start = str(self.path.parent) if self.path else ""
+            path, _ = QFileDialog.getOpenFileName(self, "Load SCPI profile", start, "Profile (*.toml);;All files (*)")
+            if not path:
+                return
+        try:
+            profile = Profile.load(path)
+        except ConfigError as e:
+            QMessageBox.warning(self, "Load profile", str(e))
+            return
+        self.path, self.loaded = Path(path), profile
+        self.set_profile(profile)
+        self._preview()
+
+    def result_path(self) -> Path | None:
+        """The profile file to keep using: the one loaded, as long as no field was changed since."""
+        try:
+            return self.path if self.path is not None and self.result_profile() == self.loaded else None
+        except (ConfigError, ValueError, UnicodeError):
+            return None
+
     def result_profile(self) -> Profile:
         """The profile as edited; raises ConfigError or ValueError when a field is wrong."""
         values = {}
@@ -1056,6 +1102,9 @@ class ProfileDialog(QDialog):
             self.test_button.setEnabled(False)
             return
         self.preview.setStyleSheet("")
+        path = self.result_path()
+        self.file_label.setText(f"From file: {path.name}" if path else "Stored in the workspace")
+        self.file_label.setToolTip(str(path) if path else "")
         self.ok.setEnabled(True)
         self.test_button.setEnabled(self.device.target is not None)
         self.preview.setText(f"Read 16 bytes:  {p.format_read(0, 0x20000000, 16)}\n"

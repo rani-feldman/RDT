@@ -163,7 +163,7 @@ The console is a dark terminal. Each line shows its time, a tag (`TX` sent, `RX`
 
 The profile says how the firmware spells a memory read and write and how it encodes the reply. The editor has every field of the `[scpi]` table (see [CLI.md](CLI.md#scpi-profile)), shows the read and write commands as they will be sent, and refuses a template that would not work (for example a read without `{len}`). While connected, **Test read** sends one read with the edited profile and shows the reply and the decoded bytes, before you apply it.
 
-Pressing OK stores the edited profile inside the workspace (no longer pointing at the profile file) and reconnects. **Target > Load profile file...** uses a profile file instead.
+**Load from file...** at the top of the editor fills the fields from a profile file; the line beside it says whether the profile comes from that file or is stored in the workspace. Pressing OK reconnects. If no field was changed after loading, the workspace keeps pointing at the profile file; once a field is edited, OK stores the profile inside the workspace instead.
 
 ## Files
 
