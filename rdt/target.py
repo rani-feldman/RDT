@@ -25,7 +25,7 @@ from pathlib import Path
 
 from .errors import AccessRefused, ConfigError, ImageMismatch, RdtError, SymbolError, WriteRefused
 from .memmap import ElfInfo, MemoryMap, build_id_note, elf_bytes, flash_samples, load_elf_sections
-from .profile import Profile, Range
+from .profile import Profile, Range, load_memory_file
 from .session import LinkState, Session
 from .symbols import Location, Resolver, Row, SymbolTable, describe_address, load_symbols, parse
 from .symbols import values
@@ -106,6 +106,7 @@ class TargetConfig:
     profile: Profile = field(default_factory=Profile)
     mcus: list[McuConfig] = field(default_factory=list)
     profile_path: Path | None = None   # where the profile came from, if it is a file of its own
+    memory_path: Path | None = None    # the memory file (bench.memory.toml) holding the ranges, if any
 
     @classmethod
     def load(cls, path: str | Path) -> TargetConfig:
@@ -140,6 +141,13 @@ class TargetConfig:
         else:
             profile = Profile.from_dict(raw.get("scpi", {}), raw.get("ranges", []))
 
+        memory_path = None
+        if raw.get("memory_file") is not None:
+            if not isinstance(raw["memory_file"], str) or not raw["memory_file"].strip():
+                raise ConfigError("memory_file must be a file name, such as \"bench.memory.toml\"")
+            memory_path = base / raw["memory_file"]
+            profile.ranges.extend(r for r in load_memory_file(memory_path) if r not in profile.ranges)
+
         mcus = []
         for t in raw.get("mcu", []):
             if "id" not in t or "name" not in t:
@@ -155,7 +163,7 @@ class TargetConfig:
                 short=check_short(str(t["short"])) if t.get("short") else None,
                 color=check_color(str(t["color"])) if t.get("color") else None,
             ))
-        return cls(connection, profile, mcus, profile_path)
+        return cls(connection, profile, mcus, profile_path, memory_path)
 
 
 class Mcu:

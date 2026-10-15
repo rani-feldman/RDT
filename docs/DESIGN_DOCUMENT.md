@@ -213,6 +213,7 @@ Each requirement links to its design section.
 | WSP-5 | The interface settings are kept in their own file, per user, not in the workspace (2026-10-14) | Done | [D-WSP-5](#d-wsp-5-interface-settings-file) |
 | WSP-6 | The watch list, the commands and the interface settings can each be imported and exported (2026-10-14) | Done | [D-WSP-6](#d-wsp-6-import-and-export) |
 | WSP-7 | The SCPI profile is kept in its own file beside the `.rdtw`, which points to it, with every field written, defaults included (2026-10-15) | Done | [D-WSP-4](#d-wsp-4-split-files) |
+| WSP-8 | The memory map (the memory regions) is kept in its own file beside the `.rdtw`, which points to it with `memory_file`; a memory map can be loaded from a file, from the GUI (File > Import > Memory map) or the CLI (`rdt memory import`) (2026-10-15) | In review | [D-WSP-8](#d-wsp-8-memory-map-file) |
 
 ### 2.15 Command line and API
 
@@ -1147,7 +1148,7 @@ The GUI remembers the last workspace file it opened or saved, as `session/last_w
 rani asked on 2026-10-14 for the imported commands, the watched variables and watch tabs, and the interface settings to each be in a separate file. A workspace is now up to four files side by side:
 
 - **`bench.rdtw`:** the connection, MCUs, `poll_ms` and `read_only`, plus `profile`, `watch_file` and `commands_file`, which name the other three relative to the `.rdtw`.
-- **`bench.profile.toml` (WSP-7):** the SCPI profile, `[scpi]` with every field and its `[[ranges]]` (`write_profile_file` in `rdt/workspace.py`). It is written on every save, even unchanged, and `Workspace.save` points `profile_path` at it. A workspace with an inline `[scpi]` table, or naming a profile file elsewhere, still opens; the next save writes the profile beside the `.rdtw` and leaves the other file alone. rani asked for this on 2026-10-15.
+- **`bench.profile.toml` (WSP-7):** the SCPI profile, `[scpi]` with every field and (`write_profile_file` in `rdt/workspace.py`; the ranges moved to the memory file, WSP-8). It is written on every save, even unchanged, and `Workspace.save` points `profile_path` at it. A workspace with an inline `[scpi]` table, or naming a profile file elsewhere, still opens; the next save writes the profile beside the `.rdtw` and leaves the other file alone. rani asked for this on 2026-10-15.
 - **`bench.watch.toml`:** the `[[tab]]` and `[[tab.watch]]` tables and `[chart]` (`read_watch_file` and `write_watch_file` in `rdt/workspace.py`).
 - **`bench.commands.toml`:** the known commands, one `[[command]]` table each with `command`, `name`, `group` and `description` (`write_commands_file` in `rdt/workspace.py`). rani asked on 2026-10-14 for it to be a TOML file the `.rdtw` points to, like the watch list; it was a CSV file at first (D-WSP-2).
 
@@ -1155,6 +1156,14 @@ Opening the `.rdtw` loads them all (`Workspace.watch_path`, `Workspace.commands_
 
 - **Default folder:** the GUI's Open and Save as dialogs start in `%LOCALAPPDATA%\rdt`, the folder of `ui.toml` (`workspace_dir` in `rdt/ui_settings.py`).
 - **Default target:** with no `-t` or `-w`, `rdt` and `rdt-gui` use `./rdt.toml`, else `%LOCALAPPDATA%\rdt\rdt.toml` (`default_target` in `rdt/workspace.py`); `rdt-gui` falls back to it when there is no last workspace to reopen (D-WSP-3). Example: [`examples/sim_bench.rdtw`](../examples/sim_bench.rdtw) with `sim_bench.watch.toml`.
+
+#### D-WSP-8 Memory map file
+
+rani asked on 2026-10-15 for the memory regions to be in a file of their own beside the `.rdtw`, for the `.rdtw` to point to it, and for a way to load a memory map.
+
+- **`bench.memory.toml`:** one `[[ranges]]` table per range, with the keys of D-MEM-5 (`name`, `start`, `size` or `end`, `kind`, `writable`) and an optional `mcu`. `Workspace.save` writes every range there, the profile's and each MCU's own (the latter tied to their MCU with `mcu = "name"`), and the `.rdtw` gets `memory_file = "bench.memory.toml"`. The file is made only when there is a range; neither the `.rdtw` nor the profile file then holds ranges (`write_memory_file`, `Workspace.memory_ranges`).
+- **Opening:** `TargetConfig.from_dict` reads `memory_file` (also in a plain target file) and adds the ranges to the profile's shared list, where the `mcu` key picks the MCU as before (D-MEM-2). A missing or broken memory file is a `ConfigError`. Older workspaces with inline `[[ranges]]`, `[[mcu.ranges]]` or ranges in the profile file still open; the next save moves them to the memory file.
+- **Loading a map:** `Workspace.import_memory(path, replace_all)` takes the ranges of a memory file, or of a profile, target file or workspace (`load_memory_file` in `rdt/profile.py`, which follows a workspace's `memory_file` and `profile`). Ranges already present are skipped; with replace the workspace's ranges are dropped first. A map whose ranges overlap each other is refused with a `ConfigError` and nothing changes. **File > Import > Memory map...** asks Add or Replace when the workspace already has ranges, then reconnects; **File > Export > Memory map...** and `rdt memory export FILE` write the whole map; `rdt memory import FILE [--replace]` loads one into the workspace file.
 
 #### D-WSP-5 Interface settings file
 
@@ -1485,6 +1494,7 @@ The application is built against the simulator. As soon as the firmware has the 
 | 2026-10-14 | The toolbar's Watch, Scope, Memory and Console buttons no longer switch between four layouts; each shows or hides its own panel (a panel behind another tab comes to the front first). The layout is saved on every press and on close, with View > Save layout (Ctrl+Shift+S), View > Reset layout and View > Target (GUI-14), at rani's request |
 | 2026-10-15 | A profile file is loaded from inside the SCPI profile dialog (**Load from file...**), and **Target > Load profile file...** is removed. OK keeps pointing at the file unless a field was edited (GUI-18), at rani's request |
 | 2026-10-15 | Four more themes (Studio Dark, Islands, Instrument, Light Pro) and the behaviour ideas from the look and feel options: a RUN/STOP key instead of the Poll checkbox, icon buttons, MCU colours on chart traces, a link strip in the status bar with reply times, a density switch, hover icons on watch rows and monospace values (LNF-1 to LNF-8), at rani's request |
+| 2026-10-15 | The memory regions are saved in their own file beside the `.rdtw` (`bench.memory.toml`), named by `memory_file`, and a memory map can be loaded from a file (GUI File > Import > Memory map, `rdt memory import`) (WSP-8), at rani's request |
 | 2026-10-15 | The SCPI profile is saved in its own file beside the `.rdtw` (`bench.profile.toml`, every field written), which the `.rdtw` names like the watch and commands files; the profile dialog's **Load from file...** only fills the fields (WSP-7, replacing GUI-18's link to the loaded file), at rani's request |
 
 ## 9. Appendix: binary protocol (planned)

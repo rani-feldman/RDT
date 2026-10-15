@@ -249,20 +249,23 @@ Every key in a `[[tab.watch]]` but `expr` is optional, and so are a command's na
 
 ### Files of a workspace
 
-A workspace is four files, next to each other and named after it:
+A workspace is up to five files, next to each other and named after it:
 
 | File | Holds | Format |
 | --- | --- | --- |
-| `bench.rdtw` | Connection, MCUs and ELF files, `poll_ms`, `read_only`, and the names of the other three | TOML |
-| `bench.profile.toml` | The SCPI profile: `[scpi]` with every field, defaults included, and its `[[ranges]]` | TOML |
+| `bench.rdtw` | Connection, MCUs and ELF files, `poll_ms`, `read_only`, and the names of the other files | TOML |
+| `bench.profile.toml` | The SCPI profile: `[scpi]` with every field, defaults included | TOML |
+| `bench.memory.toml` | The memory map: one `[[ranges]]` table per range, each with an optional `mcu`; the `.rdtw` names it with `memory_file` | TOML |
 | `bench.watch.toml` | The watch tabs (`[[tab]]`, `[[tab.watch]]`) and the chart layout (`[chart]`) | TOML |
 | `bench.commands.toml` | The known commands: one `[[command]]` table each, with `command`, `name`, `group`, `description` | TOML |
 
-Opening the `.rdtw` loads all of them. The profile file is always written; the watch list and commands files are made only once there is something to keep in them. The `.rdtw` and its files always sit in one folder: saving writes `bench.profile.toml`, `bench.watch.toml` and `bench.commands.toml` beside the `.rdtw`, named after it, and Save as writes them under the new name. A workspace that names a file elsewhere (`commands_file = "../gac_commands.toml"`) still opens with it; the next save writes that list beside the `.rdtw` and leaves the other file as it was. Workspaces are kept by default in `%LOCALAPPDATA%\rdt`, the folder of `ui.toml`; the GUI's Open and Save dialogs start there. A file the workspace names but that is missing gives a warning and an empty list, and is made again on the next save. A workspace whose commands are in a CSV file (`bench.commands.csv`, as the first version of the split saved them) still opens; the next save writes them to `bench.commands.toml` and points the `.rdtw` at it, leaving the CSV file as it was.
+Opening the `.rdtw` loads all of them. The profile file is always written; the memory, watch list and commands files are made only once there is something to keep in them. The `.rdtw` and its files always sit in one folder: saving writes `bench.profile.toml`, `bench.memory.toml`, `bench.watch.toml` and `bench.commands.toml` beside the `.rdtw`, named after it, and Save as writes them under the new name. A workspace that names a file elsewhere (`commands_file = "../gac_commands.toml"`) still opens with it; the next save writes that list beside the `.rdtw` and leaves the other file as it was. Workspaces are kept by default in `%LOCALAPPDATA%\rdt`, the folder of `ui.toml`; the GUI's Open and Save dialogs start there. A file the workspace names but that is missing gives a warning and an empty list, and is made again on the next save. A workspace whose commands are in a CSV file (`bench.commands.csv`, as the first version of the split saved them) still opens; the next save writes them to `bench.commands.toml` and points the `.rdtw` at it, leaving the CSV file as it was.
 
 Each part can also be moved between workspaces:
 
 ```
+rdt -w bench.rdtw memory export map.memory.toml          # the memory map (all ranges)
+rdt -w other.rdtw memory import map.memory.toml          # adds its ranges; --replace replaces them
 rdt -w bench.rdtw watchlist export motor.watch.toml     # the tabs and chart
 rdt -w other.rdtw watchlist import motor.watch.toml     # adds its tabs; --replace replaces them
 rdt -w other.rdtw watchlist import bench.rdtw           # another workspace works too

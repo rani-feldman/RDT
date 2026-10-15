@@ -191,6 +191,14 @@ def build_parser() -> argparse.ArgumentParser:
                     ).add_argument("file", type=Path)
     cmds.add_parser("clear", help="empty the list")
 
+    p = sub.add_parser("memory", help="import or export the workspace's memory map (the ranges; no device needed)")
+    mm = p.add_subparsers(dest="memory_cmd", metavar="ACTION", required=True)
+    q = mm.add_parser("import", help="add the ranges of a memory file (or a profile, target file or workspace), "
+                                     "skipping those already here")
+    q.add_argument("file", type=Path)
+    q.add_argument("--replace", action="store_true", help="replace the workspace's ranges instead of adding to them")
+    mm.add_parser("export", help="write the memory map to a memory file").add_argument("file", type=Path)
+
     p = sub.add_parser("watchlist", help="import or export the workspace's watch tabs and chart (no device needed)")
     wl = p.add_subparsers(dest="watchlist_cmd", metavar="ACTION", required=True)
     q = wl.add_parser("import", help="add the tabs of a watch list file (or another workspace), skipping items "
@@ -738,6 +746,20 @@ def cmd_watchlist(t: Target | None, args, out) -> int:
     return 0
 
 
+def cmd_memory(t: Target | None, args, out) -> int:
+    ws = args.ws
+    if args.memory_cmd == "export":
+        ws.export_memory(args.file)
+        print(f"wrote {len(ws.memory_ranges())} ranges to {args.file}", file=out)
+        return 0
+    ws = _need_file(ws)
+    added, skipped = ws.import_memory(args.file, args.replace)
+    ws.save()
+    msg = f"imported {added} ranges" + (f", skipped {skipped} already here" if skipped else "")
+    print(f"{msg}; {ws.path} now has {len(ws.memory_ranges())} ranges", file=out)
+    return 0
+
+
 def cmd_ui(t: Target | None, args, out) -> int:
     ui = UiSettings.load()
     if args.ui_cmd == "export":
@@ -956,11 +978,11 @@ COMMANDS = {
     "read-only": cmd_read_only,
     "info": cmd_info, "symbols": cmd_symbols, "ptype": cmd_ptype, "read": cmd_read, "write": cmd_write, "dump": cmd_dump, "poke": cmd_poke,
     "send": cmd_send, "watch": cmd_watch, "console": cmd_console, "history": cmd_history, "commands": cmd_commands,
-    "watchlist": cmd_watchlist,
+    "watchlist": cmd_watchlist, "memory": cmd_memory,
 }
 
 
-OFFLINE = ("symbols", "ptype", "init", "list", "add", "remove", "tab", "commands", "watchlist", "read-only")   # never open the link
+OFFLINE = ("symbols", "ptype", "init", "list", "add", "remove", "tab", "commands", "watchlist", "memory", "read-only")   # never open the link
 
 
 def main(argv: list[str] | None = None, out=None) -> int:
