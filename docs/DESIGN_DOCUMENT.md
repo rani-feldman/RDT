@@ -179,7 +179,7 @@ Each requirement links to its design section.
 | GUI-16 | Drag variables and watch rows onto a watch tab, a tab's title or the chart (2026-10-14) | Done | [D-GUI-16](#d-gui-16-drag-and-drop) |
 | GUI-17 | One title bar row: the app icon, the menus and the minimise, maximise and close buttons in a single line, with no title text and no standard Windows title bar above it (rani, 2026-10-14) | Done | [D-GUI-17](#d-gui-17-one-row-title-bar) |
 | GUI-18 | Load a profile file from inside the SCPI profile dialog; **Target > Load profile file...** is removed (2026-10-15) | Done | [D-SCPI-9](#d-scpi-9-profile-editor) |
-| GUI-19 | **Target > MCUs and ELF files** shows each ELF file's path, with the file name always visible (rani, 2026-10-15) | In review (PR #118) | [D-GUI-19](#d-gui-19-elf-path-in-the-mcus-dialog) |
+| GUI-19 | **Target > MCUs and ELF files** shows each ELF file's path, with the file name always visible (rani, 2026-10-15) | Done | [D-GUI-19](#d-gui-19-elf-path-in-the-mcus-dialog) |
 | LNF-1 | Four more themes in **View > Theme**: Studio Dark, Islands, Instrument and Light Pro (2026-10-15) | Done | [D-LNF-1](#d-lnf-1-themes) |
 | LNF-2 | A **RUN/STOP** key replaces the **Poll** checkbox (2026-10-15) | Done | [D-LNF-2](#d-lnf-2-runstop-key) |
 | LNF-3 | Icon buttons for Profile, Poll now, Log CSV and the panel buttons (2026-10-15) | Done | [D-LNF-3](#d-lnf-3-icon-buttons) |
