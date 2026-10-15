@@ -596,6 +596,18 @@ def test_mcu_dialog(qtbot, win):
         dlg.result_mcus()
 
 
+def test_mcu_dialog_shows_the_whole_elf_path(qtbot, win):
+    """The ELF path sits on one line, elided in the middle, with the full path as tooltip."""
+    from PySide6.QtCore import Qt
+    dlg = McuDialog(win.ws.config.mcus, win)
+    qtbot.addWidget(dlg)
+    assert not dlg.table.wordWrap() and dlg.table.textElideMode() == Qt.ElideMiddle
+    item = dlg.table.item(0, dlg.COL_ELF)
+    assert item.text() and item.toolTip() == item.text()
+    item.setText(r"C:\work\fw\Objects\new.axf")
+    assert item.toolTip() == r"C:\work\fw\Objects\new.axf"
+
+
 def test_watch_rows_show_mcu_tags_and_flash_changes(qtbot, win, tmp_path):
     from rdt.gui.style import TAG_ROLE
     from rdt.gui.variables import COL_NAME
