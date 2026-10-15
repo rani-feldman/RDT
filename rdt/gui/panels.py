@@ -1131,11 +1131,11 @@ class ProfileDialog(QDialog):
 
 
 class McuDialog(QDialog):
-    """The target's MCUs: id, name, short name and colour (GUI-12), ELF file, timeout and identity
-    variable. MCU 0 is the main MCU."""
+    """The target's MCUs: id, name, short name and colour (GUI-12), ELF file and timeout. MCU 0 is
+    the main MCU."""
 
-    COLS = ("Id", "Name", "Short name", "Colour", "ELF file", "Timeout ms", "Identity variable")
-    COL_ID, COL_NAME, COL_SHORT, COL_COLOR, COL_ELF, COL_TIMEOUT, COL_IDENTITY = range(7)
+    COLS = ("Id", "Name", "Short name", "Colour", "ELF file", "Timeout ms")
+    COL_ID, COL_NAME, COL_SHORT, COL_COLOR, COL_ELF, COL_TIMEOUT = range(6)
 
     def __init__(self, mcus: list[McuConfig], parent=None):
         super().__init__(parent)
@@ -1154,13 +1154,13 @@ class McuDialog(QDialog):
         layout.addWidget(self.table)
         for m in mcus:
             self._add_row(m.id, m.name, str(m.elf or ""), "" if m.timeout_ms is None else f"{m.timeout_ms:g}",
-                          m.identity or "", m.short or "", m.color or "")
+                          m.short or "", m.color or "")
         self.table.horizontalHeaderItem(self.COL_SHORT).setToolTip(
             "Shown on the MCU's tags, such as CM7. Empty: the part of the name after the last underscore")
         self.table.horizontalHeaderItem(self.COL_COLOR).setToolTip(
             "The MCU's tag colour. Double-click to choose; empty: a colour picked by its id")
-        self.table.horizontalHeaderItem(self.COL_IDENTITY).setToolTip(
-            "A constant variable, such as a version string or build ID, compared with the ELF on connect")
+        self.table.horizontalHeaderItem(self.COL_TIMEOUT).setToolTip(
+            "How long to wait for this MCU's reply. Empty: the SCPI profile's timeout")
         self.table.cellDoubleClicked.connect(self._double_clicked)
         row = QHBoxLayout()
         for text, slot in (("Add MCU", self._add), ("Remove", self._remove), ("Browse ELF...", self._browse)):
@@ -1174,13 +1174,12 @@ class McuDialog(QDialog):
         buttons.rejected.connect(self.reject)
         layout.addWidget(buttons)
 
-    def _add_row(self, mcu_id: int, name: str, elf: str, timeout: str, identity: str = "", short: str = "",
+    def _add_row(self, mcu_id: int, name: str, elf: str, timeout: str, short: str = "",
                  color: str = "") -> None:
         r = self.table.rowCount()
         self.table.insertRow(r)
         for c, text in ((self.COL_ID, str(mcu_id)), (self.COL_NAME, name), (self.COL_SHORT, short),
-                        (self.COL_COLOR, color), (self.COL_ELF, elf), (self.COL_TIMEOUT, timeout),
-                        (self.COL_IDENTITY, identity)):
+                        (self.COL_COLOR, color), (self.COL_ELF, elf), (self.COL_TIMEOUT, timeout)):
             self.table.setItem(r, c, QTableWidgetItem(text))
         self.table.item(r, self.COL_ELF).setToolTip(elf)
         self._show_color(r)
@@ -1254,7 +1253,7 @@ class McuDialog(QDialog):
             old = self.originals.get(mcu_id)
             base = old if old is not None else McuConfig(mcu_id, text[self.COL_NAME])
             out.append(replace(base, id=mcu_id, name=text[self.COL_NAME], elf=elf, timeout_ms=timeout,
-                               identity=text[self.COL_IDENTITY] or None, short=short, color=color))
+                               short=short, color=color))
         ids = [m.id for m in out]
         if 0 not in ids:
             raise ConfigError("MCU 0, the main MCU, is required")
