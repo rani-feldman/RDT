@@ -179,6 +179,7 @@ Each requirement links to its design section.
 | GUI-16 | Drag variables and watch rows onto a watch tab, a tab's title or the chart (2026-10-14) | Done | [D-GUI-16](#d-gui-16-drag-and-drop) |
 | GUI-17 | One title bar row: the app icon, the menus and the minimise, maximise and close buttons in a single line, with no title text and no standard Windows title bar above it (rani, 2026-10-14) | Done | [D-GUI-17](#d-gui-17-one-row-title-bar) |
 | GUI-18 | Load a profile file from inside the SCPI profile dialog; **Target > Load profile file...** is removed (2026-10-15) | Done | [D-SCPI-9](#d-scpi-9-profile-editor) |
+| GUI-19 | **Target > MCUs and ELF files** shows each ELF file's path, with the file name always visible (rani, 2026-10-15) | In review (PR #118) | [D-GUI-19](#d-gui-19-elf-path-in-the-mcus-dialog) |
 | LNF-1 | Four more themes in **View > Theme**: Studio Dark, Islands, Instrument and Light Pro (2026-10-15) | Done | [D-LNF-1](#d-lnf-1-themes) |
 | LNF-2 | A **RUN/STOP** key replaces the **Poll** checkbox (2026-10-15) | Done | [D-LNF-2](#d-lnf-2-runstop-key) |
 | LNF-3 | Icon buttons for Profile, Poll now, Log CSV and the panel buttons (2026-10-15) | Done | [D-LNF-3](#d-lnf-3-icon-buttons) |
@@ -979,6 +980,10 @@ Polling, the chart and the CSV log keep running while a panel is hidden.
 - **Moving and resizing:** pressing an empty part of the row calls the system move, a double click maximises or restores, and the outer 6 px of the window call the system resize (cursor changes at the edges; the top edge is covered by the row).
 - **Opt out:** `RDT_NATIVE_TITLEBAR=1` keeps the standard Windows title bar.
 
+#### D-GUI-19 ELF path in the MCUs dialog
+
+rani could not see the ELF path in **Target > MCUs and ELF files** (2026-10-15): the cell wrapped and showed only `C:...`. `McuDialog` in `rdt/gui/panels.py` now keeps every cell on one line (`setWordWrap(False)`) and elides long text in the middle (`Qt.ElideMiddle`), so the ELF column, which takes the spare width, shows the start of the path and the file name. The cell's tooltip is the full path, kept up to date when the path is edited (`_item_changed`). The dialog opens 1200 px wide.
+
 #### D-LNF-1 Themes
 
 rani asked on 2026-10-15 for all four styles from the look and feel options (thread "Look and feel options") to be built. **View > Theme** offers them after System, Light and Dark (D-GUI-15), still saved as `ui/theme` in `ui.toml`. Each theme is a `Theme` record in `THEME` in `rdt/gui/style.py`: its palette, the application style sheet, the chart, connect-button and status-bar colours, and the panel-button style. `apply_theme` applies it, and `MainWindow.set_theme` passes it on to the toolbar, the panel buttons, the title bar and the chart.
@@ -1499,6 +1504,7 @@ The application is built against the simulator. With the firmware's read and wri
 | 2026-10-15 | Four more themes (Studio Dark, Islands, Instrument, Light Pro) and the behaviour ideas from the look and feel options: a RUN/STOP key instead of the Poll checkbox, icon buttons, MCU colours on chart traces, a link strip in the status bar with reply times, a density switch, hover icons on watch rows and monospace values (LNF-1 to LNF-8), at rani's request |
 | 2026-10-15 | The memory regions are saved in their own file beside the `.rdtw` (`bench.memory.toml`), named by `memory_file`, and a memory map can be loaded from a file (GUI File > Import > Memory map, `rdt memory import`) (WSP-8), at rani's request |
 | 2026-10-15 | The SCPI profile is saved in its own file beside the `.rdtw` (`bench.profile.toml`, every field written), which the `.rdtw` names like the watch and commands files; the profile dialog's **Load from file...** only fills the fields (WSP-7, replacing GUI-18's link to the loaded file), at rani's request |
+| 2026-10-15 | The MCUs dialog shows the ELF path on one line, cut in the middle so the file name stays visible, with the full path as the tooltip (GUI-19), at rani's request |
 
 ## 9. Appendix: binary protocol (planned)
 
