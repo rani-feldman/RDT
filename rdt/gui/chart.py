@@ -329,6 +329,16 @@ class ChartPanel(QWidget):
         if hasattr(self, "hint"):   # built: label the axes in the new colour
             self._update_axes()
 
+    def set_colors(self, background: str, line: str, text: str) -> None:
+        """A theme's own plot colours (LNF-1)."""
+        self.plot.setBackground(background)
+        self.axis_text = text
+        for axis in self.axes + [self.plot.getAxis("bottom")]:
+            axis.setPen(pg.mkPen(line))
+            axis.setTextPen(pg.mkPen(text))
+        if hasattr(self, "hint"):
+            self._update_axes()
+
     def _update_axes(self) -> None:
         for k, axis in enumerate(self.axes, start=1):
             on = [s for s in self.series.values() if s.axis == k]

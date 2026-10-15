@@ -1080,3 +1080,103 @@ def test_panel_buttons(qtbot, win):
     assert win.ui.value("session/layout") and win.ui.value("session/watch_shown") is False
     win.reset_layout()
     assert win.centralWidget().isVisible() and btn["watch"].isChecked() and btn["scope"].isChecked()
+
+
+# --- look and feel (LNF-1..8) --------------------------------------------------------------------
+
+def test_new_themes_and_density(qtbot, win):
+    """Studio dark, Islands, Instrument and Light pro (LNF-1); compact or comfortable rows (LNF-6)."""
+    from PySide6.QtWidgets import QApplication
+    from rdt.gui.style import THEMES, is_dark
+    assert {"studio", "islands", "instrument", "light_pro"} <= set(THEMES)
+    win.show()
+    win.theme_actions["studio"].trigger()
+    assert win.ui.value("ui/theme") == "studio" and is_dark() and QApplication.instance().styleSheet()
+    assert win.toolBarArea(win.modes) == Qt.LeftToolBarArea          # the panel buttons as a strip at the left
+    assert win.modes.buttons["watch"].toolButtonStyle() == Qt.ToolButtonIconOnly
+    assert win.chart.axis_text == "#a0a0a0"
+    win.set_theme("light_pro")
+    assert not is_dark() and win.toolBarArea(win.modes) == Qt.TopToolBarArea
+    assert win.menuWidget().palette().window().color().name() == "#03234b"   # the navy title bar
+    win.set_theme("instrument")
+    assert win.chart.plot.backgroundBrush().color().name() == "#000000"
+    win.density_actions["comfortable"].trigger()
+    assert win.ui.value("ui/density") == "comfortable" and "QTreeView::item" in QApplication.instance().styleSheet()
+    win.set_density("compact")
+    assert "QTreeView::item" not in QApplication.instance().styleSheet()
+    win.set_theme("system")
+    assert win.menuWidget().palette().window().color() == QApplication.palette().window().color()
+    assert not QApplication.instance().styleSheet()
+
+
+def test_run_stop_and_icon_buttons(qtbot, win):
+    """Polling is a RUN/STOP key (LNF-2); Poll now, Log CSV and the profile are icon buttons with
+    tooltips (LNF-3)."""
+    bar = win.bar
+    assert "RUN" in bar.polling.text() and bar.polling.isChecked()
+    bar.polling.click()
+    assert "STOP" in bar.polling.text() and not win.watch_tabs.polling
+    win.polling_action.trigger()                      # F7 lights RUN again
+    assert "RUN" in bar.polling.text() and bar.polling.isChecked()
+    for b in (bar.poll_now, bar.log_button, bar.profile):
+        assert b.text() == "" and not b.icon().isNull() and b.toolTip()
+    assert "RDT simulator" in bar.profile.toolTip()
+
+
+def test_trace_takes_its_mcu_colour(qtbot, win):
+    """A chart trace is drawn in its MCU's colour, a lighter or darker turn for the next (LNF-4)."""
+    from rdt.target import mcu_color
+    connect(qtbot, win)
+    tree = win.watch_tree
+    qtbot.waitUntil(lambda: bool(tree.chartable("main:motor.speed") and tree.chartable("main:motor.target")),
+                    timeout=5000)
+    tree.chart("main:motor.speed")
+    tree.chart("main:motor.target")
+    main = mcu_color(next(m for m in win.ws.config.mcus if m.name == "main"))
+    first, second = win.chart.series["main:motor.speed"].color, win.chart.series["main:motor.target"].color
+    assert first == main and second != main
+
+
+def test_link_strip_in_status_bar(qtbot, win):
+    """The status bar is a strip in the link's colour with each MCU's reply time (LNF-5)."""
+    connect(qtbot, win)
+    qtbot.waitUntil(lambda: "main" in win.link_label.text() and " ms" in win.link_label.text(), timeout=5000)
+    assert win.link_label.text().startswith("Connected") and "#1f7a46" in win.statusBar().styleSheet()
+    win.disconnect()
+    qtbot.waitUntil(lambda: win.link_label.text().startswith("Disconnected"), timeout=5000)
+    assert win.statusBar().styleSheet() == ""
+
+
+def test_row_hover_buttons_and_mono_values(qtbot, win):
+    """A watched row shows Chart and Remove buttons under the mouse (LNF-7); values are in a
+    fixed-width font (LNF-8)."""
+    from PySide6.QtCore import QEvent, QPointF
+    from PySide6.QtGui import QFontInfo, QMouseEvent
+    from PySide6.QtWidgets import QStyleOptionViewItem
+    from rdt.gui.variables import COL_NAME
+    connect(qtbot, win)
+    tree = win.watch_tree
+    qtbot.waitUntil(lambda: tree.chartable("main:motor.speed") is not None, timeout=5000)
+    idx = tree.indexFromItem(tree.states["main:motor.speed"].item, COL_NAME)
+    delegate = tree.itemDelegateForColumn(COL_NAME)
+    opt = QStyleOptionViewItem()
+    opt.rect = tree.visualRect(idx)
+    buttons = dict(delegate.buttons(opt.rect, idx))
+    assert set(buttons) == {"chart", "remove"}
+
+    def click(kind):
+        pos = QPointF(buttons[kind].center())
+        for t in (QEvent.MouseButtonPress, QEvent.MouseButtonRelease):
+            ev = QMouseEvent(t, pos, pos, Qt.LeftButton, Qt.LeftButton, Qt.NoModifier)
+            assert delegate.editorEvent(ev, tree.model(), opt, idx)
+
+    click("chart")
+    qtbot.waitUntil(lambda: win.chart.has("main:motor.speed"))
+    buttons = dict(delegate.buttons(opt.rect, idx))
+    assert set(buttons) == {"remove"}                 # already charted
+    click("remove")
+    qtbot.waitUntil(lambda: "main:motor.speed" not in tree.states)
+    value = tree.itemDelegateForColumn(1)
+    vopt = QStyleOptionViewItem()
+    value.initStyleOption(vopt, tree.model().index(0, 1))
+    assert QFontInfo(vopt.font).fixedPitch()
