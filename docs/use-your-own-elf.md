@@ -68,7 +68,7 @@ RDT can tell whether the firmware on the device is the build your ELF came from.
 
 **With no setup: a flash sample (any toolchain, Keil included).** The ELF holds the exact bytes of everything in flash: code, constants and the vector table. On Connect, RDT reads the start and end of each read-only section plus 32 blocks of 64 bytes spread over them (about 4 KB for a large image) and compares them with the ELF. Sections that run from somewhere other than where they are flashed, such as code a Keil scatter file puts in ITCM or RAM (copied there at startup), are skipped. Code and constants shift after almost any rebuild, so an outdated image is caught in practice; a change of a single constant could slip through. Nothing to set in the firmware, the build or RDT.
 
-If the firmware has a build ID or an identity variable (below), RDT compares that instead, which catches every change.
+If the firmware has a GNU build ID (below), RDT compares that instead, which catches every change.
 
 **The GNU build ID (GCC and clang).** The linker computes a SHA-1 hash over the whole linked image, so any change to code or data gives a new one. Nothing to set in RDT; it finds the build ID in the ELF by itself.
 
@@ -87,7 +87,6 @@ If the firmware has a build ID or an identity variable (below), RDT compares tha
 
 [`link_build_id.ld`](../sim/examples/firmware/link_build_id.ld) is a small linker script laid out this way.
 
-**A constant variable instead.** Set `identity = "fw_build"` under `[[mcu]]`, or the Identity variable column in Target > MCUs and ELF files, and give the firmware a constant that changes with every build, such as `__attribute__((used)) const char fw_build[] = __DATE__ " " __TIME__;`. It must be `const` (in flash), and it only changes when its own file is compiled again, so the build ID is the safer choice.
 
 **When RDT checks:**
 

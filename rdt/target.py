@@ -53,7 +53,6 @@ class McuConfig:
     timeout_ms: float | None = None   # overrides the profile's timeout for this MCU
     byte_order: str | None = None     # default: from the ELF, else the profile's
     ranges: list[Range] = field(default_factory=list)
-    identity: str | None = None       # a constant variable that tells firmware builds apart (SYM-8)
     short: str | None = None          # short name on GUI tags and chips, such as CM7 (GUI-12)
     color: str | None = None          # tag colour, "#rrggbb" (GUI-12)
 
@@ -159,7 +158,6 @@ class TargetConfig:
                 timeout_ms=float(t["timeout_ms"]) if "timeout_ms" in t else None,
                 byte_order=t.get("byte_order"),
                 ranges=[Range.from_dict(r) for r in t.get("ranges", [])],
-                identity=str(t["identity"]) if t.get("identity") else None,
                 short=check_short(str(t["short"])) if t.get("short") else None,
                 color=check_color(str(t["color"])) if t.get("color") else None,
             ))
@@ -230,13 +228,10 @@ class Mcu:
         return True
 
     def identity_area(self) -> tuple[int, int, str] | None:
-        """Where to compare the ELF with the firmware: address, size and what it is. The MCU's
-        ``identity`` variable when set, else the GNU build ID when the linker put it in memory."""
+        """Where to compare the ELF with the firmware: address, size and what it is. The GNU build
+        ID when the linker put it in memory, else None (a flash sample is compared)."""
         if self.elf is None:
             return None
-        if self._cfg.identity:
-            loc = self.resolver().resolve(parse(f"{self.name}:{self._cfg.identity}"))
-            return loc.addr, loc.size, self._cfg.identity
         note = build_id_note(self.elf.path)
         return (*note, "the GNU build ID") if note else None
 
@@ -358,10 +353,7 @@ class Target:
         return out
 
     def _identity(self, m: Mcu) -> Identity:
-        try:
-            area = m.identity_area()
-        except RdtError as e:
-            return Identity(m.name, "unchecked", f"identity variable: {e}")
+        area = m.identity_area()
         if area is None:
             return self._flash_identity(m)
         addr, size, what = area
@@ -374,12 +366,11 @@ class Target:
             return Identity(m.name, "unread", f"{what} could not be read: {e}")
         if actual == expected:
             return Identity(m.name, "match", f"{what} matches {m.elf.path.name}")
-        bid = not m._cfg.identity
         return Identity(m.name, "mismatch", f"{what} differs from {m.elf.path.name}: "
-                                            f"device {_show_bytes(actual, bid)}, ELF {_show_bytes(expected, bid)}")
+                                            f"device {_show_bytes(actual, True)}, ELF {_show_bytes(expected, True)}")
 
     def _flash_identity(self, m: Mcu) -> Identity:
-        """Without an identity variable or build ID: compare sampled blocks of the read-only
+        """Without a build ID: compare sampled blocks of the read-only
         sections (code, constants, vector table) on the device with the ELF file."""
         if m.elf is None:
             return Identity(m.name, "unchecked", "no ELF file to compare")

@@ -272,8 +272,6 @@ class Workspace:
                 md["elf"] = _rel(m.elf, base)
             if m.timeout_ms is not None:
                 md["timeout_ms"] = _num(m.timeout_ms)
-            if m.identity:
-                md["identity"] = m.identity
             if m.short:
                 md["short"] = m.short
             if m.color:

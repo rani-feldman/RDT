@@ -578,8 +578,7 @@ def test_mcu_dialog(qtbot, win):
     dlg = McuDialog(win.ws.config.mcus, win)
     qtbot.addWidget(dlg)
     assert [m.name for m in dlg.result_mcus()] == ["main", "motorctl"]
-    assert dlg.result_mcus()[0].ranges   # GPIOA kept
-    assert dlg.table.item(0, 6).text() == "firmware_name" and dlg.result_mcus()[0].identity == "firmware_name"
+    assert dlg.table.columnCount() == 6   # no identity variable column
     dlg.table.item(1, 2).setText("MC")
     dlg.table.item(1, 3).setText("#D9822B")
     m = dlg.result_mcus()[1]
@@ -842,7 +841,7 @@ def test_reopen_last_workspace(qtbot, win, bench, tmp_path):
 
 def test_elf_identity(qtbot, win, tmp_path, monkeypatch):
     connect(qtbot, win)
-    qtbot.waitUntil(lambda: "firmware_name matches" in win.console.output.toPlainText(), timeout=3000)
+    qtbot.waitUntil(lambda: "3 flash blocks (112 bytes) match main.elf" in win.console.output.toPlainText(), timeout=3000)
     assert not any("mismatch" in a.text() for a in win.findChildren(QAction))   # no way around it in the GUI
     assert "main: ELF matches the firmware; motorctl: ELF matches the firmware" in win.message.text()
     assert "MCU motorctl: 2 flash blocks (88 bytes) match motorctl.elf" in win.console.output.toPlainText()
@@ -861,7 +860,7 @@ def test_elf_identity(qtbot, win, tmp_path, monkeypatch):
     qtbot.waitUntil(lambda: "does not match the firmware on main" in win.banner.text.text(), timeout=3000)
     qtbot.waitUntil(lambda: "\u2717 main.elf does not match" in card(win, "main").elf.text(), timeout=3000)
     assert not win.banner.isHidden() and not win.banner.load_button.isHidden()
-    assert "rdt-mXin" in win.banner.toolTip() and not win.banner.toggleViewAction().isVisible()
+    assert "1 of 3 flash blocks" in win.banner.toolTip() and not win.banner.toggleViewAction().isVisible()
     assert "does not match" not in win.message.text()   # one error bar, nothing red at the bottom
     monkeypatch.setattr(QMessageBox, "question", lambda *a, **k: QMessageBox.Yes)
     win.watch_tree.write("main:motor.target", "1500")
