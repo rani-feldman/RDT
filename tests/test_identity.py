@@ -36,8 +36,8 @@ def other_build(tmp_path) -> Path:
     return elf
 
 
-def mcus(main_elf=FIRMWARE / "main.elf", identity="firmware_name"):
-    return [McuConfig(0, "main", main_elf, identity=identity), McuConfig(1, "motorctl", FIRMWARE / "motorctl.elf")]
+def mcus(main_elf=FIRMWARE / "main.elf"):
+    return [McuConfig(0, "main", main_elf), McuConfig(1, "motorctl", FIRMWARE / "motorctl.elf")]
 
 
 def test_elf_bytes():
@@ -61,7 +61,7 @@ def test_matching_elf(sim):
     with make_target("tcp", sim.tcp_address, mcus=mcus()) as t:
         assert [(m.name, m.identity.status) for m in t.mcus.values()] == [("main", "match"), ("motorctl", "match")]
         assert "2 flash blocks (88 bytes) match motorctl.elf" in str(t.mcus["motorctl"].identity)
-        assert "firmware_name matches main.elf" in str(t.mcus["main"].identity)
+        assert "3 flash blocks (112 bytes) match main.elf" in str(t.mcus["main"].identity)
         t.write_value("main:gains[0]", 5)   # writes go through
 
 
@@ -69,7 +69,7 @@ def test_mismatch_refuses_writes_until_allowed(sim, tmp_path):
     with make_target("tcp", sim.tcp_address, mcus=mcus(other_build(tmp_path))) as t:
         ident = t.mcus["main"].identity
         assert ident.status == "mismatch"
-        assert "device 'rdt-main', ELF 'rdt-mXin'" in ident.detail
+        assert "1 of 3 flash blocks (112 bytes) differ" in ident.detail
         with pytest.raises(WriteRefused, match="does not match the firmware"):
             t.write_value("main:gains[0]", 5)
         with pytest.raises(WriteRefused):
@@ -127,13 +127,13 @@ def test_checked_again_after_the_link_comes_back(sim):
             assert t.stale_identities() == ["main", "motorctl"]
             with pytest.raises(WriteRefused, match="does not match"):
                 t.write_value("main:gains[0]", 5)
-            assert t.stale_identities() == ["motorctl"] and "device 'rdt-new'" in t.mcus["main"].identity.detail
+            assert t.stale_identities() == ["motorctl"] and "differ" in t.mcus["main"].identity.detail
     finally:
         relay.close()
 
 
-def test_flash_samples_without_an_identity(sim, tmp_path):
-    """No identity variable or build ID: blocks of the read-only sections are compared (SYM-8)."""
+def test_flash_samples_without_a_build_id(sim, tmp_path):
+    """No build ID: blocks of the read-only sections are compared (SYM-8)."""
     samples = flash_samples(FIRMWARE / "main.elf")
     assert [(hex(a), len(b)) for a, b in samples] == [("0x8000000", 80), ("0x8000050", 16), ("0x8000060", 16)]
     data = bytearray((FIRMWARE / "main.elf").read_bytes())
@@ -141,7 +141,7 @@ def test_flash_samples_without_an_identity(sim, tmp_path):
     data[at] ^= 0xFF
     elf = tmp_path / "main.elf"
     elf.write_bytes(bytes(data))
-    with make_target("tcp", sim.tcp_address, mcus=mcus(elf, identity=None)) as t:
+    with make_target("tcp", sim.tcp_address, mcus=mcus(elf)) as t:
         ident = t.mcus["main"].identity
         assert ident.status == "mismatch"
         assert "1 of 3 flash blocks (112 bytes) differ, first at 0x08000008" in ident.detail
@@ -198,15 +198,7 @@ def test_flash_samples_skip_code_copied_to_itcm(tmp_path):
 
 
 def test_identity_problems_never_block(sim):
-    with make_target("tcp", sim.tcp_address, mcus=mcus(identity="no_such_var")) as t:
-        ident = t.mcus["main"].identity
-        assert ident.status == "unchecked" and "no_such_var" in ident.detail
-        t.write_value("main:gains[0]", 5)
-    with make_target("tcp", sim.tcp_address, mcus=mcus(identity="rx_buffer")) as t:   # .bss: no value in the file
-        assert t.mcus["main"].identity.status == "unchecked"
-    cfgs = mcus()
-    cfgs[1].identity = "pwm_duty"
-    with make_target("tcp", sim.tcp_address, mcus=cfgs) as t:
+    with make_target("tcp", sim.tcp_address, mcus=mcus()) as t:
         assert t.mcus["motorctl"].identity.status == "match"
         t.command("SIMulation:MCU:SILent 1,ON")
         ident = t.check_identity("motorctl")[0]
@@ -214,20 +206,24 @@ def test_identity_problems_never_block(sim):
         t.write_value("main:gains[0]", 5)
 
 
-def test_target_file_and_workspace_keep_identity(tmp_path):
+def test_old_identity_variable_is_ignored(tmp_path):
+    """The per-MCU identity variable was removed (rani, 2026-10-15): an old file that has one still
+    loads, the flash sample is compared, and the key is dropped on save."""
+    import tomllib
     from rdt.workspace import Workspace
-    ws = Workspace.load(ROOT / "examples" / "sim_bench.rdtw")
-    assert ws.config.mcus[0].identity == "firmware_name" and ws.config.mcus[1].identity is None
+    bench = ROOT / "examples" / "sim_bench.rdtw"
+    raw = tomllib.loads(bench.read_text())
+    raw["mcu"][0]["identity"] = "firmware_name"
+    ws = Workspace.from_dict(raw, bench.parent)
     ws.save(tmp_path / "copy.rdtw")
-    assert 'identity = "firmware_name"' in (tmp_path / "copy.rdtw").read_text()
-    assert Workspace.load(tmp_path / "copy.rdtw").config.mcus[0].identity == "firmware_name"
+    assert "identity" not in (tmp_path / "copy.rdtw").read_text()
 
 
 def test_cli(sim, tmp_path, capsys):
     address = "%s:%d" % tuple(sim.tcp_address)
     out = io.StringIO()
     assert main(["-t", str(EXAMPLE_TARGET), "--tcp", address, "info"], out=out) == 0
-    assert "identity: match, firmware_name matches main.elf" in out.getvalue()
+    assert "identity: match, 3 flash blocks (112 bytes) match main.elf" in out.getvalue()
 
     target = tmp_path / "target.toml"
     target.write_text(EXAMPLE_TARGET.read_text().replace(
@@ -237,7 +233,7 @@ def test_cli(sim, tmp_path, capsys):
     out = io.StringIO()
     assert main(["-t", str(target), "--tcp", address, "write", "main:gains[0]", "5"], out=out) == 1
     err = capsys.readouterr().err
-    assert "warning: MCU main: firmware_name differs" in err and "--allow-mismatch" in err
+    assert "warning: MCU main: flash differs from main.elf: 1 of 3 flash blocks" in err and "--allow-mismatch" in err
     assert "writes are refused" in err
     out = io.StringIO()
     assert main(["-t", str(target), "--tcp", address, "--allow-mismatch", "write", "main:gains[0]", "5"], out=out) == 0

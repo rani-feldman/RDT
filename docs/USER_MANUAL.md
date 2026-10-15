@@ -140,7 +140,7 @@ retries      = 2
 
 **Memory map.** RDT refuses any access outside each MCU's ELF sections and the memory ranges you list, before sending anything. Add a range for each RAM or flash bank the firmware lets you read (`kind = "memory"`), and for each register block (`kind = "peripheral"`, read alone at its exact size and never merged with other reads). Writes to read-only sections, such as code and constants, are refused.
 
-**ELF check.** On connect, RDT checks that each MCU runs the firmware its ELF came from, by comparing a sample of the flash (code, constants and the vector table) on the device with the ELF, or an identity variable or GNU build ID when there is one. If they don't match, every read and write to that MCU is refused, so a stale ELF can never read or write the wrong address.
+**ELF check.** On connect, RDT checks that each MCU runs the firmware its ELF came from, by comparing a sample of the flash (code, constants and the vector table) on the device with the ELF, or the GNU build ID when there is one. If they don't match, every read and write to that MCU is refused, so a stale ELF can never read or write the wrong address.
 
 ---
 
@@ -190,7 +190,6 @@ Do this once per bench, then save the workspace.
    - **Short name** (1 to 6 letters, digits or underscores, such as `CM7`) and **Colour**: the MCU's tag in the watch tree and its colour on the chart. Double-click the colour to choose one. Left empty, they are picked for you.
    - **ELF file**: the `.elf` or `.axf` the linker wrote for that MCU.
    - **Timeout ms**: overrides the profile's timeout for this MCU.
-   - **Identity variable** (optional): a constant that changes with every build. Without one, RDT compares a flash sample.
 5. **Load the memory map.** **File > Import > Memory map...** reads the memory ranges from a memory file, or from a profile, target file or another workspace. Choose whether to add them to yours or replace them. The GUI has no editor for single ranges; write them in a memory file (see [Memory ranges](CLI.md#scpi-profile)) and import it. Each MCU card's **Memory ranges ▸** lists what RDT may access on that MCU.
 6. **Import the known commands** (optional). **File > Import > Commands...** reads a commands file (`.toml`), a CSV file or a text file with one command per line. They appear in the console's **Commands** list.
 7. **Save.** **File > Save as...** writes the `.rdtw` and its files, by default in `%LOCALAPPDATA%\rdt`.
@@ -402,7 +401,7 @@ Link:          tcp 127.0.0.1:5025
 Profile:       RDT simulator
 Max response:  1024 bytes
 MCU 0 main (main.elf, little endian)
-    identity: match, firmware_name matches main.elf
+    identity: match, 3 flash blocks (112 bytes) match main.elf
     0x08000000        80  ro  section     .text
     0x20000000        36  rw  section     .data
     0x48000000      1024  rw  peripheral  GPIOA

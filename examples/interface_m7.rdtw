@@ -10,7 +10,6 @@ address   = "127.0.0.1:5025"
 id       = 0
 name     = "Interface"
 elf      = "../Firmware/GAC_INTERFACE_M7.elf"
-identity = "firmware_name"
 
 [[mcu.ranges]]
 name  = "GPIOA"
