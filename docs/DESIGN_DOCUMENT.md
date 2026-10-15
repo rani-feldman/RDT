@@ -212,7 +212,7 @@ Each requirement links to its design section.
 | WSP-4 | The settings are split into separate files: the watched variables and watch tabs in one file, the imported commands in another, both opened with the workspace (2026-10-14); the commands file is a TOML file the workspace names, and the `.rdtw` and its files sit together, by default in `%LOCALAPPDATA%\rdt` (2026-10-14) | Done | [D-WSP-4](#d-wsp-4-split-files) |
 | WSP-5 | The interface settings are kept in their own file, per user, not in the workspace (2026-10-14) | Done | [D-WSP-5](#d-wsp-5-interface-settings-file) |
 | WSP-6 | The watch list, the commands and the interface settings can each be imported and exported (2026-10-14) | Done | [D-WSP-6](#d-wsp-6-import-and-export) |
-| WSP-7 | The SCPI profile is kept in its own file beside the `.rdtw`, which points to it, with every field written, defaults included (2026-10-15) | In review (PR #109) | [D-WSP-4](#d-wsp-4-split-files) |
+| WSP-7 | The SCPI profile is kept in its own file beside the `.rdtw`, which points to it, with every field written, defaults included (2026-10-15) | Done | [D-WSP-4](#d-wsp-4-split-files) |
 
 ### 2.15 Command line and API
 
