@@ -40,6 +40,7 @@ from .variables import WatchTabs, WatchTree
 
 FILTER = "RDT workspace (*.rdtw);;Target file (*.toml);;All files (*)"
 WATCH_FILTER = "Watch list (*.watch.toml *.toml);;RDT workspace (*.rdtw);;All files (*)"
+MEMORY_FILTER = "Memory map (*.memory.toml *.toml);;RDT workspace (*.rdtw);;All files (*)"
 UI_FILTER = "Interface settings (*.toml);;All files (*)"
 TICK_MS = 50            # how often the watch tabs look for items that are due
 ELF_CHECK_MS = 1000     # how often to look for rebuilt ELF files
@@ -537,10 +538,12 @@ class MainWindow(QMainWindow):
         sub = m.addMenu("&Import")
         action(sub, "&Watch list...", lambda: self.import_watches())
         action(sub, "&Commands...", lambda: self.console.commands.import_file())
+        action(sub, "&Memory map...", lambda: self.import_memory())
         action(sub, "&Interface settings...", lambda: self.import_ui())
         sub = m.addMenu("&Export")
         action(sub, "&Watch list...", lambda: self.export_watches())
         action(sub, "&Commands...", lambda: self.console.commands.export_file())
+        action(sub, "&Memory map...", lambda: self.export_memory())
         action(sub, "&Interface settings...", lambda: self.export_ui())
         m.addSeparator()
         action(m, "&Quit", self.close, QKeySequence.Quit)
@@ -915,6 +918,52 @@ class MainWindow(QMainWindow):
             QMessageBox.warning(self, "Export watch list", str(e))
             return False
         self.status(f"Exported {len(self.ws.tabs)} tabs ({len(self.ws.watches)} items) to {Path(path).name}")
+        return True
+
+    def import_memory(self, path: str | Path | None = None, replace: bool | None = None) -> bool:
+        """Load a memory map: the ranges of a memory file (or a profile, target file or workspace)."""
+        if path is None:
+            path, _ = QFileDialog.getOpenFileName(self, "Load memory map", "", MEMORY_FILTER)
+            if not path:
+                return False
+        if replace is None:
+            replace = False
+            have = len(self.ws.memory_ranges())
+            if have:
+                box = QMessageBox(QMessageBox.Question, "Load memory map",
+                                  f"The workspace has {have} memory ranges. Add the file's ranges to them, "
+                                  f"or replace them?", parent=self)
+                add = box.addButton("Add", QMessageBox.AcceptRole)
+                rep = box.addButton("Replace", QMessageBox.DestructiveRole)
+                box.addButton(QMessageBox.Cancel)
+                box.exec()
+                if box.clickedButton() not in (add, rep):
+                    return False
+                replace = box.clickedButton() is rep
+        try:
+            added, skipped = self.ws.import_memory(path, replace)
+        except ConfigError as e:
+            QMessageBox.warning(self, "Load memory map", str(e))
+            return False
+        self.set_dirty()
+        self.status(f"Loaded {added} memory ranges from {Path(path).name}"
+                    + (f", skipped {skipped} already here" if skipped else ""))
+        self.reconnect()
+        return True
+
+    def export_memory(self, path: str | Path | None = None) -> bool:
+        if path is None:
+            stem = self.ws.path.stem if self.ws.path else "memory"
+            path, _ = QFileDialog.getSaveFileName(self, "Export memory map", f"{stem}.memory.toml",
+                                                  "Memory map (*.memory.toml *.toml)")
+            if not path:
+                return False
+        try:
+            self.ws.export_memory(path)
+        except ConfigError as e:
+            QMessageBox.warning(self, "Export memory map", str(e))
+            return False
+        self.status(f"Exported {len(self.ws.memory_ranges())} memory ranges to {Path(path).name}")
         return True
 
     def import_ui(self, path: str | Path | None = None) -> bool:

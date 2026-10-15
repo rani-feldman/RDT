@@ -186,6 +186,7 @@ The profile says how the firmware spells a memory read and write and how it enco
 **File > Import** and **File > Export** move each part on its own:
 
 - **Watch list...** Export writes the watch tabs and chart to a watch list file. Import reads one (or the tabs of another `.rdtw`) and asks whether to add its tabs to yours (a tab with the same name gets the items it lacks; an item you already watch keeps its settings) or replace your tabs and chart.
+- **Memory map...** Export writes all the memory ranges to a memory file (`bench.memory.toml`). Import ("Load memory map") reads one (or the ranges of a profile, target file or another `.rdtw`) and asks whether to add its ranges to yours or replace them; ranges you already have are skipped, a map whose ranges overlap is refused, and RDT reconnects to use the new map.
 - **Commands...** The known commands as a commands file (`.toml`) or CSV, the same as the console's **Commands** panel buttons.
 - **Interface settings...** The theme, the console's text size and wrapping and the memory view's display format. These are per user, not per workspace, and kept in `ui.toml` next to the console history (`%LOCALAPPDATA%\rdt\ui.toml`). Import shows the new settings at once; a setting the file leaves out goes back to its default. The first start of this version moves the settings from the older `gui.ini` and `console.ini` into `ui.toml`.
 

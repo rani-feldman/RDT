@@ -189,23 +189,26 @@ def test_save_and_load(tmp_path):
     for key in ("name", "read", "write", "max_write", "align", "byte_order", "max_response", "terminator",
                 "timeout_ms", "retries"):
         assert re.search(rf"^{key} += ", profile_text, re.M), key
-    assert "SRAM2" in profile_text
+    assert "SRAM2" not in profile_text and "SRAM2" in (tmp_path / "sub" / "bench.memory.toml").read_text()
     assert ws.config.profile_path == tmp_path / "sub" / "bench.profile.toml"
-    assert re.search(r"^start +=  ?0x48000000$", text, re.M)
+    memory_text = (tmp_path / "sub" / "bench.memory.toml").read_text()
+    assert re.search(r"^start +=  ?0x48000000$", memory_text, re.M) and "ranges" not in text
 
     back = Workspace.load(path)
     assert back.config.connection == cfg.connection
     assert back.config.profile.name == "bench" and back.config.profile.timeout_ms == 800
     assert "size_query" not in text
-    assert back.config.profile.ranges == profile.ranges
-    assert [(m.id, m.name, m.elf.resolve(), m.timeout_ms, m.ranges) for m in back.config.mcus] == \
-           [(m.id, m.name, m.elf.resolve(), m.timeout_ms, m.ranges) for m in cfg.mcus]
+    assert [(r.name, r.start, r.mcu, r.writable) for r in back.memory_ranges()] == [
+        ("SRAM2", 0x10000000, "main", True), ("GPIOA", 0x48000000, "main", False)]
+    assert [(m.id, m.name, m.elf.resolve(), m.timeout_ms) for m in back.config.mcus] == \
+           [(m.id, m.name, m.elf.resolve(), m.timeout_ms) for m in cfg.mcus]
     assert back.tabs == ws.tabs
     assert (back.poll_ms, back.chart) == (250, ws.chart)
     # Saving again changes nothing.
     back.save()
     assert path.read_text() == text
     assert (tmp_path / "sub" / "bench.profile.toml").read_text() == profile_text
+    assert (tmp_path / "sub" / "bench.memory.toml").read_text() == memory_text
 
 
 def test_a_target_file_is_a_workspace():
@@ -476,10 +479,11 @@ def test_memory_range_kind_is_saved(tmp_path):
     ws = Workspace(TargetConfig(mcus=[McuConfig(0, "main", ranges=[
         Range("DTCM", 0x20000000, 0x20000, kind="memory"), Range("GPIOA", 0x48000000, 0x400)])]))
     ws.save(tmp_path / "b.rdtw")
-    text = (tmp_path / "b.rdtw").read_text()
+    text = (tmp_path / "b.memory.toml").read_text()      # the ranges are in the memory file (rani, 2026-10-15)
     assert text.count("kind") == 1 and '"memory"' in text   # peripheral is the default
-    back = Workspace.load(tmp_path / "b.rdtw").config.mcus[0].ranges
-    assert [(r.name, r.kind, r.size) for r in back] == [("DTCM", "memory", 0x20000), ("GPIOA", "peripheral", 0x400)]
+    back = Workspace.load(tmp_path / "b.rdtw").memory_ranges()
+    assert [(r.name, r.kind, r.size, r.mcu) for r in back] == [
+        ("DTCM", "memory", 0x20000, "main"), ("GPIOA", "peripheral", 0x400, "main")]
 
 
 def test_mcu_short_names_and_colours():
