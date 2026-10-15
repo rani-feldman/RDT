@@ -88,7 +88,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     sub = ap.add_subparsers(dest="cmd", metavar="COMMAND", required=True)
 
-    sub.add_parser("info", help="identify the device and list its MCUs and memory")
+    sub.add_parser("info", help="show the link, the profile, each MCU's ELF check and its memory")
 
     p = sub.add_parser("symbols", help="list or search an MCU's variables (no device needed)")
     p.add_argument("mcu_name", metavar="mcu")
