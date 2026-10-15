@@ -175,7 +175,7 @@ Each requirement links to its design section.
 | GUI-15 | A dark theme: View > Theme offers System, Light or Dark, saved per user (2026-10-14) | Done | [D-GUI-15](#d-gui-15-dark-theme) |
 | GUI-16 | Drag variables and watch rows onto a watch tab, a tab's title or the chart (2026-10-14) | Done | [D-GUI-16](#d-gui-16-drag-and-drop) |
 | GUI-17 | One title bar row: the app icon, the menus and the minimise, maximise and close buttons in a single line, with no title text and no standard Windows title bar above it (rani, 2026-10-14) | Done | [D-GUI-17](#d-gui-17-one-row-title-bar) |
-| GUI-18 | Load a profile file from inside the SCPI profile dialog; **Target > Load profile file...** is removed (2026-10-15) | In review (PR #104) | [D-SCPI-9](#d-scpi-9-profile-editor) |
+| GUI-18 | Load a profile file from inside the SCPI profile dialog; **Target > Load profile file...** is removed (2026-10-15) | Done | [D-SCPI-9](#d-scpi-9-profile-editor) |
 
 ### 2.12 Live chart
 
