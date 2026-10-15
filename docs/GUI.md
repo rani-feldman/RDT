@@ -1,6 +1,6 @@
 # RDT GUI
 
-The GUI works on one workspace (`.rdtw`, see [CLI.md](CLI.md#workspace)): the connection, the SCPI profile, the MCUs and their ELF files, the watch tabs, the chart layout and the known commands. Everything you change in the window is saved back to it: the watch tabs and chart go to its watch list file and the commands to its commands file (see [Files](#files)).
+The GUI works on one workspace (`.rdtw`, see [CLI.md](CLI.md#workspace)): the connection, the SCPI profile, the MCUs and their ELF files, the memory map, the watch tabs, the chart layout and the known commands. Everything you change in the window is saved back to it: the profile, the memory map, the watch tabs and chart, and the commands each go to a file of their own beside the `.rdtw` (see [Files](#files)). For a step-by-step guide, see the [user manual](USER_MANUAL.md).
 
 ```
 python -m pip install -e .[dev]
@@ -8,7 +8,7 @@ python -m sim &                          # the simulated device
 rdt-gui examples/sim_bench.rdtw          # or: python -m rdt.gui examples/sim_bench.rdtw
 ```
 
-Started with no file, `rdt-gui` reopens the workspace you last opened or saved. If there is none (or that file is gone), it opens `rdt.toml` from the current folder, or else from `%LOCALAPPDATA%\rdt`, the same default target file as the CLI (see [Default files](CLI.md#default-files)); otherwise it starts with a new workspace. File > Open and Save as start in `%LOCALAPPDATA%\rdt` (beside `ui.toml`), and a workspace's `.watch.toml` and `.commands.toml` are always saved beside its `.rdtw`.
+Started with no file, `rdt-gui` reopens the workspace you last opened or saved. If there is none (or that file is gone), it opens `rdt.toml` from the current folder, or else from `%LOCALAPPDATA%\rdt`, the same default target file as the CLI (see [Default files](CLI.md#default-files)); otherwise it starts with a new workspace. File > Open and Save as start in `%LOCALAPPDATA%\rdt` (beside `ui.toml`), and a workspace's `.profile.toml`, `.memory.toml`, `.watch.toml` and `.commands.toml` are always saved beside its `.rdtw`.
 
 ![RDT main window connected to the simulator](images/gui-main.png)
 
@@ -181,13 +181,13 @@ The profile says how the firmware spells a memory read and write and how it enco
 
 ## Files
 
-**File > New, Open, Save, Save as**. A workspace is saved as four files next to each other: `bench.rdtw` (connection, MCUs, polling), `bench.profile.toml` (the SCPI profile), `bench.watch.toml` (the watch tabs and chart) and `bench.commands.toml` (the known commands); opening the `.rdtw` loads all of them. A workspace from before the split, with everything in the `.rdtw`, still opens and is split on the next save; one with its commands in `bench.commands.csv` gets `bench.commands.toml` on the next save. See [CLI.md](CLI.md#files-of-a-workspace).
+**File > New, Open, Save, Save as**. A workspace is saved as up to five files next to each other: `bench.rdtw` (connection, MCUs, polling), `bench.profile.toml` (the SCPI profile), `bench.memory.toml` (the memory map), `bench.watch.toml` (the watch tabs and chart) and `bench.commands.toml` (the known commands); opening the `.rdtw` loads all of them. A workspace from before the split, with everything in the `.rdtw`, still opens and is split on the next save; one with its commands in `bench.commands.csv` gets `bench.commands.toml` on the next save. See [CLI.md](CLI.md#files-of-a-workspace).
 
 **File > Import** and **File > Export** move each part on its own:
 
 - **Watch list...** Export writes the watch tabs and chart to a watch list file. Import reads one (or the tabs of another `.rdtw`) and asks whether to add its tabs to yours (a tab with the same name gets the items it lacks; an item you already watch keeps its settings) or replace your tabs and chart.
 - **Memory map...** Export writes all the memory ranges to a memory file (`bench.memory.toml`). Import ("Load memory map") reads one (or the ranges of a profile, target file or another `.rdtw`) and asks whether to add its ranges to yours or replace them; ranges you already have are skipped, a map whose ranges overlap is refused, and RDT reconnects to use the new map.
 - **Commands...** The known commands as a commands file (`.toml`) or CSV, the same as the console's **Commands** panel buttons.
-- **Interface settings...** The theme, the console's text size and wrapping and the memory view's display format. These are per user, not per workspace, and kept in `ui.toml` next to the console history (`%LOCALAPPDATA%\rdt\ui.toml`). Import shows the new settings at once; a setting the file leaves out goes back to its default. The first start of this version moves the settings from the older `gui.ini` and `console.ini` into `ui.toml`.
+- **Interface settings...** The theme and row density, the console's text size and wrapping and the memory view's display format. These are per user, not per workspace, and kept in `ui.toml` next to the console history (`%LOCALAPPDATA%\rdt\ui.toml`). The panel layout and the last workspace are kept there too, but are never exported. Import shows the new settings at once; a setting the file leaves out goes back to its default. The first start of this version moves the settings from the older `gui.ini` and `console.ini` into `ui.toml`.
 
 Opening a plain target file (`.toml`) starts a new workspace from it, so Save asks where to put the `.rdtw` rather than overwriting the target file. A workspace from before watch tabs opens with its watch list in one tab, `Watch`. Command buttons are no longer part of RDT: a workspace that has them still opens, the status bar says they were dropped, and they are left out when it is saved. Type such commands in the SCPI console instead. The title shows `*` while there are unsaved changes, and closing the window asks whether to save them.
