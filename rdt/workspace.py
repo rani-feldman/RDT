@@ -811,14 +811,14 @@ def _range_dict(r: Range) -> dict:
 
 
 def _profile_dict(p: Profile) -> dict:
-    default = Profile()
+    """Every field of the profile, defaults included, so the file shows the whole profile
+    (rani, 2026-10-15)."""
     d = {}
     for f in fields(Profile):
         if f.name == "ranges":
             continue
         v = getattr(p, f.name)
-        if v != getattr(default, f.name) or f.name == "name":
-            d[f.name] = "" if v is None else _num(v)
+        d[f.name] = "" if v is None else _num(v)
     return d
 
 
