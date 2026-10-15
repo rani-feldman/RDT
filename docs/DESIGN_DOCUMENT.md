@@ -177,14 +177,14 @@ Each requirement links to its design section.
 | GUI-16 | Drag variables and watch rows onto a watch tab, a tab's title or the chart (2026-10-14) | Done | [D-GUI-16](#d-gui-16-drag-and-drop) |
 | GUI-17 | One title bar row: the app icon, the menus and the minimise, maximise and close buttons in a single line, with no title text and no standard Windows title bar above it (rani, 2026-10-14) | Done | [D-GUI-17](#d-gui-17-one-row-title-bar) |
 | GUI-18 | Load a profile file from inside the SCPI profile dialog; **Target > Load profile file...** is removed (2026-10-15) | Done | [D-SCPI-9](#d-scpi-9-profile-editor) |
-| LNF-1 | Four more themes in **View > Theme**: Studio Dark, Islands, Instrument and Light Pro (2026-10-15) | In progress | [D-LNF-1](#d-lnf-1-themes) |
-| LNF-2 | A **RUN/STOP** key replaces the **Poll** checkbox (2026-10-15) | In progress | [D-LNF-2](#d-lnf-2-runstop-key) |
-| LNF-3 | Icon buttons for Profile, Poll now, Log CSV and the panel buttons (2026-10-15) | In progress | [D-LNF-3](#d-lnf-3-icon-buttons) |
-| LNF-4 | Chart traces take the colour of their MCU (2026-10-15) | In progress | [D-LNF-4](#d-lnf-4-mcu-colours-on-the-chart) |
-| LNF-5 | The link state is a coloured strip in the status bar, with each MCU's reply time (2026-10-15) | In progress | [D-LNF-5](#d-lnf-5-link-strip-in-the-status-bar) |
-| LNF-6 | **View > Density**: Compact or Comfortable, saved per user (2026-10-15) | In progress | [D-LNF-6](#d-lnf-6-density) |
-| LNF-7 | Chart and remove icons appear when hovering over a watch row (2026-10-15) | In progress | [D-LNF-7](#d-lnf-7-hover-icons-on-watch-rows) |
-| LNF-8 | Values are shown in a monospace font (2026-10-15) | In progress | [D-LNF-8](#d-lnf-8-monospace-values) |
+| LNF-1 | Four more themes in **View > Theme**: Studio Dark, Islands, Instrument and Light Pro (2026-10-15) | In review (PR #111) | [D-LNF-1](#d-lnf-1-themes) |
+| LNF-2 | A **RUN/STOP** key replaces the **Poll** checkbox (2026-10-15) | In review (PR #111) | [D-LNF-2](#d-lnf-2-runstop-key) |
+| LNF-3 | Icon buttons for Profile, Poll now, Log CSV and the panel buttons (2026-10-15) | In review (PR #111) | [D-LNF-3](#d-lnf-3-icon-buttons) |
+| LNF-4 | Chart traces take the colour of their MCU (2026-10-15) | In review (PR #111) | [D-LNF-4](#d-lnf-4-mcu-colours-on-the-chart) |
+| LNF-5 | The link state is a coloured strip in the status bar, with each MCU's reply time (2026-10-15) | In review (PR #111) | [D-LNF-5](#d-lnf-5-link-strip-in-the-status-bar) |
+| LNF-6 | **View > Density**: Compact or Comfortable, saved per user (2026-10-15) | In review (PR #111) | [D-LNF-6](#d-lnf-6-density) |
+| LNF-7 | Chart and Remove buttons appear on a watch row while the mouse is over it (2026-10-15) | In review (PR #111) | [D-LNF-7](#d-lnf-7-hover-buttons-on-watch-rows) |
+| LNF-8 | Values are shown in a monospace font (2026-10-15) | In review (PR #111) | [D-LNF-8](#d-lnf-8-monospace-values) |
 
 ### 2.12 Live chart
 
@@ -978,40 +978,40 @@ Polling, the chart and the CSV log keep running while a panel is hidden.
 
 #### D-LNF-1 Themes
 
-rani asked on 2026-10-15 for all four styles from the look and feel options (thread "Look and feel options") to be built. **View > Theme** gains them next to System, Light and Dark (D-GUI-15), still saved as `ui/theme` in `ui.toml`:
+rani asked on 2026-10-15 for all four styles from the look and feel options (thread "Look and feel options") to be built. **View > Theme** offers them after System, Light and Dark (D-GUI-15), still saved as `ui/theme` in `ui.toml`. Each theme is a `Theme` record in `THEME` in `rdt/gui/style.py`: its palette, the application style sheet, the chart, connect-button and status-bar colours, and the panel-button style. `apply_theme` applies it, and `MainWindow.set_theme` passes it on to the toolbar, the panel buttons, the title bar and the chart.
 
-- **Studio Dark:** like VS Code or Ozone. The panel buttons become icons on a strip at the far left, and the status bar is blue.
-- **Islands:** like JetBrains or Windows 11. Rounded panels, more space, one blue accent.
-- **Instrument:** like an oscilloscope. A black plot, MCU colours on the traces (D-LNF-4) and the RUN/STOP key (D-LNF-2).
-- **Light Pro:** like CubeMonitor. A white work area, a navy title bar and zebra rows.
+- **Studio dark** (`studio`): like VS Code or Segger Ozone, flat and square. The panel buttons become an icon strip down the window's left edge (`panels_left`).
+- **Islands** (`islands`): like JetBrains or Windows 11. Rounded panels and one blue accent.
+- **Instrument** (`instrument`): like an oscilloscope, with a black plot.
+- **Light pro** (`light_pro`): like CubeMonitor. A white work area and a navy title bar.
 
 #### D-LNF-2 RUN/STOP key
 
-A **RUN/STOP** key replaces the **Poll** checkbox of D-POLL-5 and does the same thing: it turns all polling on or off. Polling still starts on and is not saved.
+A **RUN/STOP** key, as on an oscilloscope, replaces the **Poll** checkbox of D-POLL-5 and does the same thing, still with F7: a green `▶ RUN` while polling, a red `■ STOP` when stopped. Polling still starts on and is not saved.
 
 #### D-LNF-3 Icon buttons
 
-The toolbar's Profile, Poll now and Log CSV buttons and the Watch, Scope, Memory and Console panel buttons (D-GUI-14) show icons, with their name and shortcut in the tooltip.
+**Poll now**, **Log CSV** and the profile button are icon buttons, and so are the Watch, Scope, Memory and Console panel buttons (D-GUI-14). The tooltip says what each does. The icons are drawn as lines in the theme's text colour (`line_icon` in `rdt/gui/style.py`); Log CSV turns red while logging.
 
 #### D-LNF-4 MCU colours on the chart
 
-A new chart trace takes its MCU's tag colour (D-GUI-12).
+A new chart trace takes its MCU's tag colour (D-GUI-12). That MCU's later traces get lighter or darker shades of it, skipping colours already on the chart (`MainWindow.trace_color`, `shade` in `rdt/gui/style.py`).
 
 #### D-LNF-5 Link strip in the status bar
 
-The status bar shows the link state (D-GUI-2, D-LNK-9) as a coloured strip, with the last reply time of each MCU next to it.
+The status bar is a strip in the link's colour (D-GUI-2, D-LNK-9), in every theme. While the link is up it shows each MCU's last reply time, or `silent` for a silent MCU (D-MCU-6), from `Session.mcu_status` (`MainWindow.link_label`).
 
 #### D-LNF-6 Density
 
-**View > Density** offers **Compact** and **Comfortable** row heights and padding, saved per user as `ui/density` in `ui.toml` (D-WSP-5).
+**View > Density** offers **Compact rows** (the default) and **Comfortable rows**, which add padding to tree and table rows. It is saved per user as `ui/density` in `ui.toml` (D-WSP-5) and applied by `apply_theme`.
 
-#### D-LNF-7 Hover icons on watch rows
+#### D-LNF-7 Hover buttons on watch rows
 
-Hovering over a watch row shows a chart icon (add it to the chart) and a remove icon at the row's end.
+On the watch row under the mouse, two small buttons, **Chart** and **Remove**, appear in the name column (`RowDelegate` in `rdt/gui/variables.py`, which also draws the MCU tag).
 
 #### D-LNF-8 Monospace values
 
-Value columns in the watch tree and memory view use a monospace font, so digits line up.
+Values, addresses and statistics are shown in the system's fixed-width font, also while being edited, so digits line up while they change (`MonoDelegate` in `rdt/gui/variables.py`, `mono_font` in `rdt/gui/style.py`).
 
 ### 4.12 Live chart
 
