@@ -213,7 +213,7 @@ Each requirement links to its design section.
 | WSP-5 | The interface settings are kept in their own file, per user, not in the workspace (2026-10-14) | Done | [D-WSP-5](#d-wsp-5-interface-settings-file) |
 | WSP-6 | The watch list, the commands and the interface settings can each be imported and exported (2026-10-14) | Done | [D-WSP-6](#d-wsp-6-import-and-export) |
 | WSP-7 | The SCPI profile is kept in its own file beside the `.rdtw`, which points to it, with every field written, defaults included (2026-10-15) | Done | [D-WSP-4](#d-wsp-4-split-files) |
-| WSP-8 | The memory map (the memory regions) is kept in its own file beside the `.rdtw`, which points to it with `memory_file`; a memory map can be loaded from a file, from the GUI (File > Import > Memory map) or the CLI (`rdt memory import`) (2026-10-15) | In review | [D-WSP-8](#d-wsp-8-memory-map-file) |
+| WSP-8 | The memory map (the memory regions) is kept in its own file beside the `.rdtw`, which points to it with `memory_file`; a memory map can be loaded from a file, from the GUI (File > Import > Memory map) or the CLI (`rdt memory import`) (2026-10-15) | Done | [D-WSP-8](#d-wsp-8-memory-map-file) |
 
 ### 2.15 Command line and API
 
@@ -1148,7 +1148,7 @@ The GUI remembers the last workspace file it opened or saved, as `session/last_w
 rani asked on 2026-10-14 for the imported commands, the watched variables and watch tabs, and the interface settings to each be in a separate file. A workspace is now up to four files side by side:
 
 - **`bench.rdtw`:** the connection, MCUs, `poll_ms` and `read_only`, plus `profile`, `watch_file` and `commands_file`, which name the other three relative to the `.rdtw`.
-- **`bench.profile.toml` (WSP-7):** the SCPI profile, `[scpi]` with every field and (`write_profile_file` in `rdt/workspace.py`; the ranges moved to the memory file, WSP-8). It is written on every save, even unchanged, and `Workspace.save` points `profile_path` at it. A workspace with an inline `[scpi]` table, or naming a profile file elsewhere, still opens; the next save writes the profile beside the `.rdtw` and leaves the other file alone. rani asked for this on 2026-10-15.
+- **`bench.profile.toml` (WSP-7):** the SCPI profile, `[scpi]` with every field (`write_profile_file` in `rdt/workspace.py`); its ranges moved to the memory file (WSP-8). It is written on every save, even unchanged, and `Workspace.save` points `profile_path` at it. A workspace with an inline `[scpi]` table, or naming a profile file elsewhere, still opens; the next save writes the profile beside the `.rdtw` and leaves the other file alone. rani asked for this on 2026-10-15.
 - **`bench.watch.toml`:** the `[[tab]]` and `[[tab.watch]]` tables and `[chart]` (`read_watch_file` and `write_watch_file` in `rdt/workspace.py`).
 - **`bench.commands.toml`:** the known commands, one `[[command]]` table each with `command`, `name`, `group` and `description` (`write_commands_file` in `rdt/workspace.py`). rani asked on 2026-10-14 for it to be a TOML file the `.rdtw` points to, like the watch list; it was a CSV file at first (D-WSP-2).
 
