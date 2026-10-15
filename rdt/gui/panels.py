@@ -1140,12 +1140,17 @@ class McuDialog(QDialog):
     def __init__(self, mcus: list[McuConfig], parent=None):
         super().__init__(parent)
         self.setWindowTitle("MCUs and ELF files")
-        self.resize(900, 260)
+        self.resize(1200, 280)
         self.originals = {m.id: m for m in mcus}
         layout = QVBoxLayout(self)
         self.table = QTableWidget(0, len(self.COLS))
         self.table.setHorizontalHeaderLabels(self.COLS)
+        # The ELF path takes the spare width on one line, cut in the middle so the file name stays
+        # visible; the full path is the cell's tooltip (word wrap cut it to "C:..." before).
+        self.table.setWordWrap(False)
+        self.table.setTextElideMode(Qt.ElideMiddle)
         self.table.horizontalHeader().setSectionResizeMode(self.COL_ELF, QHeaderView.Stretch)
+        self.table.itemChanged.connect(self._item_changed)
         layout.addWidget(self.table)
         for m in mcus:
             self._add_row(m.id, m.name, str(m.elf or ""), "" if m.timeout_ms is None else f"{m.timeout_ms:g}",
@@ -1177,7 +1182,12 @@ class McuDialog(QDialog):
                         (self.COL_COLOR, color), (self.COL_ELF, elf), (self.COL_TIMEOUT, timeout),
                         (self.COL_IDENTITY, identity)):
             self.table.setItem(r, c, QTableWidgetItem(text))
+        self.table.item(r, self.COL_ELF).setToolTip(elf)
         self._show_color(r)
+
+    def _item_changed(self, item: QTableWidgetItem) -> None:
+        if item.column() == self.COL_ELF and item.toolTip() != item.text():
+            item.setToolTip(item.text())
 
     def _show_color(self, r: int) -> None:
         """Paint the colour cell with the colour the MCU's tag will have."""
