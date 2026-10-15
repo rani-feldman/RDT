@@ -13,10 +13,10 @@ import time
 from datetime import datetime
 from pathlib import Path
 
-from PySide6.QtCore import QByteArray, QSettings, Qt, QTimer
+from PySide6.QtCore import QByteArray, QSettings, QSize, Qt, QTimer
 from PySide6.QtGui import QAction, QActionGroup, QColor, QIcon, QKeySequence, QPainter, QPen, QPixmap
 from PySide6.QtWidgets import (
-    QAbstractItemView, QApplication, QCheckBox, QComboBox, QDialog, QDialogButtonBox, QDockWidget, QFileDialog, QLabel,
+    QAbstractItemView, QApplication, QComboBox, QDialog, QDialogButtonBox, QDockWidget, QFileDialog, QLabel,
     QLineEdit, QMainWindow, QMessageBox, QPushButton, QSpinBox, QTableWidget, QTableWidgetItem, QToolBar,
     QButtonGroup, QHBoxLayout, QSizePolicy, QToolButton, QVBoxLayout, QWidget,
 )
@@ -26,7 +26,7 @@ from ..csvlog import CsvLog
 from ..errors import ConfigError, LinkDown
 from ..profile import Profile
 from ..session import LinkState
-from ..target import ConnectionConfig, McuConfig, TargetConfig
+from ..target import ConnectionConfig, McuConfig, TargetConfig, mcu_color
 from ..ui_settings import SETTINGS, UiSettings, workspace_dir
 from ..workspace import Workspace, default_target
 from .chart import ChartPanel
@@ -35,7 +35,7 @@ from .device import Device, describe_error
 from .dnd import DropTarget
 from .panels import CONSOLE_KEYS, Console, McuDialog, MemoryView, ProfileDialog, mono
 from . import titlebar
-from .style import THEMES, apply_theme, is_dark
+from .style import DENSITY, THEMES, TITLE_BAR, apply_theme, is_dark, line_icon, shade, theme
 from .variables import WatchTabs, WatchTree
 
 FILTER = "RDT workspace (*.rdtw);;Target file (*.toml);;All files (*)"
@@ -145,18 +145,22 @@ class ConnectionBar(QToolBar):
         self.poll.setSpecialValueText("Off")
         self.poll.setToolTip("Global polling interval; each watched item can override it")
         self.poll.valueChanged.connect(main.set_poll_ms)
-        self.polling = QCheckBox("Poll")
+        # A RUN/STOP key, as on an oscilloscope, turns all polling on and off (LNF-2).
+        self.polling = QPushButton()
+        self.polling.setObjectName("runstop")
+        self.polling.setCheckable(True)
         self.polling.setChecked(True)
-        self.polling.setToolTip("Poll the watched items; untick to stop all polling, "
-                                "including items with their own interval (F7)")
         self.polling.toggled.connect(main.set_polling)
-        self.poll_now = QPushButton("Poll now")
-        self.poll_now.setToolTip("Read every watched item once, in every tab (F6)")
+        self.polling.toggled.connect(lambda _: self.show_polling())
+        # Poll now, Log CSV and the profile are icon buttons; the tooltip says what each does (LNF-3).
+        self.poll_now = QPushButton()
+        self.poll_now.setToolTip("Poll now: read every watched item once, in every tab (F6)")
         self.poll_now.clicked.connect(main.read_all)
-        self.log_button = QPushButton("Log CSV")
+        self.log_button = QPushButton()
         self.log_button.setCheckable(True)
-        self.log_button.setToolTip("Log every watched value to a CSV file while connected (Ctrl+L)")
+        self.log_button.setToolTip("Log CSV: log every watched value to a CSV file while connected (Ctrl+L)")
         self.log_button.clicked.connect(main.toggle_log)
+        self.profile.setObjectName("profile")
         self.addWidget(self.transport)
         self._lan = [self.addWidget(self.host), self.addWidget(QLabel(":")), self.addWidget(self.port)]
         self._serial = [self.addWidget(self.com), self.addWidget(self.baud)]
@@ -173,6 +177,25 @@ class ConnectionBar(QToolBar):
             w.currentTextChanged.connect(main.connection_edited)
         self.host.textEdited.connect(main.connection_edited)
         self.port.valueChanged.connect(main.connection_edited)
+
+    def show_polling(self) -> None:
+        """RUN in green while polling, STOP in red when stopped (LNF-2)."""
+        on = self.polling.isChecked()
+        self.polling.setText("\u25b6 RUN" if on else "\u25a0 STOP")
+        self.polling.setToolTip(("Polling the watched items; click to stop all polling, including items with their "
+                                 "own interval" if on else "Polling is stopped; click to poll again") + " (F7)")
+        fg, bg = ("#ffffff", "#1f8a4c") if on else ("#ffffff", "#c62828")
+        self.polling.setStyleSheet(f"QPushButton#runstop {{ color: {fg}; background: {bg}; border: none;"
+                                   " border-radius: 3px; padding: 4px 12px; font-weight: bold; letter-spacing: 1px; }")
+
+    def restyle(self, color: str, logging: bool = False) -> None:
+        """Draw the icon buttons in the theme's text colour (LNF-3)."""
+        for b, kind in ((self.poll_now, "refresh"), (self.profile, "gear")):
+            b.setIcon(line_icon(kind, color))
+        self.log_button.setIcon(line_icon("csv", "#e05050" if logging else color))
+        for b in (self.poll_now, self.profile, self.log_button):
+            b.setIconSize(QSize(18, 18))
+        self.show_polling()
 
     def _kind(self, kind: str) -> None:
         for a in self._lan:
@@ -218,7 +241,8 @@ class ConnectionBar(QToolBar):
     def show_profile(self, ws: Workspace) -> None:
         cfg = ws.config
         where = f" ({cfg.profile_path.name})" if cfg.profile_path else ""
-        self.profile.setText(f"Profile: {cfg.profile.name}{where}")
+        self.profile.setToolTip(f"SCPI profile: {cfg.profile.name}{where}\n"
+                                "Click to edit the command templates and reply format")
 
     def connection(self) -> ConnectionConfig:
         kind = self.transport.currentText()
@@ -257,6 +281,7 @@ class ModeBar(QToolBar):
         for k, (name, text) in enumerate(PANELS.items(), start=1):
             b = QToolButton()
             b.setText(text.replace("&", ""))
+            b.setProperty("icon_kind", name)
             b.setCheckable(True)
             b.setAutoRaise(False)
             b.setToolTip(f"Show or hide the {b.text()} panel (Ctrl+{k})")
@@ -265,12 +290,28 @@ class ModeBar(QToolBar):
             row.addWidget(b)
             self.buttons[name] = b
         self.addWidget(holder)
-        holder.setStyleSheet(
-            "QToolButton { padding: 3px 12px; border: 1px solid palette(mid); background: palette(base); }"
-            "QToolButton:checked { background: palette(highlight); color: palette(highlighted-text);"
-            " font-weight: bold; }"
-            "QToolButton#first { border-top-left-radius: 4px; border-bottom-left-radius: 4px; }"
-            "QToolButton#last { border-top-right-radius: 4px; border-bottom-right-radius: 4px; }")
+        self.holder, self.row = holder, row
+
+    def restyle(self, main, color: str) -> None:
+        """The theme's look: a row of text buttons in the toolbar, or, for a theme with
+        ``panels_left``, a strip of icon buttons down the window's left edge (LNF-1, LNF-3)."""
+        t = theme()
+        left = t.panels_left
+        self.holder.setStyleSheet(t.modes)
+        self.row.setDirection(QHBoxLayout.TopToBottom if left else QHBoxLayout.LeftToRight)
+        self.row.setContentsMargins(0, 0, 0 if left else 6, 0)
+        for b in self.buttons.values():
+            b.setIcon(line_icon(b.property("icon_kind"), color, 22))
+            b.setIconSize(QSize(22, 22))
+            b.setToolButtonStyle(Qt.ToolButtonIconOnly if left else Qt.ToolButtonTextOnly)
+        area = Qt.LeftToolBarArea if left else Qt.TopToolBarArea
+        if main.toolBarArea(self) != area:
+            main.removeToolBar(self)
+            if left:
+                main.addToolBar(Qt.LeftToolBarArea, self)
+            else:
+                main.insertToolBar(main.bar, self)
+            self.show()
 
     def show_panel(self, name: str, shown: bool) -> None:
         self.buttons[name].setChecked(shown)
@@ -456,6 +497,9 @@ class MainWindow(QMainWindow):
         self.statusBar().addWidget(self.message, 1)
         self.log_label = QLabel()
         self.statusBar().addPermanentWidget(self.log_label)
+        self.link_label = QLabel()    # the link and each MCU's reply time, on the coloured strip (LNF-5)
+        self.statusBar().addPermanentWidget(self.link_label)
+        self._strip = None
 
         self.poll_timer = QTimer(self)
         self.poll_timer.timeout.connect(self.watch_tabs.tick)
@@ -546,6 +590,14 @@ class MainWindow(QMainWindow):
             a.setCheckable(True)
             group.addAction(a)
             self.theme_actions[name] = a
+        sub = m.addMenu("&Density")
+        group = QActionGroup(self)
+        self.density_actions = {}
+        for name, text in DENSITY.items():
+            a = action(sub, text, lambda _=False, n=name: self.set_density(n))
+            a.setCheckable(True)
+            group.addAction(a)
+            self.density_actions[name] = a
         m = self.menu_bar.addMenu("&Help")
         action(m, "&Keyboard shortcuts", self.show_shortcuts, "F1")
 
@@ -672,6 +724,7 @@ class MainWindow(QMainWindow):
         if saved:
             self.restoreState(QByteArray.fromBase64(saved.encode()))
         self.centralWidget().setVisible(bool(self.ui.value("session/watch_shown", True)))
+        self.modes.restyle(self, QApplication.palette().text().color().name())   # where the theme puts them
         self.sync_panel_buttons()
 
     def sync_panel_buttons(self) -> None:
@@ -717,10 +770,48 @@ class MainWindow(QMainWindow):
             name = str(self.ui.value("ui/theme", "system"))
         elif name != self.ui.value("ui/theme", "system"):
             self.ui.set_value("ui/theme", name)
-        name = apply_theme(name)
+        name = apply_theme(name, str(self.ui.value("ui/density", "compact")))
         self.theme_actions[name].setChecked(True)
+        self.density_actions[str(self.ui.value("ui/density", "compact"))].setChecked(True)
+        t = theme()
         self.chart.set_dark(is_dark())
+        if t.chart:
+            self.chart.set_colors(*t.chart)
         self.symbols.restyle()
+        text = QApplication.palette().text().color().name()
+        self.bar.restyle(text, self.log is not None)
+        self.modes.restyle(self, text)
+        self._title_colors(name)
+        self._strip = None
+        if hasattr(self, "link_label"):
+            self._show_state()
+
+    def set_density(self, name: str) -> None:
+        """Compact or comfortable rows in the watch tabs and lists, saved in ui.toml (LNF-6)."""
+        if name not in DENSITY:
+            return
+        self.ui.set_value("ui/density", name)
+        self.set_theme()
+
+    def _title_colors(self, name: str) -> None:
+        """A theme with its own title bar colour (Light pro's navy) paints the title bar row."""
+        row = self.menuWidget()
+        if row is None:
+            return
+        pal = QApplication.palette()
+        fg = None
+        if name in TITLE_BAR:
+            bg, fg = TITLE_BAR[name]
+            pal.setColor(pal.ColorRole.Window, QColor(bg))
+            pal.setColor(pal.ColorRole.WindowText, QColor(fg))
+        for w in [row] + row.findChildren(QWidget):
+            w.setPalette(pal)
+            own = w.property("own_qss")
+            if own is None:
+                own = w.styleSheet()
+                w.setProperty("own_qss", own)
+            if own:
+                w.setStyleSheet(own.replace("palette(window-text)", fg) if fg else own)
 
     def settings(self) -> UiSettings:
         """Per-user interface settings (ui.toml), next to the console history."""
@@ -913,6 +1004,7 @@ class MainWindow(QMainWindow):
             w.blockSignals(True)
             w.setChecked(on)
             w.blockSignals(False)
+        self.bar.show_polling()
         self.bar.poll.setEnabled(on)
         self.status("Polling on" if on else "Polling off: press Poll now (F6) to read the watched items")
 
@@ -998,7 +1090,7 @@ class MainWindow(QMainWindow):
                     if look == "down" and self.device.target is not None else ""
                 self.console.log(text + why, "error" if look == "down" else "note")
             self._last_state = text
-        fg, border, bg = STATE_COLORS[look]
+        fg, border, bg = (theme().connect or STATE_COLORS).get(look, STATE_COLORS[look])
         tip = LINK_TIPS.get(state, "") if not self._connecting else ""
         button = self.bar.connect_button
         button.setText(text)
@@ -1012,6 +1104,7 @@ class MainWindow(QMainWindow):
             stale = t.stale_identities()
             if stale:
                 self.check_identity(stale)
+        self._show_strip(look, text)
         self._show_mismatch(up)
         self.symbols.show_health(t, state if t is not None else None)
         self.memory.setEnabled(up)
@@ -1020,6 +1113,23 @@ class MainWindow(QMainWindow):
         self.console.set_link_up(up or state == LinkState.NO_REPLY)
         for w in (self.bar.transport, self.bar.host, self.bar.port, self.bar.com, self.bar.baud):
             w.setEnabled(self.device.target is None and not self._connecting)
+
+    def _show_strip(self, look: str, text: str) -> None:
+        """The status bar as a strip in the link's colour, with each MCU's reply time (LNF-5)."""
+        t = self.device.target
+        parts = [text]
+        if t is not None and self.device.state == LinkState.UP:
+            for m in self.ws.config.mcus:
+                st = t.session.mcu_status(m.id)
+                parts.append(f"\u25cf {m.name} " + ("silent" if st.silent else
+                                                     f"{st.reply_ms:.0f} ms" if st.reply_ms is not None else "\u2013"))
+        self.link_label.setText("   ".join(parts) + " ")
+        colors = (theme().strip or {}).get(look)
+        if colors == self._strip:
+            return
+        self._strip = colors
+        self.statusBar().setStyleSheet(
+            f"QStatusBar {{ background: {colors[0]}; }} QStatusBar QLabel {{ color: {colors[1]}; }}" if colors else "")
 
     def _show_mismatch(self, up: bool) -> None:
         """An ELF that does not match its firmware shows in the error bar (SYM-8); each MCU's
@@ -1094,9 +1204,19 @@ class MainWindow(QMainWindow):
         return self.log is not None or self.chart.wants(expr)
 
     def add_to_chart(self, path: str, unit: str = "") -> None:
-        self.chart.add(path, unit)
+        self.chart.add(path, unit, color=self.trace_color(path))
         self.docks["Chart"].show()
         self.docks["Chart"].raise_()
+
+    def trace_color(self, path: str) -> str | None:
+        """A new chart trace takes its MCU's colour, the colour of its tag and card, in a lighter
+        or darker turn when the MCU already has traces (LNF-4)."""
+        name = path.lstrip("@").partition(":")[0]
+        cfg = next((m for m in self.ws.config.mcus if m.name == name), None)
+        if cfg is None:
+            return None
+        used = {s.color for s in self.chart.series.values()}
+        return next((c for c in (shade(mcu_color(cfg), k) for k in range(8)) if c not in used), None)
 
     def show_memory(self, mcu: str) -> None:
         """The memory view, on one MCU."""
@@ -1222,8 +1342,7 @@ class MainWindow(QMainWindow):
             w.blockSignals(True)
             w.setChecked(on)
             w.blockSignals(False)
-        self.bar.log_button.setText("● Logging" if on else "Log CSV")
-        self.bar.log_button.setStyleSheet("color: #c03030" if on else "")
+        self.bar.restyle(QApplication.palette().text().color().name(), on)
         self.log_label.setText(f"CSV: {self.log.path.name}, {self.log.rows} rows" if on else "")
 
     def read_all(self) -> None:

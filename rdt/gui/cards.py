@@ -8,8 +8,8 @@ from pathlib import Path
 
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import (
-    QFrame, QHBoxLayout, QLabel, QMenu, QScrollArea, QToolButton, QTreeWidget, QTreeWidgetItem, QVBoxLayout,
-    QWidget,
+    QApplication, QFrame, QHBoxLayout, QLabel, QMenu, QScrollArea, QToolButton, QTreeWidget, QTreeWidgetItem,
+    QVBoxLayout, QWidget,
 )
 
 from ..memmap import MemoryMap, load_elf_sections
@@ -135,19 +135,19 @@ class McuCard(QFrame):
         self.tag.setText(mcu_short(self.cfg))
         self.tag.setStyleSheet(f"background: {color}; color: white; border-radius: 7px; padding: 1px 7px;"
                                " font-weight: bold")
-        line = self.palette().mid().color().name()
-        base = self.palette().base().color().name()
+        line = QApplication.palette().mid().color().name()
+        base = QApplication.palette().base().color().name()
         self.setStyleSheet(f"#card {{ background: {base}; border: 1px solid {line}; border-left: 5px solid {color};"
                            " border-radius: 5px }")
-        dim = self.palette().placeholderText().color().name()
+        dim = QApplication.palette().placeholderText().color().name()
         self.id.setStyleSheet(f"color: {dim}")
 
     def show_health(self, t: Target | None, state) -> None:
         up = state == LinkState.UP
         link = link_health(t, self.cfg, state)
         elf = elf_health(t, self.cfg, up)
-        dim = self.palette().placeholderText().color().name()
-        text = self.palette().text().color().name()
+        dim = QApplication.palette().placeholderText().color().name()
+        text = QApplication.palette().text().color().name()
         look = (link, elf)
         if look == self._look:
             return

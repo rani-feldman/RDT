@@ -15,12 +15,12 @@ Started with no file, `rdt-gui` reopens the workspace you last opened or saved. 
 ## Connection bar
 
 - **Transport**: `tcp` or `udp` with the device's IP address and port, or `serial` with a COM port and baud rate. The COM port list shows each port with its description, such as `COM3 - GAC serial port (COM3)`; you can also type a port name.
-- **Profile**: opens the SCPI profile editor (below). The button shows the profile's name and, when it comes from a file of its own, the file.
+- **Profile** (gear icon): opens the SCPI profile editor (below). Its tooltip shows the profile's name and, when it comes from a file of its own, the file.
 - **Connect button** (F5). One button shows the link state and the link, the COM port or IP:port, and clicking it connects or disconnects: green `Connected · COM3` while the link is up, amber `Connecting · COM3` (click to cancel), red `Link down · COM3` when the port broke (RDT reconnects by itself) or when the device answered none of the last three reads while the port stays open, and blue `Disconnected · COM3` when not connected. Hover over the button for which one it is. Connected means the COM port or socket opened; RDT sends nothing to the device to check it (no `*IDN?`). A port that disappears, such as an unplugged USB COM port, shows as link down within a second even with polling off; a board that hangs with its port still open is only noticed by the next reads, so with polling off press Poll now (F6). While the link is down the MCU cards say `link down` and writes are refused; when it comes back the ELFs are checked against the firmware again. The memory view and sending from the console are disabled unless the link is up (the transcript, search, log and command list still work), and the connection fields can only be changed while disconnected.
-- **Poll** (F7, also **Watch > Poll automatically**): untick it to turn all polling off, including items with their own interval. The interval is kept and polling picks up where it was when you tick it again. Polling is on when RDT starts; the setting is not saved in the workspace.
+- **RUN / STOP** (F7, also **Watch > Poll automatically**): a key as on an oscilloscope. Green `▶ RUN` while polling; click it to stop all polling, including items with their own interval, and it turns red `■ STOP`. The interval is kept and polling picks up where it was when you click it again. Polling is on when RDT starts; the setting is not saved in the workspace.
 - The interval next to it is the global polling interval. `Off` (0) stops the global polling only; items set to their own interval still poll.
-- **Poll now** (F6, also **Watch > Poll now**): read every watched item once, in every tab, including manual items, whether polling is on or off.
-- **Log CSV** (Ctrl+L): log every watched value to a CSV file. See [CSV log](#csv-log).
+- **Poll now** (circular arrow icon, F6, also **Watch > Poll now**): read every watched item once, in every tab, including manual items, whether polling is on or off.
+- **Log CSV** (page icon, red while logging, Ctrl+L): log every watched value to a CSV file. See [CSV log](#csv-log).
 
 **Target > MCUs and ELF files** sets each MCU's id, name, short name, colour, ELF file, timeout and identity variable. MCU 0 is the main MCU and is required. The **short name** (1 to 6 letters, digits or underscores, such as `CM7`) and the **colour** make the MCU's tag in the watch tree; double-click the colour cell to choose one. Left empty, the short name is the part of the name after its last underscore, cut to four characters (`Control_CM7` is `CM7`, `main` is `MAIN`), and the colour is picked by the MCU's id. Short names must be unique.
 
@@ -153,7 +153,21 @@ The console is a dark terminal. Each line shows its time, a tag (`TX` sent, `RX`
 
 ## Theme
 
-**View > Theme** chooses the window's colours: **Dark**, **Light**, or **System** (the default), which follows Windows. The chart follows the theme; the SCPI console is always the dark terminal. The choice is kept per user in `ui.toml` and comes back on the next start.
+**View > Theme** chooses how the window looks:
+
+- **System** (the default) follows Windows; **Light** and **Dark** are plain light and dark colours.
+- **Studio dark**, like VS Code and Segger Ozone: flat grey, square buttons, and the Watch, Scope, Memory and Console buttons become an icon strip down the window's left edge (hover for their names).
+- **Islands**, like the JetBrains IDEs and Windows 11: rounded panels with gaps between them and one blue accent.
+- **Instrument**, like an oscilloscope: black plot, bold square buttons, green for what is on.
+- **Light pro**, like STM32CubeMonitor: a white work area, a navy title bar and a light blue accent.
+
+**View > Density** chooses **Compact rows** (the default) or **Comfortable rows** with more space in the watch tabs and lists. The chart follows the theme; the SCPI console is always the dark terminal. Both choices are kept per user in `ui.toml` (`ui/theme`, `ui/density`) and come back on the next start.
+
+**Status bar.** The right end of the status bar shows the link and each MCU's latest reply time (`● main 1 ms`), and the whole bar takes the link's colour: green while connected, amber while connecting, red when the link is down (Studio dark also shows blue while disconnected).
+
+**Chart colours.** A value added to the chart is drawn in its MCU's colour, the colour of its tag and card; the MCU's next values get lighter and darker turns of it. Right-click a signal to pick another colour.
+
+**Watch rows.** Values, addresses and statistics are in a fixed-width font so their digits stay in place while they change. With the mouse over a row, two small buttons appear at the right of its name: a wave to add the value to the chart (when it is a number and not charted yet) and ✕ to remove the item from the tab.
 
 ## Keyboard shortcuts
 

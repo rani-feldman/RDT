@@ -7,12 +7,12 @@ from dataclasses import dataclass, field
 
 import shiboken6
 
-from PySide6.QtCore import Qt, Signal
-from PySide6.QtGui import QAction, QBrush, QColor
+from PySide6.QtCore import QEvent, QRect, Qt, QTimer, Signal
+from PySide6.QtGui import QAction, QBrush, QColor, QFontMetrics
 from PySide6.QtWidgets import (
     QAbstractItemView, QCheckBox, QComboBox, QDialog, QDialogButtonBox, QFormLayout, QHBoxLayout,
-    QHeaderView, QInputDialog, QLabel, QLineEdit, QMenu, QMessageBox, QPushButton, QSpinBox, QTabWidget,
-    QToolButton, QTreeWidget, QTreeWidgetItem, QVBoxLayout, QWidget,
+    QHeaderView, QInputDialog, QLabel, QLineEdit, QMenu, QMessageBox, QPushButton, QSpinBox, QStyle,
+    QStyledItemDelegate, QTabWidget, QToolButton, QToolTip, QTreeWidget, QTreeWidgetItem, QVBoxLayout, QWidget,
 )
 
 from ..errors import ConfigError, LinkDown, McuSilent, RdtError
@@ -22,7 +22,7 @@ from ..symbols import Location, load_symbols
 from ..workspace import Reading, Shown, Tab, Watch, Workspace
 from .device import describe_error
 from .dnd import DragTree, DropTarget
-from .style import FLASH_S, TAG_ROLE, TagDelegate, flash_color, mcu_tag, split_expr
+from .style import FLASH_S, TAG_ROLE, TagDelegate, flash_color, line_icon, mcu_tag, mono_font, split_expr
 
 COL_NAME, COL_VALUE, COL_TYPE, COL_ADDR, COL_RATE, COL_MIN, COL_MAX, COL_MEAN, COL_COUNT = range(9)
 STATS_COLUMNS = (COL_MIN, COL_MAX, COL_MEAN, COL_COUNT)
@@ -52,6 +52,84 @@ class _ItemState:
     note: str | None = None         # after an ELF rebuild: moved, retyped or gone
     gone: bool = False
     force: bool = True              # read at the next tick whatever the interval
+
+
+class MonoDelegate(QStyledItemDelegate):
+    """Values and addresses in a fixed-width font, so digits line up while they change (LNF-8)."""
+
+    def initStyleOption(self, opt, idx) -> None:
+        super().initStyleOption(opt, idx)
+        opt.font = mono_font(opt.font)
+        opt.fontMetrics = QFontMetrics(opt.font)
+
+    def createEditor(self, parent, opt, idx):
+        editor = super().createEditor(parent, opt, idx)
+        editor.setFont(mono_font(editor.font()))
+        return editor
+
+
+class RowDelegate(TagDelegate):
+    """The name column: the row's MCU tag and, on the row under the mouse, two small buttons at
+    its right end: Chart (a value that is a number) and Remove (a watched item) (LNF-7)."""
+
+    SIZE = 18
+    TIPS = {"chart": "Add to the chart", "remove": "Remove from this tab"}
+
+    def __init__(self, tree: "WatchTree"):
+        super().__init__(tree)
+        self.tree = tree
+
+    def buttons(self, rect: QRect, idx) -> list[tuple[str, QRect]]:
+        path = idx.data(PATH_ROLE)
+        kinds = []
+        if path and self.tree.chartable(path) is not None and not self.tree.main.chart.has(path):
+            kinds.append("chart")
+        if path and not idx.parent().isValid():
+            kinds.append("remove")
+        top = rect.top() + (rect.height() - self.SIZE) // 2
+        out, right = [], rect.right() - 2
+        for kind in reversed(kinds):
+            out.insert(0, (kind, QRect(right - self.SIZE + 1, top, self.SIZE, self.SIZE)))
+            right -= self.SIZE + 2
+        return out
+
+    def paint(self, p, opt, idx) -> None:
+        super().paint(p, opt, idx)
+        if not opt.state & QStyle.State_MouseOver:
+            return
+        buttons = self.buttons(opt.rect, idx)
+        if not buttons:
+            return
+        selected = bool(opt.state & QStyle.State_Selected)
+        alternate = bool(opt.features & opt.ViewItemFeature.Alternate)
+        bg = opt.palette.highlight() if selected else opt.palette.alternateBase() if alternate else opt.palette.base()
+        fg = (opt.palette.highlightedText() if selected else opt.palette.text()).color().name()
+        p.save()
+        cover = QRect(buttons[0][1].left() - 4, opt.rect.top(), opt.rect.right() - buttons[0][1].left() + 5,
+                      opt.rect.height())
+        p.fillRect(cover, bg)
+        for kind, r in buttons:
+            line_icon(kind, fg, self.SIZE).paint(p, r)
+        p.restore()
+
+    def editorEvent(self, ev, model, opt, idx) -> bool:
+        if ev.type() in (QEvent.MouseButtonPress, QEvent.MouseButtonRelease, QEvent.MouseButtonDblClick) \
+                and ev.button() == Qt.LeftButton:
+            for kind, r in self.buttons(opt.rect, idx):
+                if r.contains(ev.position().toPoint()):
+                    if ev.type() == QEvent.MouseButtonRelease:
+                        path = idx.data(PATH_ROLE)
+                        QTimer.singleShot(0, lambda: self.tree.chart(path) if kind == "chart"
+                                          else self.tree.remove_watch(path))
+                    return True
+        return super().editorEvent(ev, model, opt, idx)
+
+    def helpEvent(self, ev, view, opt, idx) -> bool:
+        for kind, r in self.buttons(opt.rect, idx):
+            if r.contains(ev.pos()):
+                QToolTip.showText(ev.globalPos(), self.TIPS[kind], view)
+                return True
+        return super().helpEvent(ev, view, opt, idx)
 
 
 class WatchTree(DragTree):
@@ -84,7 +162,12 @@ class WatchTree(DragTree):
         self.itemDoubleClicked.connect(self._double_clicked)
         self.itemChanged.connect(self._item_changed)
         self.itemExpanded.connect(self._expanded)
-        self.setItemDelegateForColumn(COL_NAME, TagDelegate(self))
+        self.setItemDelegateForColumn(COL_NAME, RowDelegate(self))
+        mono = MonoDelegate(self)
+        for c in (COL_VALUE, COL_ADDR, COL_MIN, COL_MAX, COL_MEAN):
+            self.setItemDelegateForColumn(c, mono)
+        self.setMouseTracking(True)
+        self.viewport().setAttribute(Qt.WA_Hover)
         DropTarget(self.viewport(), self.dropped, ignore=self)
         self.states: dict[str, _ItemState] = {}
         self.flashing: dict[str, tuple[QTreeWidgetItem, float]] = {}   # path: (row, when to stop)
