@@ -32,6 +32,7 @@ Status values:
 
 - **Done:** implemented in the PC application and covered by tests.
 - **Firmware:** a requirement on the firmware. The simulator implements it today; the real firmware will implement it later.
+- **In progress:** being built, no pull request open yet.
 - **In review:** built in an open pull request, not merged yet.
 - **Planned:** agreed but not built yet.
 - **Removed:** was built or agreed, then dropped by rani.
@@ -176,6 +177,14 @@ Each requirement links to its design section.
 | GUI-16 | Drag variables and watch rows onto a watch tab, a tab's title or the chart (2026-10-14) | Done | [D-GUI-16](#d-gui-16-drag-and-drop) |
 | GUI-17 | One title bar row: the app icon, the menus and the minimise, maximise and close buttons in a single line, with no title text and no standard Windows title bar above it (rani, 2026-10-14) | Done | [D-GUI-17](#d-gui-17-one-row-title-bar) |
 | GUI-18 | Load a profile file from inside the SCPI profile dialog; **Target > Load profile file...** is removed (2026-10-15) | Done | [D-SCPI-9](#d-scpi-9-profile-editor) |
+| LNF-1 | Four more themes in **View > Theme**: Studio Dark, Islands, Instrument and Light Pro (2026-10-15) | In progress | [D-LNF-1](#d-lnf-1-themes) |
+| LNF-2 | A **RUN/STOP** key replaces the **Poll** checkbox (2026-10-15) | In progress | [D-LNF-2](#d-lnf-2-runstop-key) |
+| LNF-3 | Icon buttons for Profile, Poll now, Log CSV and the panel buttons (2026-10-15) | In progress | [D-LNF-3](#d-lnf-3-icon-buttons) |
+| LNF-4 | Chart traces take the colour of their MCU (2026-10-15) | In progress | [D-LNF-4](#d-lnf-4-mcu-colours-on-the-chart) |
+| LNF-5 | The link state is a coloured strip in the status bar, with each MCU's reply time (2026-10-15) | In progress | [D-LNF-5](#d-lnf-5-link-strip-in-the-status-bar) |
+| LNF-6 | **View > Density**: Compact or Comfortable, saved per user (2026-10-15) | In progress | [D-LNF-6](#d-lnf-6-density) |
+| LNF-7 | Chart and remove icons appear when hovering over a watch row (2026-10-15) | In progress | [D-LNF-7](#d-lnf-7-hover-icons-on-watch-rows) |
+| LNF-8 | Values are shown in a monospace font (2026-10-15) | In progress | [D-LNF-8](#d-lnf-8-monospace-values) |
 
 ### 2.12 Live chart
 
@@ -203,6 +212,7 @@ Each requirement links to its design section.
 | WSP-4 | The settings are split into separate files: the watched variables and watch tabs in one file, the imported commands in another, both opened with the workspace (2026-10-14); the commands file is a TOML file the workspace names, and the `.rdtw` and its files sit together, by default in `%LOCALAPPDATA%\rdt` (2026-10-14) | Done | [D-WSP-4](#d-wsp-4-split-files) |
 | WSP-5 | The interface settings are kept in their own file, per user, not in the workspace (2026-10-14) | Done | [D-WSP-5](#d-wsp-5-interface-settings-file) |
 | WSP-6 | The watch list, the commands and the interface settings can each be imported and exported (2026-10-14) | Done | [D-WSP-6](#d-wsp-6-import-and-export) |
+| WSP-7 | The SCPI profile is kept in its own file beside the `.rdtw`, which points to it, with every field written, defaults included (2026-10-15) | In review (PR #109) | [D-WSP-4](#d-wsp-4-split-files) |
 
 ### 2.15 Command line and API
 
@@ -408,7 +418,7 @@ rani reported on 2026-10-14 that the status box stayed green `Connected · COM3`
 
 #### D-SCPI-1 SCPI profile
 
-The profile (`rdt/profile.py`) is a `[scpi]` TOML table. It can be a file of its own (`profile = "fw_profile.toml"`) or sit inline in the target file or workspace. The simulator reads the same table, so a command set can be tried on the simulator before the firmware has it.
+The profile (`rdt/profile.py`) is a `[scpi]` TOML table. It can be a file of its own (`profile = "fw_profile.toml"`) or sit inline in a target file. A workspace always keeps it in its own file, `bench.profile.toml` (D-WSP-4). RDT writes every field, defaults included, so the file shows the whole profile (`_profile_dict` in `rdt/workspace.py`, rani, 2026-10-15). The simulator reads the same table, so a command set can be tried on the simulator before the firmware has it.
 
 ```toml
 [scpi]
@@ -471,8 +481,8 @@ A write gets no reply whether it succeeds or fails, so `Session.write` reads the
 
 - **Preview:** the read and write commands are shown as they will be sent, and a template that can't work is refused, such as a read without `{len}`.
 - **Test read:** while connected, it sends one read with the edited profile and shows the reply and the decoded bytes, before anything is applied.
-- **Load from file (GUI-18):** a **Load from file...** button at the top of `ProfileDialog` in `rdt/gui/panels.py` fills the fields from a profile `.toml`. The line beside it says `From file: <name>` or `Stored in the workspace`. `MainWindow.edit_profile` passes the workspace's current `profile_path` in. rani asked on 2026-10-15 for this to replace the separate **Target > Load profile file...**, which is removed.
-- **Apply:** OK reconnects. If no field was changed since the file was loaded (or since the dialog opened on a file), the workspace keeps pointing at that file (`ProfileDialog.result_path()`); once any field is edited, OK stores the profile inside the workspace.
+- **Load from file (GUI-18):** a **Load from file...** button at the top of `ProfileDialog` in `rdt/gui/panels.py` fills the fields from a profile `.toml`. The line beside it names the workspace's profile file (`File: bench.profile.toml`, or `File: saved with the workspace` before the first save), or `Loaded from <name>` after a load. `MainWindow.edit_profile` passes the workspace's current `profile_path` in. rani asked on 2026-10-15 for this to replace the separate **Target > Load profile file...**, which is removed.
+- **Apply:** OK puts the fields into the workspace's profile and reconnects; the next save writes them to the workspace's own profile file (WSP-7, D-WSP-4). A loaded file is only copied from, never linked. This replaces the first version, where OK with no field edited kept the workspace pointing at the loaded file (`ProfileDialog.result_path()`, removed 2026-10-15).
 
 #### D-SCPI-10 Aligned words
 
@@ -966,6 +976,43 @@ Polling, the chart and the CSV log keep running while a panel is hidden.
 - **Moving and resizing:** pressing an empty part of the row calls the system move, a double click maximises or restores, and the outer 6 px of the window call the system resize (cursor changes at the edges; the top edge is covered by the row).
 - **Opt out:** `RDT_NATIVE_TITLEBAR=1` keeps the standard Windows title bar.
 
+#### D-LNF-1 Themes
+
+rani asked on 2026-10-15 for all four styles from the look and feel options (thread "Look and feel options") to be built. **View > Theme** gains them next to System, Light and Dark (D-GUI-15), still saved as `ui/theme` in `ui.toml`:
+
+- **Studio Dark:** like VS Code or Ozone. The panel buttons become icons on a strip at the far left, and the status bar is blue.
+- **Islands:** like JetBrains or Windows 11. Rounded panels, more space, one blue accent.
+- **Instrument:** like an oscilloscope. A black plot, MCU colours on the traces (D-LNF-4) and the RUN/STOP key (D-LNF-2).
+- **Light Pro:** like CubeMonitor. A white work area, a navy title bar and zebra rows.
+
+#### D-LNF-2 RUN/STOP key
+
+A **RUN/STOP** key replaces the **Poll** checkbox of D-POLL-5 and does the same thing: it turns all polling on or off. Polling still starts on and is not saved.
+
+#### D-LNF-3 Icon buttons
+
+The toolbar's Profile, Poll now and Log CSV buttons and the Watch, Scope, Memory and Console panel buttons (D-GUI-14) show icons, with their name and shortcut in the tooltip.
+
+#### D-LNF-4 MCU colours on the chart
+
+A new chart trace takes its MCU's tag colour (D-GUI-12).
+
+#### D-LNF-5 Link strip in the status bar
+
+The status bar shows the link state (D-GUI-2, D-LNK-9) as a coloured strip, with the last reply time of each MCU next to it.
+
+#### D-LNF-6 Density
+
+**View > Density** offers **Compact** and **Comfortable** row heights and padding, saved per user as `ui/density` in `ui.toml` (D-WSP-5).
+
+#### D-LNF-7 Hover icons on watch rows
+
+Hovering over a watch row shows a chart icon (add it to the chart) and a remove icon at the row's end.
+
+#### D-LNF-8 Monospace values
+
+Value columns in the watch tree and memory view use a monospace font, so digits line up.
+
 ### 4.12 Live chart
 
 #### D-CHT-1 Chart
@@ -1032,7 +1079,7 @@ time,seconds,main:motor.speed [rpm],main:motor.mode,main:tick_count,event
 A workspace (`.rdtw`, TOML, `rdt/workspace.py`) is a target file plus everything set up on top of it. A target file (`.toml`) has the same `profile`, `[connection]` and `[[mcu]]` content, and opens as a workspace with one empty tab.
 
 ```toml
-profile = "fw_profile.toml"   # or an inline [scpi] table
+profile = "bench.profile.toml" # the SCPI profile (D-WSP-4); an inline [scpi] table still loads
 poll_ms = 500                 # global polling interval; 0 = off
 read_only = false             # true: every item read-only unless it says read_only = false (D-WS-4)
 watch_file    = "bench.watch.toml"     # the watch tabs and chart (D-WSP-4)
@@ -1097,13 +1144,14 @@ The GUI remembers the last workspace file it opened or saved, as `session/last_w
 
 #### D-WSP-4 Split files
 
-rani asked on 2026-10-14 for the imported commands, the watched variables and watch tabs, and the interface settings to each be in a separate file. A workspace is now up to three files side by side:
+rani asked on 2026-10-14 for the imported commands, the watched variables and watch tabs, and the interface settings to each be in a separate file. A workspace is now up to four files side by side:
 
-- **`bench.rdtw`:** the connection, profile, MCUs, `poll_ms` and `read_only`, plus `watch_file` and `commands_file`, which name the other two relative to the `.rdtw`.
+- **`bench.rdtw`:** the connection, MCUs, `poll_ms` and `read_only`, plus `profile`, `watch_file` and `commands_file`, which name the other three relative to the `.rdtw`.
+- **`bench.profile.toml` (WSP-7):** the SCPI profile, `[scpi]` with every field and its `[[ranges]]` (`write_profile_file` in `rdt/workspace.py`). It is written on every save, even unchanged, and `Workspace.save` points `profile_path` at it. A workspace with an inline `[scpi]` table, or naming a profile file elsewhere, still opens; the next save writes the profile beside the `.rdtw` and leaves the other file alone. rani asked for this on 2026-10-15.
 - **`bench.watch.toml`:** the `[[tab]]` and `[[tab.watch]]` tables and `[chart]` (`read_watch_file` and `write_watch_file` in `rdt/workspace.py`).
 - **`bench.commands.toml`:** the known commands, one `[[command]]` table each with `command`, `name`, `group` and `description` (`write_commands_file` in `rdt/workspace.py`). rani asked on 2026-10-14 for it to be a TOML file the `.rdtw` points to, like the watch list; it was a CSV file at first (D-WSP-2).
 
-Opening the `.rdtw` loads all three (`Workspace.watch_path`, `Workspace.commands_path`). A file is only made once it has something in it. If a named file is missing, the workspace still opens with a warning and that list is empty. Naming a file and also having the same tables inline is a `ConfigError`. The files are always saved beside the `.rdtw`, named after it (`_beside` in `rdt/workspace.py`), and Save As writes them under the new name (`bench.watch.toml` becomes `new.watch.toml`). A workspace that names a file in another folder (`commands_file = "../gac_commands.toml"`) still loads it; the next save writes the list beside the `.rdtw`, points the `.rdtw` at it and leaves the other file alone. rani asked on 2026-10-14 for the `.rdtw` and its `.toml` files all to be in one place, `%LOCALAPPDATA%\rdt`. This replaces the first version, where a file named otherwise stayed where it was.
+Opening the `.rdtw` loads them all (`Workspace.watch_path`, `Workspace.commands_path`, `config.profile_path`). The watch and commands files are only made once they have something in them. If a named file is missing, the workspace still opens with a warning and that list is empty. Naming a file and also having the same tables inline is a `ConfigError`. The files are always saved beside the `.rdtw`, named after it (`_beside` in `rdt/workspace.py`), and Save As writes them under the new name (`bench.watch.toml` becomes `new.watch.toml`). A workspace that names a file in another folder (`commands_file = "../gac_commands.toml"`) still loads it; the next save writes the list beside the `.rdtw`, points the `.rdtw` at it and leaves the other file alone. rani asked on 2026-10-14 for the `.rdtw` and its `.toml` files all to be in one place, `%LOCALAPPDATA%\rdt`. This replaces the first version, where a file named otherwise stayed where it was.
 
 - **Default folder:** the GUI's Open and Save as dialogs start in `%LOCALAPPDATA%\rdt`, the folder of `ui.toml` (`workspace_dir` in `rdt/ui_settings.py`).
 - **Default target:** with no `-t` or `-w`, `rdt` and `rdt-gui` use `./rdt.toml`, else `%LOCALAPPDATA%\rdt\rdt.toml` (`default_target` in `rdt/workspace.py`); `rdt-gui` falls back to it when there is no last workspace to reopen (D-WSP-3). Example: [`examples/sim_bench.rdtw`](../examples/sim_bench.rdtw) with `sim_bench.watch.toml`.
@@ -1112,7 +1160,7 @@ Opening the `.rdtw` loads all three (`Workspace.watch_path`, `Workspace.commands
 
 Interface settings are per user, not per workspace. They are in `ui.toml` next to the console history (`%LOCALAPPDATA%\rdt\ui.toml` on Windows; `RDT_UI_FILE` overrides it), handled by `UiSettings` in `rdt/ui_settings.py`:
 
-- **Settings:** `console/font_size` and `console/wrap` (D-CON-11), `memory/kind`, `memory/type` and `memory/decimal` (D-GUI-7), and `ui/theme` (D-GUI-15).
+- **Settings:** `console/font_size` and `console/wrap` (D-CON-11), `memory/kind`, `memory/type` and `memory/decimal` (D-GUI-7), `ui/theme` (D-GUI-15, D-LNF-1) and `ui/density` (D-LNF-6).
 - **State:** `session/last_workspace` (D-WSP-3), `session/layout` and `session/watch_shown` (D-GUI-14). They are not settings, so they are never exported and an import leaves them alone.
 
 Each change re-reads the file before writing it, so two windows keep each other's changes, and a file that can't be written leaves the settings in memory only. `ui.toml` replaces `gui.ini` and `console.ini`, whose values are copied into it on the first start (`load_ui` in `rdt/gui/app.py`).
@@ -1436,6 +1484,8 @@ The application is built against the simulator. As soon as the firmware has the 
 | 2026-10-14 | Each MCU gets an optional short name and colour, shown as a tag on its watch rows (GUI-12), and a changed value is highlighted for a second (GUI-13). Then layout C: MCU cards replacing the Variables panel and image box, and Watch, Scope, Memory and Console modes with their own layouts (GUI-14), a dark theme (GUI-15) and drag and drop (GUI-16). rani picked these from mockups |
 | 2026-10-14 | The toolbar's Watch, Scope, Memory and Console buttons no longer switch between four layouts; each shows or hides its own panel (a panel behind another tab comes to the front first). The layout is saved on every press and on close, with View > Save layout (Ctrl+Shift+S), View > Reset layout and View > Target (GUI-14), at rani's request |
 | 2026-10-15 | A profile file is loaded from inside the SCPI profile dialog (**Load from file...**), and **Target > Load profile file...** is removed. OK keeps pointing at the file unless a field was edited (GUI-18), at rani's request |
+| 2026-10-15 | Four more themes (Studio Dark, Islands, Instrument, Light Pro) and the behaviour ideas from the look and feel options: a RUN/STOP key instead of the Poll checkbox, icon buttons, MCU colours on chart traces, a link strip in the status bar with reply times, a density switch, hover icons on watch rows and monospace values (LNF-1 to LNF-8), at rani's request |
+| 2026-10-15 | The SCPI profile is saved in its own file beside the `.rdtw` (`bench.profile.toml`, every field written), which the `.rdtw` names like the watch and commands files; the profile dialog's **Load from file...** only fills the fields (WSP-7, replacing GUI-18's link to the loaded file), at rani's request |
 
 ## 9. Appendix: binary protocol (planned)
 
