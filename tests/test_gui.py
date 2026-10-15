@@ -550,25 +550,18 @@ def test_profile_dialog_loads_a_file(qtbot, win, tmp_path, monkeypatch):
     assert not any(a.text().startswith("Load profile") for a in win.findChildren(QAction))
     dlg = ProfileDialog(win.ws.config.profile, win.device, win)
     qtbot.addWidget(dlg)
-    assert dlg.result_path() is None and "workspace" in dlg.file_label.text()
     dlg.load_file(str(path))
     assert dlg.edits["name"].text() == "RDT GAC" and dlg.edits["max_response"].text() == "500"
     assert "SERV:MEM:READ? 0,20000000,16" in dlg.preview.text()
-    assert dlg.result_path() == path and "gac.toml" in dlg.file_label.text()
-    win.apply_profile(dlg.result_profile(), dlg.result_path())
-    assert win.ws.config.profile_path == path and win.ws.config.profile.name == "RDT GAC"
-    # Reopened, the dialog still knows the file; an edit stores the profile in the workspace.
-    dlg = ProfileDialog(win.ws.config.profile, win.device, win, win.ws.config.profile_path)
-    qtbot.addWidget(dlg)
-    assert dlg.result_path() == path
-    dlg.edits["timeout_ms"].setText("800")
-    assert dlg.result_path() is None
+    assert "gac.toml" in dlg.file_label.text()
+    win.apply_profile(dlg.result_profile(), win.ws.config.profile_path)
+    assert win.ws.config.profile.name == "RDT GAC"
     bad = tmp_path / "bad.toml"
     bad.write_text("[scpi]\nnope = 1\n")
     warned = []
     monkeypatch.setattr(QMessageBox, "warning", lambda *a: warned.append(a[2]))
     dlg.load_file(str(bad))
-    assert "unknown [scpi] keys" in warned[0] and dlg.edits["timeout_ms"].text() == "800"
+    assert "unknown [scpi] keys" in warned[0] and dlg.edits["name"].text() == "RDT GAC"
 
 
 def test_profile_test_read(qtbot, win):

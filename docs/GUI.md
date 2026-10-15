@@ -163,11 +163,11 @@ The console is a dark terminal. Each line shows its time, a tag (`TX` sent, `RX`
 
 The profile says how the firmware spells a memory read and write and how it encodes the reply. The editor has every field of the `[scpi]` table (see [CLI.md](CLI.md#scpi-profile)), shows the read and write commands as they will be sent, and refuses a template that would not work (for example a read without `{len}`). While connected, **Test read** sends one read with the edited profile and shows the reply and the decoded bytes, before you apply it.
 
-**Load from file...** at the top of the editor fills the fields from a profile file; the line beside it says whether the profile comes from that file or is stored in the workspace. Pressing OK reconnects. If no field was changed after loading, the workspace keeps pointing at the profile file; once a field is edited, OK stores the profile inside the workspace instead.
+**Load from file...** at the top of the editor fills the fields from a profile file; the line beside it names the workspace's profile file, or the file just loaded. Pressing OK applies the profile and reconnects. Saving the workspace writes the profile to its own file beside the `.rdtw` (`bench.profile.toml`), and the `.rdtw` points to it.
 
 ## Files
 
-**File > New, Open, Save, Save as**. A workspace is saved as three files next to each other: `bench.rdtw` (connection, profile, MCUs, polling), `bench.watch.toml` (the watch tabs and chart) and `bench.commands.toml` (the known commands); opening the `.rdtw` loads all three. A workspace from before the split, with everything in the `.rdtw`, still opens and is split on the next save; one with its commands in `bench.commands.csv` gets `bench.commands.toml` on the next save. See [CLI.md](CLI.md#files-of-a-workspace).
+**File > New, Open, Save, Save as**. A workspace is saved as four files next to each other: `bench.rdtw` (connection, MCUs, polling), `bench.profile.toml` (the SCPI profile), `bench.watch.toml` (the watch tabs and chart) and `bench.commands.toml` (the known commands); opening the `.rdtw` loads all of them. A workspace from before the split, with everything in the `.rdtw`, still opens and is split on the next save; one with its commands in `bench.commands.csv` gets `bench.commands.toml` on the next save. See [CLI.md](CLI.md#files-of-a-workspace).
 
 **File > Import** and **File > Export** move each part on its own:
 

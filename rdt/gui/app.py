@@ -1055,11 +1055,11 @@ class MainWindow(QMainWindow):
         dlg = ProfileDialog(self.ws.config.profile, self.device, self, self.ws.config.profile_path)
         if dlg.exec() != QDialog.Accepted:
             return
-        self.apply_profile(dlg.result_profile(), dlg.result_path())
+        self.apply_profile(dlg.result_profile(), self.ws.config.profile_path)
 
     def apply_profile(self, profile: Profile, path: Path | None = None) -> None:
         self.ws.config.profile = profile
-        self.ws.config.profile_path = path   # None: the profile is saved inside the workspace
+        self.ws.config.profile_path = path   # saving writes the profile to bench.profile.toml
         self.bar.show_profile(self.ws)
         self.set_dirty()
         self.reconnect()
