@@ -237,3 +237,25 @@ def parse_int(text: str) -> int:
         if u.startswith(prefix):
             return int(t[2:], base)
     return int(t, 0) if u.lstrip("+-")[:2] in ("0X", "0B", "0O") else int(t, 10)
+
+
+def load_memory_file(path: str | Path) -> list[Range]:
+    """The memory map in a memory file: its ``[[ranges]]`` (each may name an ``mcu``). A profile,
+    target file or workspace works too, so a map can be taken from any of them: its ``[[ranges]]``
+    and each ``[[mcu]]``'s ``[[mcu.ranges]]`` (the latter tied to that MCU)."""
+    try:
+        with open(path, "rb") as f:
+            raw = tomllib.load(f)
+    except OSError as e:
+        raise ConfigError(f"cannot read memory file {path}: {e.strerror}") from None
+    except tomllib.TOMLDecodeError as e:
+        raise ConfigError(f"memory file {path}: {e}") from None
+    out = [Range.from_dict(r) for r in raw.get("ranges", [])]
+    for m in raw.get("mcu", []):
+        for r in m.get("ranges", []):
+            out.append(Range.from_dict({"mcu": m.get("name", m.get("id")), **r}))
+    for key, loader in (("profile", Profile.load), ("memory_file", load_memory_file)):   # a workspace points to files
+        if isinstance(raw.get(key), str):
+            out += [r for r in (loader(Path(path).parent / raw[key]) if key == "memory_file"
+                                else loader(Path(path).parent / raw[key]).ranges) if r not in out]
+    return out
