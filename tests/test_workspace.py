@@ -181,7 +181,11 @@ def test_save_and_load(tmp_path):
     path = ws.save(tmp_path / "sub" / "bench.rdtw")
 
     text = path.read_text()
-    assert "sim/examples/firmware/main.elf" in text and "\\" not in text   # relative, with / on every OS
+    assert "sim/examples/firmware/main.elf" in text   # relative, with / on every OS
+    assert not any("\\" in line for line in text.splitlines() if "elf" in line)
+    # Every profile field is written, defaults included (rani, 2026-10-15).
+    for key in ("max_write", "align", "byte_order", "max_response", "terminator", "timeout_ms", "retries"):
+        assert re.search(rf"^{key} += ", text, re.M), key
     assert re.search(r"^start +=  ?0x48000000$", text, re.M)
 
     back = Workspace.load(path)
