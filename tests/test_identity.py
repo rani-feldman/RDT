@@ -6,13 +6,12 @@ import time
 from pathlib import Path
 
 import pytest
+from host_helpers import FIRMWARE, Relay, make_target
 
 from rdt import ImageMismatch, McuConfig, WriteRefused
 from rdt.cli import main
 from rdt.memmap import build_id_note, elf_bytes, flash_samples
 from sim import Simulator, TransportConfig, load_config
-
-from host_helpers import FIRMWARE, Relay, make_target
 
 ROOT = Path(__file__).resolve().parent.parent
 EXAMPLE_TARGET = ROOT / "examples" / "sim_target.toml"
@@ -86,8 +85,9 @@ def test_mismatch_refuses_writes_until_allowed(sim, tmp_path):
 
 def test_build_id_in_flash_on_the_h7(tmp_path):
     """An STM32H7 build with the GNU build ID kept in flash, read in aligned 4-byte words."""
-    from rdt.workspace import Workspace
     from test_stm32h7 import SIM_CONFIG, WORKSPACE, run, with_elf
+
+    from rdt.workspace import Workspace
 
     flashed = FIRMWARE / "main_build_id.elf"
     assert build_id_note(flashed) == (0x08000000, 36)
@@ -210,6 +210,7 @@ def test_old_identity_variable_is_ignored(tmp_path):
     """The per-MCU identity variable was removed (rani, 2026-10-15): an old file that has one still
     loads, the flash sample is compared, and the key is dropped on save."""
     import tomllib
+
     from rdt.workspace import Workspace
     bench = ROOT / "examples" / "sim_bench.rdtw"
     raw = tomllib.loads(bench.read_text())
