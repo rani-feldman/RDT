@@ -175,6 +175,7 @@ Each requirement links to its design section.
 | GUI-15 | A dark theme: View > Theme offers System, Light or Dark, saved per user (2026-10-14) | Done | [D-GUI-15](#d-gui-15-dark-theme) |
 | GUI-16 | Drag variables and watch rows onto a watch tab, a tab's title or the chart (2026-10-14) | Done | [D-GUI-16](#d-gui-16-drag-and-drop) |
 | GUI-17 | One title bar row: the app icon, the menus and the minimise, maximise and close buttons in a single line, with no title text and no standard Windows title bar above it (rani, 2026-10-14) | Done | [D-GUI-17](#d-gui-17-one-row-title-bar) |
+| GUI-18 | Load a profile file from inside the SCPI profile dialog; **Target > Load profile file...** is removed (2026-10-15) | In review (PR #104) | [D-SCPI-9](#d-scpi-9-profile-editor) |
 
 ### 2.12 Live chart
 
@@ -470,7 +471,8 @@ A write gets no reply whether it succeeds or fails, so `Session.write` reads the
 
 - **Preview:** the read and write commands are shown as they will be sent, and a template that can't work is refused, such as a read without `{len}`.
 - **Test read:** while connected, it sends one read with the edited profile and shows the reply and the decoded bytes, before anything is applied.
-- **Apply:** OK stores the profile inside the workspace and reconnects. **Target > Load profile file** points the workspace at a profile file instead.
+- **Load from file (GUI-18):** a **Load from file...** button at the top of `ProfileDialog` in `rdt/gui/panels.py` fills the fields from a profile `.toml`. The line beside it says `From file: <name>` or `Stored in the workspace`. `MainWindow.edit_profile` passes the workspace's current `profile_path` in. rani asked on 2026-10-15 for this to replace the separate **Target > Load profile file...**, which is removed.
+- **Apply:** OK reconnects. If no field was changed since the file was loaded (or since the dialog opened on a file), the workspace keeps pointing at that file (`ProfileDialog.result_path()`); once any field is edited, OK stores the profile inside the workspace.
 
 #### D-SCPI-10 Aligned words
 
@@ -1433,6 +1435,7 @@ The application is built against the simulator. As soon as the firmware has the 
 | 2026-10-14 | A workspace's `.watch.toml` and `.commands.toml` are always saved beside its `.rdtw`; workspaces live by default in `%LOCALAPPDATA%\rdt` (Open and Save as start there), and the default target is `./rdt.toml`, else `%LOCALAPPDATA%\rdt\rdt.toml` (WSP-4), at rani's request |
 | 2026-10-14 | Each MCU gets an optional short name and colour, shown as a tag on its watch rows (GUI-12), and a changed value is highlighted for a second (GUI-13). Then layout C: MCU cards replacing the Variables panel and image box, and Watch, Scope, Memory and Console modes with their own layouts (GUI-14), a dark theme (GUI-15) and drag and drop (GUI-16). rani picked these from mockups |
 | 2026-10-14 | The toolbar's Watch, Scope, Memory and Console buttons no longer switch between four layouts; each shows or hides its own panel (a panel behind another tab comes to the front first). The layout is saved on every press and on close, with View > Save layout (Ctrl+Shift+S), View > Reset layout and View > Target (GUI-14), at rani's request |
+| 2026-10-15 | A profile file is loaded from inside the SCPI profile dialog (**Load from file...**), and **Target > Load profile file...** is removed. OK keeps pointing at the file unless a field was edited (GUI-18), at rani's request |
 
 ## 9. Appendix: binary protocol (planned)
 
