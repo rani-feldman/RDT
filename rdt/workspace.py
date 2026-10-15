@@ -5,11 +5,13 @@ of it: the watch tabs, each a named watch list, with each item's display format,
 polling and write safety, and the chart layout; and the device's known commands. A plain target
 file loads as a workspace with no tabs, and a workspace works anywhere a target file does.
 
-The watch tabs and chart are kept in their own watch list file, and the known commands in their
-own commands file; the ``.rdtw`` names them (``watch_file``, ``commands_file``), so opening it loads
-everything. They sit next to it, named after it, and saving always writes them there::
+The watch tabs and chart are kept in their own watch list file, the known commands in their
+own commands file, and the SCPI profile in its own profile file; the ``.rdtw`` names them
+(``watch_file``, ``commands_file``, ``profile``), so opening it loads everything. They sit next to
+it, named after it, and saving always writes them there::
 
-    bench.rdtw               connection, profile, MCUs, polling, read-only default
+    bench.rdtw               connection, MCUs, polling, read-only default
+    bench.profile.toml       [scpi] (every field) and [[ranges]]
     bench.watch.toml         [[tab]] / [[tab.watch]] and [chart]
     bench.commands.toml      [[command]] tables: command, name, group, description
 
@@ -55,6 +57,7 @@ POLL_KINDS = ("global", "manual")
 DEFAULT_POLL_MS = 500
 WATCH_SUFFIX = ".watch.toml"        # bench.rdtw keeps its watch tabs in bench.watch.toml
 COMMANDS_SUFFIX = ".commands.toml"  # and its known commands in bench.commands.toml
+PROFILE_SUFFIX = ".profile.toml"    # and its SCPI profile in bench.profile.toml
 
 
 def canonical(expr: str) -> str:
@@ -283,13 +286,17 @@ class Workspace:
         return d
 
     def save(self, path: str | Path | None = None) -> Path:
-        """Save the workspace, its watch list file and its commands file. The two files always go
-        next to the ``.rdtw``, named after it (bench.watch.toml, bench.commands.toml), so a
-        workspace is one folder's files (rani, 2026-10-14). A file it was loaded from elsewhere,
-        or under another name, is left as it was."""
+        """Save the workspace, its profile file, its watch list file and its commands file. The
+        files always go next to the ``.rdtw``, named after it (bench.profile.toml,
+        bench.watch.toml, bench.commands.toml), so a workspace is one folder's files (rani,
+        2026-10-14; the profile file 2026-10-15). A file it was loaded from elsewhere, or under
+        another name, is left as it was."""
         path = Path(path) if path is not None else self.path
         if path is None:
             raise ConfigError("the workspace has no file yet; give a path to save it to")
+        profile_path = _beside(path, PROFILE_SUFFIX)
+        write_profile_file(profile_path, self.config.profile)
+        self.config.profile_path = profile_path
         watch_path = _beside(path, WATCH_SUFFIX) if self.tabs or self.chart else None
         commands_path = _beside(path, COMMANDS_SUFFIX) if self.commands else None
         if watch_path is not None:
@@ -298,7 +305,7 @@ class Workspace:
             write_commands_file(commands_path, self.commands)
         self.watch_path, self.commands_path = watch_path, commands_path
         text = tomlw.dumps(self.to_dict(path.parent), "RDT workspace. Saved by RDT, so comments are not kept.\n"
-                           "The watch tabs and the known commands are in the files it names.")
+                           "The SCPI profile, the watch tabs and the known commands are in the files it names.")
         try:
             _write_atomic(path, lambda tmp: tmp.write_text(text, encoding="utf-8"))
         except OSError as e:
@@ -685,6 +692,20 @@ def _write_atomic(path: Path, write: Callable[[Path], None]) -> None:
     tmp = path.with_name(path.name + ".tmp")
     write(tmp)
     os.replace(tmp, path)
+
+
+def write_profile_file(path: str | Path, profile: Profile) -> None:
+    """Write the SCPI profile as a profile file: [scpi] with every field, and its [[ranges]]."""
+    path = Path(path)
+    d: dict = {"scpi": _profile_dict(profile)}
+    if profile.ranges:
+        d["ranges"] = [_range_dict(r) for r in profile.ranges]
+    text = tomlw.dumps(d, "RDT SCPI profile: the memory read and write commands and the reply format.\n"
+                          "Saved by RDT, so comments are not kept.")
+    try:
+        _write_atomic(path, lambda tmp: tmp.write_text(text, encoding="utf-8"))
+    except OSError as e:
+        raise ConfigError(f"cannot save profile file {path}: {e.strerror}") from None
 
 
 def write_commands_file(path: str | Path, commands: list[SavedCommand]) -> None:

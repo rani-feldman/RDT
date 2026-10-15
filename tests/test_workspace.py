@@ -183,9 +183,14 @@ def test_save_and_load(tmp_path):
     text = path.read_text()
     assert "sim/examples/firmware/main.elf" in text   # relative, with / on every OS
     assert not any("\\" in line for line in text.splitlines() if "elf" in line)
-    # Every profile field is written, defaults included (rani, 2026-10-15).
-    for key in ("max_write", "align", "byte_order", "max_response", "terminator", "timeout_ms", "retries"):
-        assert re.search(rf"^{key} += ", text, re.M), key
+    # The profile is in its own file beside the .rdtw, every field written (rani, 2026-10-15).
+    assert re.search(r'^profile +=  ?"bench.profile.toml"$', text, re.M) and "[scpi]" not in text
+    profile_text = (tmp_path / "sub" / "bench.profile.toml").read_text()
+    for key in ("name", "read", "write", "max_write", "align", "byte_order", "max_response", "terminator",
+                "timeout_ms", "retries"):
+        assert re.search(rf"^{key} += ", profile_text, re.M), key
+    assert "SRAM2" in profile_text
+    assert ws.config.profile_path == tmp_path / "sub" / "bench.profile.toml"
     assert re.search(r"^start +=  ?0x48000000$", text, re.M)
 
     back = Workspace.load(path)
@@ -200,6 +205,7 @@ def test_save_and_load(tmp_path):
     # Saving again changes nothing.
     back.save()
     assert path.read_text() == text
+    assert (tmp_path / "sub" / "bench.profile.toml").read_text() == profile_text
 
 
 def test_a_target_file_is_a_workspace():
