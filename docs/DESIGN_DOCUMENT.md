@@ -32,6 +32,7 @@ Status values:
 
 - **Done:** implemented in the PC application and covered by tests.
 - **Firmware:** a requirement on the firmware. The simulator implements it today; the real firmware will implement it later.
+- **In progress:** being built, no pull request open yet.
 - **In review:** built in an open pull request, not merged yet.
 - **Planned:** agreed but not built yet.
 - **Removed:** was built or agreed, then dropped by rani.
@@ -176,6 +177,14 @@ Each requirement links to its design section.
 | GUI-16 | Drag variables and watch rows onto a watch tab, a tab's title or the chart (2026-10-14) | Done | [D-GUI-16](#d-gui-16-drag-and-drop) |
 | GUI-17 | One title bar row: the app icon, the menus and the minimise, maximise and close buttons in a single line, with no title text and no standard Windows title bar above it (rani, 2026-10-14) | Done | [D-GUI-17](#d-gui-17-one-row-title-bar) |
 | GUI-18 | Load a profile file from inside the SCPI profile dialog; **Target > Load profile file...** is removed (2026-10-15) | Done | [D-SCPI-9](#d-scpi-9-profile-editor) |
+| LNF-1 | Four more themes in **View > Theme**: Studio Dark, Islands, Instrument and Light Pro (2026-10-15) | In progress | [D-LNF-1](#d-lnf-1-themes) |
+| LNF-2 | A **RUN/STOP** key replaces the **Poll** checkbox (2026-10-15) | In progress | [D-LNF-2](#d-lnf-2-runstop-key) |
+| LNF-3 | Icon buttons for Profile, Poll now, Log CSV and the panel buttons (2026-10-15) | In progress | [D-LNF-3](#d-lnf-3-icon-buttons) |
+| LNF-4 | Chart traces take the colour of their MCU (2026-10-15) | In progress | [D-LNF-4](#d-lnf-4-mcu-colours-on-the-chart) |
+| LNF-5 | The link state is a coloured strip in the status bar, with each MCU's reply time (2026-10-15) | In progress | [D-LNF-5](#d-lnf-5-link-strip-in-the-status-bar) |
+| LNF-6 | **View > Density**: Compact or Comfortable, saved per user (2026-10-15) | In progress | [D-LNF-6](#d-lnf-6-density) |
+| LNF-7 | Chart and remove icons appear when hovering over a watch row (2026-10-15) | In progress | [D-LNF-7](#d-lnf-7-hover-icons-on-watch-rows) |
+| LNF-8 | Values are shown in a monospace font (2026-10-15) | In progress | [D-LNF-8](#d-lnf-8-monospace-values) |
 
 ### 2.12 Live chart
 
@@ -966,6 +975,43 @@ Polling, the chart and the CSV log keep running while a panel is hidden.
 - **Moving and resizing:** pressing an empty part of the row calls the system move, a double click maximises or restores, and the outer 6 px of the window call the system resize (cursor changes at the edges; the top edge is covered by the row).
 - **Opt out:** `RDT_NATIVE_TITLEBAR=1` keeps the standard Windows title bar.
 
+#### D-LNF-1 Themes
+
+rani asked on 2026-10-15 for all four styles from the look and feel options (thread "Look and feel options") to be built. **View > Theme** gains them next to System, Light and Dark (D-GUI-15), still saved as `ui/theme` in `ui.toml`:
+
+- **Studio Dark:** like VS Code or Ozone. The panel buttons become icons on a strip at the far left, and the status bar is blue.
+- **Islands:** like JetBrains or Windows 11. Rounded panels, more space, one blue accent.
+- **Instrument:** like an oscilloscope. A black plot, MCU colours on the traces (D-LNF-4) and the RUN/STOP key (D-LNF-2).
+- **Light Pro:** like CubeMonitor. A white work area, a navy title bar and zebra rows.
+
+#### D-LNF-2 RUN/STOP key
+
+A **RUN/STOP** key replaces the **Poll** checkbox of D-POLL-5 and does the same thing: it turns all polling on or off. Polling still starts on and is not saved.
+
+#### D-LNF-3 Icon buttons
+
+The toolbar's Profile, Poll now and Log CSV buttons and the Watch, Scope, Memory and Console panel buttons (D-GUI-14) show icons, with their name and shortcut in the tooltip.
+
+#### D-LNF-4 MCU colours on the chart
+
+A new chart trace takes its MCU's tag colour (D-GUI-12).
+
+#### D-LNF-5 Link strip in the status bar
+
+The status bar shows the link state (D-GUI-2, D-LNK-9) as a coloured strip, with the last reply time of each MCU next to it.
+
+#### D-LNF-6 Density
+
+**View > Density** offers **Compact** and **Comfortable** row heights and padding, saved per user as `ui/density` in `ui.toml` (D-WSP-5).
+
+#### D-LNF-7 Hover icons on watch rows
+
+Hovering over a watch row shows a chart icon (add it to the chart) and a remove icon at the row's end.
+
+#### D-LNF-8 Monospace values
+
+Value columns in the watch tree and memory view use a monospace font, so digits line up.
+
 ### 4.12 Live chart
 
 #### D-CHT-1 Chart
@@ -1112,7 +1158,7 @@ Opening the `.rdtw` loads all three (`Workspace.watch_path`, `Workspace.commands
 
 Interface settings are per user, not per workspace. They are in `ui.toml` next to the console history (`%LOCALAPPDATA%\rdt\ui.toml` on Windows; `RDT_UI_FILE` overrides it), handled by `UiSettings` in `rdt/ui_settings.py`:
 
-- **Settings:** `console/font_size` and `console/wrap` (D-CON-11), `memory/kind`, `memory/type` and `memory/decimal` (D-GUI-7), and `ui/theme` (D-GUI-15).
+- **Settings:** `console/font_size` and `console/wrap` (D-CON-11), `memory/kind`, `memory/type` and `memory/decimal` (D-GUI-7), `ui/theme` (D-GUI-15, D-LNF-1) and `ui/density` (D-LNF-6).
 - **State:** `session/last_workspace` (D-WSP-3), `session/layout` and `session/watch_shown` (D-GUI-14). They are not settings, so they are never exported and an import leaves them alone.
 
 Each change re-reads the file before writing it, so two windows keep each other's changes, and a file that can't be written leaves the settings in memory only. `ui.toml` replaces `gui.ini` and `console.ini`, whose values are copied into it on the first start (`load_ui` in `rdt/gui/app.py`).
@@ -1436,6 +1482,7 @@ The application is built against the simulator. As soon as the firmware has the 
 | 2026-10-14 | Each MCU gets an optional short name and colour, shown as a tag on its watch rows (GUI-12), and a changed value is highlighted for a second (GUI-13). Then layout C: MCU cards replacing the Variables panel and image box, and Watch, Scope, Memory and Console modes with their own layouts (GUI-14), a dark theme (GUI-15) and drag and drop (GUI-16). rani picked these from mockups |
 | 2026-10-14 | The toolbar's Watch, Scope, Memory and Console buttons no longer switch between four layouts; each shows or hides its own panel (a panel behind another tab comes to the front first). The layout is saved on every press and on close, with View > Save layout (Ctrl+Shift+S), View > Reset layout and View > Target (GUI-14), at rani's request |
 | 2026-10-15 | A profile file is loaded from inside the SCPI profile dialog (**Load from file...**), and **Target > Load profile file...** is removed. OK keeps pointing at the file unless a field was edited (GUI-18), at rani's request |
+| 2026-10-15 | Four more themes (Studio Dark, Islands, Instrument, Light Pro) and the behaviour ideas from the look and feel options: a RUN/STOP key instead of the Poll checkbox, icon buttons, MCU colours on chart traces, a link strip in the status bar with reply times, a density switch, hover icons on watch rows and monospace values (LNF-1 to LNF-8), at rani's request |
 
 ## 9. Appendix: binary protocol (planned)
 
