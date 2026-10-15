@@ -7,11 +7,12 @@ file loads as a workspace with no tabs, and a workspace works anywhere a target 
 
 The watch tabs and chart are kept in their own watch list file, the known commands in their
 own commands file, and the SCPI profile in its own profile file; the ``.rdtw`` names them
-(``watch_file``, ``commands_file``, ``profile``), so opening it loads everything. They sit next to
+(``watch_file``, ``commands_file``, ``profile``, ``memory_file``), so opening it loads everything. They sit next to
 it, named after it, and saving always writes them there::
 
     bench.rdtw               connection, MCUs, polling, read-only default
-    bench.profile.toml       [scpi] (every field) and [[ranges]]
+    bench.profile.toml       [scpi] (every field)
+    bench.memory.toml        [[ranges]]: the memory map (regions), each with an optional mcu
     bench.watch.toml         [[tab]] / [[tab.watch]] and [chart]
     bench.commands.toml      [[command]] tables: command, name, group, description
 
@@ -39,13 +40,15 @@ import csv
 import os
 import tomllib
 from dataclasses import dataclass, field, fields
+from dataclasses import replace as dc_replace
 from pathlib import Path
 from typing import Callable
 
 from . import scheduler, tomlw
 from .console import SavedCommand, merge_commands, read_commands, write_commands
 from .errors import ConfigError, RdtError, SymbolError, WriteRefused
-from .profile import Profile, Range
+from .memmap import MemoryMap
+from .profile import Profile, Range, load_memory_file
 from .scaling import Display
 from .symbols import Location, parse
 from .symbols.expr import expr_text
@@ -58,6 +61,7 @@ DEFAULT_POLL_MS = 500
 WATCH_SUFFIX = ".watch.toml"        # bench.rdtw keeps its watch tabs in bench.watch.toml
 COMMANDS_SUFFIX = ".commands.toml"  # and its known commands in bench.commands.toml
 PROFILE_SUFFIX = ".profile.toml"    # and its SCPI profile in bench.profile.toml
+MEMORY_SUFFIX = ".memory.toml"      # and its memory map (the ranges) in bench.memory.toml
 
 
 def canonical(expr: str) -> str:
@@ -257,8 +261,10 @@ class Workspace:
         d["connection"] = conn
         if cfg.profile_path is None:
             d["scpi"] = _profile_dict(cfg.profile)
-            if cfg.profile.ranges:
+            if cfg.profile.ranges and cfg.memory_path is None:
                 d["ranges"] = [_range_dict(r) for r in cfg.profile.ranges]
+        if cfg.memory_path is not None:
+            d["memory_file"] = _rel(cfg.memory_path, base)
         mcus = []
         for m in cfg.mcus:
             md: dict = {"id": m.id, "name": m.name}
@@ -274,7 +280,7 @@ class Workspace:
                 md["color"] = m.color
             if m.byte_order:
                 md["byte_order"] = m.byte_order
-            if m.ranges:
+            if m.ranges and cfg.memory_path is None:
                 md["ranges"] = [_range_dict(r) for r in m.ranges]
             mcus.append(md)
         if mcus:
@@ -286,17 +292,23 @@ class Workspace:
         return d
 
     def save(self, path: str | Path | None = None) -> Path:
-        """Save the workspace, its profile file, its watch list file and its commands file. The
-        files always go next to the ``.rdtw``, named after it (bench.profile.toml,
-        bench.watch.toml, bench.commands.toml), so a workspace is one folder's files (rani,
-        2026-10-14; the profile file 2026-10-15). A file it was loaded from elsewhere, or under
+        """Save the workspace, its profile file, its memory file, its watch list file and its
+        commands file. The files always go next to the ``.rdtw``, named after it
+        (bench.profile.toml, bench.memory.toml, bench.watch.toml, bench.commands.toml), so a
+        workspace is one folder's files (rani, 2026-10-14; the profile file 2026-10-15; the
+        memory file 2026-10-15). A file it was loaded from elsewhere, or under
         another name, is left as it was."""
         path = Path(path) if path is not None else self.path
         if path is None:
             raise ConfigError("the workspace has no file yet; give a path to save it to")
+        ranges = self.memory_ranges()
+        memory_path = _beside(path, MEMORY_SUFFIX) if ranges else None
+        if memory_path is not None:
+            write_memory_file(memory_path, ranges)
         profile_path = _beside(path, PROFILE_SUFFIX)
-        write_profile_file(profile_path, self.config.profile)
+        write_profile_file(profile_path, self.config.profile, ranges=memory_path is None)
         self.config.profile_path = profile_path
+        self.config.memory_path = memory_path
         watch_path = _beside(path, WATCH_SUFFIX) if self.tabs or self.chart else None
         commands_path = _beside(path, COMMANDS_SUFFIX) if self.commands else None
         if watch_path is not None:
@@ -314,6 +326,46 @@ class Workspace:
         return path
 
     # --- import and export ----------------------------------------------------------------------
+
+    def memory_ranges(self) -> list[Range]:
+        """Every range of the workspace: the profile's and each MCU's own (tied to that MCU by name)."""
+        out = list(self.config.profile.ranges)
+        for m in self.config.mcus:
+            out += [r if r.mcu not in (None, "") else dc_replace(r, mcu=m.name) for r in m.ranges]
+        return out
+
+    def export_memory(self, path: str | Path) -> Path:
+        """Write the memory map (all ranges) to a memory file of its own."""
+        path = Path(path)
+        write_memory_file(path, self.memory_ranges())
+        return path
+
+    def import_memory(self, path: str | Path, replace_all: bool = False) -> tuple[int, int]:
+        """Take the memory map of a memory file (or a profile, target file or workspace). With
+        ``replace_all`` the workspace's ranges are dropped first; otherwise the file's ranges are
+        added and one already here is skipped. A map that overlaps itself or the ELF sections is
+        refused and nothing changes. Returns how many ranges were added and how many skipped."""
+        new = load_memory_file(path)
+        cfg = self.config
+        kept = [] if replace_all else self.memory_ranges()
+        added = skipped = 0
+        merged = list(kept)
+        for r in new:
+            if r in merged:
+                skipped += 1
+            else:
+                merged.append(r)
+                added += 1
+        for m in cfg.mcus:
+            shared = [r for r in merged if r.mcu in (None, "", m.name, m.id)]
+            try:
+                MemoryMap([], shared)
+            except RdtError as e:
+                raise ConfigError(f"{Path(path).name}: {e}") from None
+        cfg.profile.ranges = merged
+        for m in cfg.mcus:
+            m.ranges = []
+        return added, skipped
 
     def export_watches(self, path: str | Path) -> Path:
         """Write the watch tabs and the chart to a watch list file of their own."""
@@ -694,11 +746,24 @@ def _write_atomic(path: Path, write: Callable[[Path], None]) -> None:
     os.replace(tmp, path)
 
 
-def write_profile_file(path: str | Path, profile: Profile) -> None:
-    """Write the SCPI profile as a profile file: [scpi] with every field, and its [[ranges]]."""
+def write_memory_file(path: str | Path, ranges: list[Range]) -> None:
+    """Write the memory map as a memory file: one [[ranges]] table per range."""
+    path = Path(path)
+    text = tomlw.dumps({"ranges": [_range_dict(r) for r in ranges]} if ranges else {},
+                       "RDT memory map: the memory regions RDT may access beyond the ELF's sections.\n"
+                       "Each range may name an mcu. Saved by RDT, so comments are not kept.")
+    try:
+        _write_atomic(path, lambda tmp: tmp.write_text(text, encoding="utf-8"))
+    except OSError as e:
+        raise ConfigError(f"cannot save memory file {path}: {e.strerror}") from None
+
+
+def write_profile_file(path: str | Path, profile: Profile, ranges: bool = True) -> None:
+    """Write the SCPI profile as a profile file: [scpi] with every field, and (unless the ranges
+    are in a memory file of their own) its [[ranges]]."""
     path = Path(path)
     d: dict = {"scpi": _profile_dict(profile)}
-    if profile.ranges:
+    if profile.ranges and ranges:
         d["ranges"] = [_range_dict(r) for r in profile.ranges]
     text = tomlw.dumps(d, "RDT SCPI profile: the memory read and write commands and the reply format.\n"
                           "Saved by RDT, so comments are not kept.")

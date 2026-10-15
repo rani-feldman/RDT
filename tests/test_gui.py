@@ -928,7 +928,7 @@ def test_settings_files_import_and_export(qtbot, win, bench, tmp_path, monkeypat
     subs = {a.text().replace("&", ""): a.menu() for a in file_menu.actions() if a.menu()}
     for name in ("Import", "Export"):
         assert [a.text().replace("&", "") for a in subs[name].actions()] == \
-               ["Watch list...", "Commands...", "Interface settings..."]
+               ["Watch list...", "Commands...", "Memory map...", "Interface settings..."]
     # the workspace was saved in three files
     assert (tmp_path / "bench.watch.toml").is_file()
     exported = tmp_path / "out.watch.toml"
@@ -940,6 +940,12 @@ def test_settings_files_import_and_export(qtbot, win, bench, tmp_path, monkeypat
     assert win.watch_tabs.count() == len(tabs) and win.dirty
     assert win.import_watches(exported, replace=True) and [t.name for t in win.ws.tabs] == tabs
     assert "Imported" in win.message.text()
+
+    memory = tmp_path / "map.memory.toml"
+    memory.write_text('[[ranges]]\nname = "GPIOA"\nstart = 0x40020000\nsize = 0x400\n')
+    assert win.import_memory(memory, replace=True) and [r.name for r in win.ws.memory_ranges()] == ["GPIOA"]
+    out = tmp_path / "out.memory.toml"
+    assert win.export_memory(out) and "GPIOA" in out.read_text()
 
     win.console.set_font_size(9)
     ui = tmp_path / "mine.toml"

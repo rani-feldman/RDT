@@ -10,6 +10,7 @@ import pytest
 from rdt import ConfigError
 from rdt.cli import main
 from rdt.console import SavedCommand
+from rdt.profile import Range
 from rdt.scaling import Display
 from rdt.target import McuConfig, TargetConfig
 from rdt.ui_settings import UiSettings, ui_path
@@ -273,3 +274,83 @@ def test_cli_watchlist_and_ui(tmp_path, capsys):
     assert "console/font_size  14" in run("ui", "show")[1]
     assert run("ui", "export", str(tmp_path / "back.toml"))[0] == 0
     assert tomllib.loads((tmp_path / "back.toml").read_text()) == {"console": {"font_size": 14, "wrap": True}}
+
+
+MEMORY = '''[[ranges]]
+name = "GPIOA"
+start = 0x40020000
+size = 0x400
+
+[[ranges]]
+name = "DTCM"
+start = 0x20000000
+size = 0x20000
+kind = "memory"
+mcu = "main"
+'''
+
+
+def test_memory_map_has_its_own_file(tmp_path):
+    ws = bench()
+    ws.config.mcus[0].ranges = [Range("SRAM", 0x24000000, 0x80000, kind="memory")]
+    ws.config.profile.ranges = [Range("GPIOA", 0x40020000, 0x400)]
+    ws.save(tmp_path / "bench.rdtw")
+    raw = tomllib.loads((tmp_path / "bench.rdtw").read_text())
+    assert raw["memory_file"] == "bench.memory.toml" and "ranges" not in raw and "ranges" not in raw["mcu"][0]
+    assert "ranges" not in tomllib.loads((tmp_path / "bench.profile.toml").read_text())
+    mem = tomllib.loads((tmp_path / "bench.memory.toml").read_text())
+    assert [r["name"] for r in mem["ranges"]] == ["GPIOA", "SRAM"] and mem["ranges"][1]["mcu"] == "main"
+    back = Workspace.load(tmp_path / "bench.rdtw")
+    assert sorted(r.name for r in back.memory_ranges()) == ["GPIOA", "SRAM"]
+    back.save()
+    assert tomllib.loads((tmp_path / "bench.rdtw").read_text())["memory_file"] == "bench.memory.toml"
+
+
+def test_no_ranges_no_memory_file(tmp_path):
+    bench().save(tmp_path / "bench.rdtw")
+    assert not (tmp_path / "bench.memory.toml").exists()
+    assert "memory_file" not in tomllib.loads((tmp_path / "bench.rdtw").read_text())
+
+
+def test_old_inline_ranges_move_to_the_memory_file(tmp_path):
+    (tmp_path / "old.rdtw").write_text(
+        '[connection]\ntransport = "tcp"\naddress = "127.0.0.1:5025"\n\n[[mcu]]\nid = 0\nname = "main"\n\n'
+        '  [[mcu.ranges]]\n  name = "GPIOA"\n  start = 0x40020000\n  size = 0x400\n')
+    ws = Workspace.load(tmp_path / "old.rdtw")
+    assert [r.name for r in ws.config.mcus[0].ranges] == ["GPIOA"]
+    ws.save()
+    assert "ranges" not in tomllib.loads((tmp_path / "old.rdtw").read_text())["mcu"][0]
+    assert (tmp_path / "old.memory.toml").is_file()
+    assert [r.name for r in Workspace.load(tmp_path / "old.rdtw").memory_ranges()] == ["GPIOA"]
+
+
+def test_load_memory_map(tmp_path):
+    (tmp_path / "m.memory.toml").write_text(MEMORY)
+    ws = bench()
+    assert ws.import_memory(tmp_path / "m.memory.toml") == (2, 0)
+    assert ws.import_memory(tmp_path / "m.memory.toml") == (0, 2)        # again: all skipped
+    assert ws.import_memory(tmp_path / "m.memory.toml", replace_all=True) == (2, 0)
+    t = Workspace.load(ws.save(tmp_path / "w.rdtw"))
+    assert {r.name for r in t.memory_ranges()} == {"GPIOA", "DTCM"}
+
+
+def test_load_memory_map_refuses_overlap(tmp_path):
+    (tmp_path / "bad.toml").write_text('[[ranges]]\nname = "A"\nstart = 0x1000\nsize = 0x100\n\n'
+                                       '[[ranges]]\nname = "B"\nstart = 0x1080\nsize = 0x100\n')
+    ws = bench()
+    with pytest.raises(ConfigError):
+        ws.import_memory(tmp_path / "bad.toml")
+    assert ws.memory_ranges() == []
+
+
+def test_memory_map_from_a_workspace_and_the_cli(tmp_path):
+    src = bench()
+    src.config.mcus[0].ranges = [Range("SRAM", 0x24000000, 0x80000, kind="memory")]
+    src.save(tmp_path / "src.rdtw")
+    bench().save(tmp_path / "dst.rdtw")
+    out = io.StringIO()
+    assert main(["-w", str(tmp_path / "dst.rdtw"), "memory", "import", str(tmp_path / "src.rdtw")], out) == 0
+    assert "imported 1 ranges" in out.getvalue()
+    exported = tmp_path / "x.memory.toml"
+    assert main(["-w", str(tmp_path / "dst.rdtw"), "memory", "export", str(exported)], io.StringIO()) == 0
+    assert tomllib.loads(exported.read_text())["ranges"][0]["name"] == "SRAM"
