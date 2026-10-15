@@ -24,7 +24,9 @@ The host application loads one ELF file per MCU and reads its DWARF debug inform
 - **Scope now:** the PC application only. The firmware side is a specification (section 5); a Python simulated device implements it, so the application is built and tested end to end before the firmware has its memory commands.
 - **Not in v1:** breakpoints, stepping, local (stack) variables, flashing, authentication, map files.
 
-**Status (2026-10-12):** milestones M0 to M4 are done. The simulator, host core, CLI, symbols, workspace, GUI, watch tabs, live chart, statistics, CSV log and console features are all built and tested. The firmware memory commands are not written yet.
+**Status (2026-10-15):** milestones M0 to M5 are done, and so are the GUI redesign (MCU cards, panel buttons, themes and the look and feel, GUI-12 to GUI-18, LNF-1 to LNF-8) and the split workspace files (WSP-4 to WSP-8). The simulator, host core, CLI, symbols, workspace, GUI, watch tabs, live chart, statistics, CSV log and console features are all built and tested. rani's firmware answers the memory read command on the first real board (an STM32H7, over COM3, since 2026-10-13). Only the installer (M6) and the binary protocol (RM-4) are still planned.
+
+**How to use RDT:** the [user manual](USER_MANUAL.md) explains how to operate it from the GUI and the CLI.
 
 ## 2. Requirements
 
@@ -62,7 +64,7 @@ Each requirement links to its design section.
 | LNK-6 | Other tools may use the firmware's SCPI port over LAN at the same time as RDT (2026-10-05) | Done | [D-LNK-6](#d-lnk-6-sharing-the-link-with-other-tools) |
 | LNK-7 | Connected means the COM port or socket opened; RDT sends nothing to the device on connect or reconnect (no `*IDN?`) and sends no probe; when the link shows as down is LNK-9 (2026-10-14) | Done | [D-LNK-7](#d-lnk-7-connect-without-a-probe) |
 | LNK-8 | The GUI lists each COM port with its description, such as `COM3 - GAC serial port (COM3)` (2026-10-13) | Done | [D-LNK-1](#d-lnk-1-com-port) |
-| LNK-9 | The link shows as down (red `Link down · COM3`) when the port or socket breaks, noticed within a second even with polling off, or when the device answers none of 3 reads in a row from any MCU while the port stays open ("no reply"). While the link is down the image box is hidden and writes are refused, and the ELFs are checked again when it comes back (2026-10-14; the default chosen in the thread "Status box on lost connection", not yet confirmed by rani) | Done | [D-LNK-9](#d-lnk-9-noticing-a-lost-link) |
+| LNK-9 | The link shows as down (red `Link down · COM3`) when the port or socket breaks, noticed within a second even with polling off, or when the device answers none of 3 reads in a row from any MCU while the port stays open ("no reply"). While the link is down the MCU cards show `link down` (GUI-14) and writes are refused, and the ELFs are checked again when it comes back (2026-10-14; the default chosen in the thread "Status box on lost connection", not yet confirmed by rani) | Done | [D-LNK-9](#d-lnk-9-noticing-a-lost-link) |
 
 ### 2.3 SCPI commands
 
@@ -410,7 +412,7 @@ rani reported on 2026-10-14 that the status box stayed green `Connected · COM3`
 
 - **Idle check:** `Session._watch_loop` (thread `rdt-linkwatch`) calls `Transport.check()` every `WATCH_S` = 1 s while the session lock is free. Serial reads `in_waiting`, which fails once a USB COM port is unplugged (`ClearCommError` on Windows, `EIO` on Linux). TCP does a non-blocking `recv(1, MSG_PEEK)`, where EOF or a reset means broken. UDP has nothing to check. A failure goes through the usual link-down and auto-reconnect path (D-LNK-5). No bytes are sent.
 - **No reply:** `LinkState.NO_REPLY` in `rdt/session.py`. `_device_unanswered` counts read pieces that got no reply at all (`NO_REPLY_AFTER` = 3), and `_device_answered` resets the count and goes back to up. Reads still go out, since they act as the probe. Writes raise `LinkDown(... write refused)`. The port stays open and nothing reconnects.
-- **GUI:** both cases show the red `Link down` connect button (GUI-9, GUI-11), with the tooltip saying which. The image box is hidden while the link is down.
+- **GUI:** both cases show the red `Link down` connect button (GUI-9, GUI-11), with the tooltip saying which. Each MCU card shows `link down` (`link_health` in `rdt/gui/cards.py`, D-GUI-14).
 - **ELF check:** `Target._link_event` marks every identity stale on down and on no reply, so the GUI runs the image check again when the link comes back up (D-SYM-8).
 - **Known limits:** with its port open and polling off, a hung board is noticed only at the next read (Poll now, F6), because RDT sends no probe. Three bad-address reads in a row also count as no reply, because the firmware does not reply on errors (D-SCPI-5).
 - **Simulator:** `Device.frozen` and `SIMulation:FREEze <seconds>` make the simulated board stop answering with the port open ([SIMULATOR.md](SIMULATOR.md)).
@@ -862,7 +864,7 @@ The poll collects what every tab has due, not only the tab in front. Each expres
 
 #### D-GUI-1 Main window
 
-`rdt-gui [workspace.rdtw]` (or `python -m rdt.gui`) opens one workspace. The window has the connection bar on top, the watch tabs in the centre, and docked panels for the variable browser, the chart, the memory view and the SCPI console. Every change is saved back to the workspace: the title shows `*` while there are unsaved changes, and closing asks whether to save. **File > New, Open, Save, Save as** work on `.rdtw` files. Opening a plain `.toml` target file starts an unsaved workspace, and Save asks for a `.rdtw` path.
+`rdt-gui [workspace.rdtw]` (or `python -m rdt.gui`) opens one workspace. The window has the connection bar on top, the watch tabs in the centre, and docked panels: the **Target** panel with one card per MCU (D-GUI-14), the chart, the memory view and the SCPI console. Every change is saved back to the workspace: the title shows `*` while there are unsaved changes, and closing asks whether to save. **File > New, Open, Save, Save as** work on `.rdtw` files. Opening a plain `.toml` target file starts an unsaved workspace, and Save asks for a `.rdtw` path.
 
 #### D-GUI-2 Connection bar
 
@@ -1430,10 +1432,11 @@ Later, with the firmware: region-boundary tests on the target, and measuring the
 | M4 | Poll scheduler, live chart, statistics, CSV log (PR #14); watch tabs and removing command buttons (PR #16) | Done 2026-10-11 |
 | Console | Console features from ComPort-Zone, CON-1 to CON-12; terminal look and typing in it CON-13, CON-14 | Done 2026-10-12 |
 | M5 | ELF identity check (SYM-8), global read-only default (WS-4), reopen last workspace (WSP-3) | Done 2026-10-12 |
+| GUI and files | MCU tags, layout C, dark theme, drag and drop, one-row title bar, profile dialog (GUI-12 to GUI-18); four more themes and the look and feel (LNF-1 to LNF-8); split workspace files (WSP-4 to WSP-8) | Done 2026-10-15 |
 | M6 | Installer and packaged documentation | Planned |
-| Later | Firmware memory commands on real hardware; binary protocol (RM-4) | Waiting on firmware |
+| Later | Binary protocol (RM-4) | Waiting on firmware |
 
-The application is built against the simulator. As soon as the firmware has the read and write commands of section 5, it works on real hardware with only the target file changed. The first hardware board is still open.
+The application is built against the simulator. With the firmware's read and write commands of section 5, it works on real hardware with only the target file changed; it has read memory on rani's STM32H7 board over COM3 since 2026-10-13.
 
 ## 8. Decision log
 
