@@ -67,7 +67,9 @@ def test_save_writes_three_files(tmp_path):
 
 def test_nothing_to_keep_makes_no_files(tmp_path):
     path = Workspace(TargetConfig(mcus=[McuConfig(0, "main")])).save(tmp_path / "empty.rdtw")
-    assert "_file" not in path.read_text() and sorted(p.name for p in tmp_path.iterdir()) == ["empty.rdtw"]
+    # Only the profile file is always written (rani, 2026-10-15).
+    assert "_file" not in path.read_text()
+    assert sorted(p.name for p in tmp_path.iterdir()) == ["empty.profile.toml", "empty.rdtw"]
 
 
 def test_an_old_single_file_workspace_is_split_on_save(tmp_path):
