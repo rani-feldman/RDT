@@ -47,7 +47,7 @@ For another STM32H7 part, change the banks to match its reference manual, in bot
 
    A relative path is relative to the file it is in. In the GUI you can instead use **Target > MCUs and ELF files** and then save the workspace.
 3. In the simulator config, delete the `uptime_ms` signal, or set its `addr` to one of your own variables. A signal overwrites its address every time it is read.
-4. Start the simulator with your config, then RDT with your workspace, and press **Connect**. The **Variables** panel lists your globals; double-click one to watch it.
+4. Start the simulator with your config, then RDT with your workspace, and press **Connect**. Click the `Interface` card in the **Target** panel on the left to open its variables; double-click one to watch it.
 
 To skip `--config` and `-w` every time, save the two files as `sim.toml` and `rdt.toml` in the folder you start from (the repository root is fine, git ignores them there). `python -m sim`, `rdt` and `rdt-gui` then pick them up by themselves; see [Default config](SIMULATOR.md#default-config-simtoml) and [Default files](CLI.md#default-files).
 
@@ -91,7 +91,7 @@ If the firmware has a build ID or an identity variable (below), RDT compares tha
 
 **When RDT checks:**
 
-- On Connect. The toolbar's image box, next to the connection status, shows `Image ✓ verified` (green), `Image ✗ mismatch` (red), `Image: checking`, `Image ? not read` (the MCU did not answer) or `Image not checked` (nothing to compare); its tooltip has each MCU's result. A mismatch also shows in the red error bar under the toolbar, and the console says the same, with the detail: the first flash address that differs, or both build IDs.
+- On Connect. The ELF line of each MCU's card in the **Target** panel shows `✓ interface.elf` (green), `✗ interface.elf does not match` (red), `? interface.elf: not read` (the MCU did not answer) or `interface.elf: not checked` (nothing to compare), in grey. A mismatch also shows in the red error bar under the toolbar, and the console says the same, with the detail: the first flash address that differs, or both build IDs.
 - When the link comes back after a drop, such as a reset over a native USB port, and before the next write if the link dropped meanwhile.
 - When the GUI loads a rebuilt ELF.
 - From **Target > Check ELF identity**. Use it after flashing over ST-LINK while the COM port stays open, since then the link never drops and RDT can't tell the firmware changed.

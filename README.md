@@ -25,7 +25,11 @@ python -m sim &
 rdt-gui examples/sim_bench.rdtw
 ```
 
-Connection bar, watch tabs with a debugger-style watch tree from the ELF, live chart with cursors, statistics, CSV logging, memory view, SCPI console and an SCPI profile editor. See [docs/GUI.md](docs/GUI.md).
+One connect button that shows the link, a card per MCU with its link and ELF check and its variables, watch tabs with a debugger-style watch tree from the ELF, live chart with cursors, statistics, CSV logging, memory view, SCPI console, an SCPI profile editor and several themes. See [docs/GUI.md](docs/GUI.md).
+
+## User manual
+
+[docs/USER_MANUAL.md](docs/USER_MANUAL.md) walks through setting up a bench and operating RDT, from the GUI and from the command line.
 
 ## Simulated device
 

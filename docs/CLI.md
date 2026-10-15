@@ -85,7 +85,7 @@ A bit field is written by reading the word that holds it, changing the field and
 
 | Command | What it does |
 | --- | --- |
-| `info` | Device identity, max response size, and each MCU's memory map and ELF identity check |
+| `info` | The link, the max response size, and each MCU's memory map and ELF identity check |
 | `symbols MCU [PATTERN]` | List an MCU's variables with address, size and type. `PATTERN` is a glob such as `motor*`, or any part of the name. Needs no device |
 | `ptype EXPR` | Where a variable is, and its type's layout: member offsets, bit positions, enum values. Also takes a type, such as `main:motor_t`. Needs no device |
 | `read [EXPR...] [--tab NAME] [--max-cells N]` | Read values; structs and arrays open to every field and cell. With no names, every item in the workspace's watch tabs, or with `--tab` the items of one tab |
@@ -97,6 +97,7 @@ A bit field is written by reading the word that holds it, changing the field and
 | `console [--timestamps] [--log FILE]` | Interactive SCPI console. `.read EXPR` reads, `.write EXPR VALUE` writes, `.history [N]` lists the saved history, `!N` sends entry N again, `.quit` leaves. See [Console](#console) |
 | `commands list [TEXT]`, `commands import FILE [--replace]`, `commands export FILE`, `commands clear` | The workspace's list of known commands. See [Console](#console). Needs no device |
 | `watchlist import FILE [--replace]`, `watchlist export FILE` | Bring in the watch tabs of a watch list file (or another `.rdtw`), or write this workspace's tabs and chart to one. See [Files of a workspace](#files-of-a-workspace). Needs no device |
+| `memory import FILE [--replace]`, `memory export FILE` | Bring in the memory ranges of a memory file (or of a profile, target file or another `.rdtw`), or write this workspace's memory map to one. See [Files of a workspace](#files-of-a-workspace). Needs no device |
 | `ui show`, `ui import FILE`, `ui export FILE` | The GUI's per-user interface settings: show them, take an exported file's, or export them. See [Files of a workspace](#files-of-a-workspace). Needs no workspace or device |
 | `history [-n N] [--clear]` | List the last N (default 20, 0 for all) commands of the saved console history, or delete it. Needs no device |
 | `init FILE` | Save the current target (file and command-line options) as a new workspace. Needs no device |
@@ -186,7 +187,7 @@ and change `profile` to `"sim/examples/default_profile.toml"` (paths are relativ
 
 ## Workspace
 
-A workspace (`.rdtw`) is a target file plus everything set up on top of it: the watch tabs, each a named watch list, with each item's format, scaling, polling and write safety, the chart layout, and the device's known commands. The tabs and chart are kept in a watch list file and the commands in a commands file, both named by the `.rdtw` (see [Files of a workspace](#files-of-a-workspace)). Give it with `-w` (`-t` is the same option). [`examples/sim_bench.rdtw`](../examples/sim_bench.rdtw) is one for the simulator, with the tabs `Motor` and `System`:
+A workspace (`.rdtw`) is a target file plus everything set up on top of it: the watch tabs, each a named watch list, with each item's format, scaling, polling and write safety, the chart layout, and the device's known commands. The SCPI profile, the memory map, the tabs and chart, and the commands are each kept in a file of their own, named by the `.rdtw` (see [Files of a workspace](#files-of-a-workspace)). Give it with `-w` (`-t` is the same option). [`examples/sim_bench.rdtw`](../examples/sim_bench.rdtw) is one for the simulator, with the tabs `Motor` and `System`:
 
 ```
 rdt -w examples/sim_bench.rdtw read                 # every watched item, scaled
@@ -202,6 +203,7 @@ Start one from a target file or command-line options with `rdt init bench.rdtw`,
 # bench.rdtw
 profile = "bench.profile.toml" # the SCPI profile; an inline [scpi] table still loads
 poll_ms = 500                 # global polling interval; 0 turns polling off
+memory_file   = "bench.memory.toml"    # the memory map (all ranges)
 watch_file    = "bench.watch.toml"     # the watch tabs and chart
 commands_file = "bench.commands.toml"  # the known commands
 
@@ -277,7 +279,7 @@ rdt ui import my-ui.toml
 
 Importing a watch list adds its tabs: a tab with the same name as one already there gets the items it lacks, and an item already watched keeps the settings it has here. `--replace` drops the tabs and chart and takes the file's.
 
-The GUI's interface settings (the console's text size and wrapping, the memory view's display format) are per user, not per workspace: they are in `ui.toml` next to the console history (`%LOCALAPPDATA%\rdt\ui.toml` on Windows). `rdt ui show` prints them. An export holds only those settings; the GUI's memory of the last workspace stays out of it. Importing replaces them all: one the file leaves out goes back to its default. The first time the GUI starts with this version, it moves the settings from the older `gui.ini` and `console.ini` into `ui.toml`.
+The GUI's interface settings (the theme and row density, the console's text size and wrapping, the memory view's display format) are per user, not per workspace: they are in `ui.toml` next to the console history (`%LOCALAPPDATA%\rdt\ui.toml` on Windows). `rdt ui show` prints them. An export holds only those settings; the GUI's memory of the last workspace and its panel layout stay out of it. Importing replaces them all: one the file leaves out goes back to its default. The first time the GUI starts with this version, it moves the settings from the older `gui.ini` and `console.ini` into `ui.toml`.
 
 - **Tabs.** Each tab has a name, unique whatever the case, and its own list of items. An item can be in several tabs, but it is still one item: its settings are the same in every tab and it is read once per poll. RDT writes its settings at its first place only; a later place may repeat them, but not differ. Every tab is polled, not only the one the GUI shows.
 - **Older workspaces.** A workspace from before the split keeps its tabs, chart and `[[command]]` tables inside the `.rdtw`. It still opens, and the next save moves them out into the two files. A file from before tabs has a plain `[[watch]]` list; it loads as one tab named `Watch` and is saved with tabs. Its `[[button]]` tables (command buttons, which RDT no longer has) are ignored with a warning and left out when the file is saved; send such commands with `rdt send` or the console.
@@ -317,7 +319,7 @@ The profile is the same `[scpi]` table the simulator reads ([`default_profile.to
 | `retries` | 2 | Extra attempts after a read times out, with a growing delay |
 | `byte_order` | `little` | Used for an MCU without an ELF |
 
-A profile may also list `[[ranges]]` that apply to every MCU, or to one MCU with `mcu = "name"`.
+Memory ranges are listed as `[[mcu.ranges]]` in the target file, or as `[[ranges]]` that apply to every MCU or to one MCU with `mcu = "name"`. A workspace keeps them all in its memory file (`bench.memory.toml`, see [Files of a workspace](#files-of-a-workspace)); a profile that still lists `[[ranges]]` loads them, and the next save moves them there.
 
 A range is a `peripheral` (the default) or `memory`:
 
@@ -403,14 +405,17 @@ rdt/
   ui_settings.py                                    the GUI's per-user interface settings (ui.toml)
   console.py                                        console history, autocomplete, session log, known commands
   cli.py                                            command line
-  gui/         app.py, device.py, variables.py, panels.py, chart.py   the GUI (PySide6): main window, device worker thread,
-                                                    watch tabs and symbol browser, memory view, console, dialogs,
-                                                    live chart (pyqtgraph)
+  memfmt.py                                         the memory view's display formats
+  gui/         app.py, device.py, variables.py, panels.py, chart.py, cards.py,
+               terminal.py, style.py, dnd.py, titlebar.py
+                                                    the GUI (PySide6): main window, device worker thread,
+                                                    watch tabs, MCU cards, memory view, console, dialogs,
+                                                    live chart (pyqtgraph), themes, drag and drop, title bar
 ```
 
 ## Tests
 
-`python -m pytest` runs the host tests against the simulator over TCP, UDP (with dropped datagrams) and a serial pseudo-terminal on Linux. They cover every reply format, user-defined commands, split reads and writes, write confirmation, a silent MCU, a cut link and reconnect, and a second SCPI client sharing the device and its error queue.
+`python -m pytest` runs the host tests against the simulator over TCP, UDP (with dropped datagrams) and a serial pseudo-terminal on Linux. They cover the word reply format, user-defined command templates, split reads and writes, write confirmation, a silent MCU, a cut link and reconnect, and a second SCPI client sharing the device and its error queue.
 
 The symbol tests use a corpus in [`tests/elf`](../tests/elf): one C program with structs, unions, anonymous members, bit fields, enums, 2-D arrays, pointer chains, function pointers and clashing file-statics, built by clang for little-endian Cortex-M4 (DWARF 4), by clang for big-endian ARM (DWARF 5), and by GCC for x86-64 (64-bit pointers). A second "rebuilt" image tests reloading. `build.sh` rebuilds them; the ELFs are committed.
 
