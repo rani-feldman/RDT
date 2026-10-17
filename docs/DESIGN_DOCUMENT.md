@@ -274,7 +274,7 @@ Agreed with rani on 2026-10-17 (thread "Installer and releases plan", milestone 
 
 | ID | Requirement | Status | Design |
 | --- | --- | --- | --- |
-| INS-1 | Windows installer `RDT-Setup-X.Y.Z.exe`, per user in `%LOCALAPPDATA%\Programs\RDT`, no admin rights; Start menu shortcut, optional desktop shortcut (2026-10-17) | Planned | [D-INS-1](#d-ins-1-windows-installer) |
+| INS-1 | Windows installer `RDT-Setup-X.Y.Z.exe` that carries Python and every package RDT needs (no Python, pip or internet needed on the PC), per user in `%LOCALAPPDATA%\Programs\RDT`, no admin rights; Start menu shortcut, optional desktop shortcut (2026-10-17) | Planned | [D-INS-1](#d-ins-1-windows-installer) |
 | INS-2 | Uninstall from Settings > Apps or the Start menu; it asks whether to delete `%LOCALAPPDATA%\rdt` (No preselected) (2026-10-17) | Planned | [D-INS-2](#d-ins-2-uninstall) |
 | INS-3 | A new setup closes RDT, silently uninstalls the old version and then installs; user settings are always kept; installing an older version warns and lets you continue (2026-10-17) | Planned | [D-INS-3](#d-ins-3-upgrade-over-an-old-version) |
 | INS-4 | An "Add rdt to PATH" checkbox, ticked by default; removed on uninstall (2026-10-17) | Planned | [D-INS-4](#d-ins-4-rdt-on-path) |
@@ -1385,7 +1385,7 @@ Planned (rani, 2026-10-17). The packaging files live in `packaging/` (PyInstalle
 
 #### D-INS-1 Windows installer
 
-A PyInstaller one-folder build holds `RDT.exe` (the GUI, no console window), `rdt.exe` (the CLI) and `rdt-sim.exe`, sharing one `_internal` folder; a one-folder build starts faster and trips fewer antivirus false alarms than a one-file build. Inno Setup wraps it as `RDT-Setup-X.Y.Z.exe`, installed per user in `%LOCALAPPDATA%\Programs\RDT` with no admin rights, with a Start menu shortcut, an optional desktop shortcut and an entry under Settings > Apps.
+A PyInstaller one-folder build holds `RDT.exe` (the GUI, no console window), `rdt.exe` (the CLI) and `rdt-sim.exe`, sharing one `_internal` folder. The build bundles Python itself and every package RDT uses (PySide6, pyqtgraph, pyelftools, pyserial, pyreadline3, numpy), in the setup and in the portable zip alike, so the PC needs no Python, pip or internet to install or run RDT (rani, 2026-10-17). A one-folder build starts faster and trips fewer antivirus false alarms than a one-file build. Inno Setup wraps it as `RDT-Setup-X.Y.Z.exe`, installed per user in `%LOCALAPPDATA%\Programs\RDT` with no admin rights, with a Start menu shortcut, an optional desktop shortcut and an entry under Settings > Apps.
 
 #### D-INS-2 Uninstall
 
