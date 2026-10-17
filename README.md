@@ -42,3 +42,7 @@ python -m pytest
 ```
 
 See [docs/SIMULATOR.md](docs/SIMULATOR.md). To try RDT on your own firmware's ELF, with a ready STM32H7 single-MCU setup, see [docs/use-your-own-elf.md](docs/use-your-own-elf.md).
+
+## Licence
+
+RDT is released under the [MIT licence](LICENSE).
