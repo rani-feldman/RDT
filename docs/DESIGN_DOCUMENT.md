@@ -24,7 +24,7 @@ The host application loads one ELF file per MCU and reads its DWARF debug inform
 - **Scope now:** the PC application only. The firmware side is a specification (section 5); a Python simulated device implements it, so the application is built and tested end to end before the firmware has its memory commands.
 - **Not in v1:** breakpoints, stepping, local (stack) variables, flashing, authentication, map files.
 
-**Status (2026-10-15):** milestones M0 to M5 are done, and so are the GUI redesign (MCU cards, panel buttons, themes and the look and feel, GUI-12 to GUI-18, LNF-1 to LNF-8) and the split workspace files (WSP-4 to WSP-8). The simulator, host core, CLI, symbols, workspace, GUI, watch tabs, live chart, statistics, CSV log and console features are all built and tested. rani's firmware answers the memory read command on the first real board (an STM32H7, over COM3, since 2026-10-13). Only the installer (M6) and the binary protocol (RM-4) are still planned.
+**Status (2026-10-15):** milestones M0 to M5 are done, and so are the GUI redesign (MCU cards, panel buttons, themes and the look and feel, GUI-12 to GUI-18, LNF-1 to LNF-8) and the split workspace files (WSP-4 to WSP-8). The simulator, host core, CLI, symbols, workspace, GUI, watch tabs, live chart, statistics, CSV log and console features are all built and tested. rani's firmware answers the memory read command on the first real board (an STM32H7, over COM3, since 2026-10-13). Only the installer and releases (M6, INS-1 to INS-13, planned with rani on 2026-10-17) and the binary protocol (RM-4) are still planned.
 
 **How to use RDT:** the [user manual](USER_MANUAL.md) explains how to operate it from the GUI and the CLI.
 
@@ -267,6 +267,26 @@ Console features taken from ComPort-Zone (an open serial terminal); rani approve
 | RM-7 | Error query: RDT reading `SYSTem:ERRor?` once after a timeout as a hint, the profile key `error_query`, `rdt errors` and the console's `.err`. Built 2026-10-11, removed by rani on 2026-10-14; `SYST:ERR?` can still be typed by hand | Removed | [D-SCPI-5](#d-scpi-5-failed-commands-send-no-reply) |
 | RM-8 | Probe on connect: `*IDN?` (profile key `probe`) sent on connect and every reconnect, and the device identity in the GUI and `rdt info`. Removed by rani on 2026-10-14 | Removed | [D-LNK-7](#d-lnk-7-connect-without-a-probe) |
 | RM-9 | Reply regex: the profile key `reply_regex` (Reply regex in the profile editor) that picked the data out of a longer read reply. Removed by rani on 2026-10-14, since a reply holds only the comma-separated words | Removed | [D-SCPI-11](#d-scpi-11-word-replies) |
+
+### 2.19 Installer and releases
+
+Agreed with rani on 2026-10-17 (thread "Installer and releases plan", milestone M6). Nothing is built yet; rani makes the repository public first (for the update check and free GitHub Actions).
+
+| ID | Requirement | Status | Design |
+| --- | --- | --- | --- |
+| INS-1 | Windows installer `RDT-Setup-X.Y.Z.exe` that carries Python and every package RDT needs (no Python, pip or internet needed on the PC), per user in `%LOCALAPPDATA%\Programs\RDT`, no admin rights; Start menu shortcut, optional desktop shortcut (2026-10-17) | Planned | [D-INS-1](#d-ins-1-windows-installer) |
+| INS-2 | Uninstall from Settings > Apps or the Start menu; it asks whether to delete `%LOCALAPPDATA%\rdt` (No preselected) (2026-10-17) | Planned | [D-INS-2](#d-ins-2-uninstall) |
+| INS-3 | A new setup closes RDT, silently uninstalls the old version and then installs; user settings are always kept; installing an older version warns and lets you continue (2026-10-17) | Planned | [D-INS-3](#d-ins-3-upgrade-over-an-old-version) |
+| INS-4 | An "Add rdt to PATH" checkbox, ticked by default; removed on uninstall (2026-10-17) | Planned | [D-INS-4](#d-ins-4-rdt-on-path) |
+| INS-5 | `.rdtw` files open in RDT on double-click and show the RDT icon (2026-10-17) | Planned | [D-INS-5](#d-ins-5-rdtw-file-association) |
+| INS-6 | A portable zip with each release; the simulator (`rdt-sim`, the example firmware and workspace) is in both (2026-10-17) | Planned | [D-INS-6](#d-ins-6-portable-zip-and-simulator) |
+| INS-7 | Version from the git tag, shown in Help > About, `rdt --version` and the exe properties; first release 1.0.0; semantic versioning (2026-10-17) | Planned | [D-INS-7](#d-ins-7-versions) |
+| INS-8 | A GitHub Release per `v*` tag, built by Actions as a draft (setup, zip, SHA256SUMS, changelog notes); rani publishes after a smoke test; the same build script runs locally (2026-10-17) | Planned | [D-INS-8](#d-ins-8-release-build) |
+| INS-9 | On start, RDT checks the repository's latest Release and shows when a newer version is available (needs the repository public) (2026-10-17) | Planned | [D-INS-9](#d-ins-9-update-check) |
+| INS-10 | A code signing step in the build, off until a certificate is configured (2026-10-17) | Planned | [D-INS-10](#d-ins-10-code-signing) |
+| INS-11 | Settings files carry `format = N`; a newer RDT migrates them after a `.bak` copy; crash log in `%LOCALAPPDATA%\rdt\logs` (2026-10-17) | Planned | [D-INS-11](#d-ins-11-settings-formats-and-crash-log) |
+| INS-12 | MIT licence and third-party notices; the user manual is bundled and opened from Help (2026-10-17) | Planned | [D-INS-12](#d-ins-12-licence-and-bundled-manual) |
+| INS-13 | Release notes from `CHANGELOG.md`: only New features and Bug fixes, one line per feature or bug-fix PR, small changes left out; copied into each GitHub Release; bundled and shown from Help > Release notes (2026-10-17) | Planned | [D-INS-13](#d-ins-13-release-notes) |
 
 Requirements on the firmware itself (FW-1 to FW-10) are in [section 5](#5-firmware-specification).
 
@@ -1359,6 +1379,62 @@ The transcript and the prompt are one editable `QPlainTextEdit`, `Terminal` in `
 
 User-defined buttons that each sent one SCPI command, with an optional parameter, were built in M3 (`[[button]]` in the workspace, a Buttons panel, `rdt press`). rani removed them on 2026-10-11. Such commands are now sent from the SCPI console or with `rdt send`. Old workspaces are handled as described in D-WSP-2.
 
+### 4.19 Installer and releases
+
+Planned (rani, 2026-10-17). The packaging files live in `packaging/` (PyInstaller spec, Inno Setup script, icon, notices), the build in `tools/build_release.ps1` and the release workflow in `.github/workflows/release.yml`. The plan with rani's twelve answers is in the project files (`plans/installer-plan.md`).
+
+#### D-INS-1 Windows installer
+
+A PyInstaller one-folder build holds `RDT.exe` (the GUI, no console window), `rdt.exe` (the CLI) and `rdt-sim.exe`, sharing one `_internal` folder. The build bundles Python itself and every package RDT uses (PySide6, pyqtgraph, pyelftools, pyserial, pyreadline3, numpy), in the setup and in the portable zip alike, so the PC needs no Python, pip or internet to install or run RDT (rani, 2026-10-17). A one-folder build starts faster and trips fewer antivirus false alarms than a one-file build. Inno Setup wraps it as `RDT-Setup-X.Y.Z.exe`, installed per user in `%LOCALAPPDATA%\Programs\RDT` with no admin rights, with a Start menu shortcut, an optional desktop shortcut and an entry under Settings > Apps.
+
+#### D-INS-2 Uninstall
+
+The uninstaller runs from Settings > Apps or the Start menu. A manual uninstall asks "Also delete my settings and workspaces?" with No preselected; Yes deletes `%LOCALAPPDATA%\rdt`. The program folder never holds user files, so removing it loses nothing.
+
+#### D-INS-3 Upgrade over an old version
+
+The setup uses a fixed AppId. When it finds an installed RDT it closes RDT if it is running, runs the old uninstaller silently (which never asks and never touches `%LOCALAPPDATA%\rdt`) and then installs. When the installed version is newer it warns "you are installing an older version" and lets you continue.
+
+#### D-INS-4 rdt on PATH
+
+The setup has an "Add rdt to PATH" checkbox, ticked by default, which adds the install folder to the per-user PATH. The uninstaller removes it.
+
+#### D-INS-5 .rdtw file association
+
+The setup registers `.rdtw` for the current user, with the RDT icon, so a double-click opens the workspace in `RDT.exe`. The uninstaller removes the association.
+
+#### D-INS-6 Portable zip and simulator
+
+Each release also has `RDT-X.Y.Z-portable.zip`, the same folder ready to run unzipped; it keeps its settings in `%LOCALAPPDATA%\rdt` like the installed RDT. Both carry `rdt-sim.exe`, the example firmware ELFs and the example workspace.
+
+#### D-INS-7 Versions
+
+The git tag is the only source of the version (setuptools-scm or a small step that writes it). It appears in `pyproject`, `rdt.__version__`, the exe file properties, a new **Help > About** box and `rdt --version`. Semantic versioning: patch for fixes, minor for features, major for breaking file formats. The first release is 1.0.0, tag `v1.0.0`.
+
+#### D-INS-8 Release build
+
+Pushing a `v*` tag runs `.github/workflows/release.yml`: it builds, runs the tests and the smoke test, and creates a **draft** GitHub Release with the setup exe, the portable zip, `SHA256SUMS.txt` and notes from `CHANGELOG.md`. rani smoke-tests the draft and presses Publish. `tools/build_release.ps1` is the same build and runs on rani's PC. The smoke test: silent install, each exe with `--version`, the sim workspace against `rdt-sim`, an upgrade over the previous release, an uninstall, and a check that `%LOCALAPPDATA%\rdt` survived.
+
+#### D-INS-9 Update check
+
+`rdt/gui/updates.py` makes one HTTPS GET to `api.github.com/repos/rani-feldman/RDT/releases/latest`, with no sign-in, at most once a day, on start. When the tag is newer than the running version the GUI shows "RDT X.Y.Z is available" with a link to the Release. It can be turned off in `ui.toml`, and any failure stays silent. It needs the repository to be public.
+
+#### D-INS-10 Code signing
+
+Releases are unsigned for now. The build script has a signing step for the exes and the setup that is skipped until a certificate is configured.
+
+#### D-INS-11 Settings formats and crash log
+
+Each settings file (the workspace files, the target file, `ui.toml`) gets a `format = N` key. A newer RDT migrates an older file after copying it to `.bak`; an older RDT reading a newer file ignores the keys it does not know and warns once. Unexpected errors are written to `%LOCALAPPDATA%\rdt\logs\rdt.log` (rotated), and a dialog shows the error.
+
+#### D-INS-12 Licence and bundled manual
+
+The repository gets an MIT `LICENSE`, and the app ships a third-party notices file (PySide6/Qt under LGPL, pyqtgraph, pyelftools, pyserial). The user manual (USER_MANUAL.md) is bundled and opened from **Help > User manual**.
+
+#### D-INS-13 Release notes
+
+`CHANGELOG.md` holds the release notes. Each PR that adds a feature or fixes a bug adds one line under `## Unreleased`, in **New features** or **Bug fixes**; there are no other headings, and small changes (tweaks, refactors, docs, tests) get no entry (rani, 2026-10-17). The release build renames the section to the version and date and copies it into the GitHub Release notes (D-INS-8). The app bundles the file and shows it from **Help > Release notes**; nothing pops up after an upgrade.
+
 ## 5. Firmware specification
 
 The firmware side is not written yet; rani adds it to the existing firmware later. This section is the contract it must meet. The simulator meets it today.
@@ -1437,7 +1513,7 @@ Later, with the firmware: region-boundary tests on the target, and measuring the
 | Console | Console features from ComPort-Zone, CON-1 to CON-12; terminal look and typing in it CON-13, CON-14 | Done 2026-10-12 |
 | M5 | ELF identity check (SYM-8), global read-only default (WS-4), reopen last workspace (WSP-3) | Done 2026-10-12 |
 | GUI and files | MCU tags, layout C, dark theme, drag and drop, one-row title bar, profile dialog (GUI-12 to GUI-18); four more themes and the look and feel (LNF-1 to LNF-8); split workspace files (WSP-4 to WSP-8) | Done 2026-10-15 |
-| M6 | Installer and packaged documentation | Planned |
+| M6 | Installer and releases (INS-1 to INS-13): setup exe, portable zip, versions, GitHub Releases, update check | Planned |
 | Later | Binary protocol (RM-4) | Waiting on firmware |
 
 The application is built against the simulator. With the firmware's read and write commands of section 5, it works on real hardware with only the target file changed; it has read memory on rani's STM32H7 board over COM3 since 2026-10-13.
@@ -1506,6 +1582,7 @@ The application is built against the simulator. With the firmware's read and wri
 | 2026-10-15 | The MCUs dialog shows the ELF path on one line, cut in the middle so the file name stays visible, with the full path as the tooltip (GUI-19), at rani's request |
 | 2026-10-15 | The per-MCU identity variable is removed (the Identity variable column in Target > MCUs and ELF files, the `[[mcu]] identity` key, which old files drop on save, and its check); the ELF check uses the GNU build ID when present, else the flash sample (SYM-8), at rani's request since RDT reads the image from the flash |
 | 2026-10-17 | The Light theme gets its own white palette, independent of Windows dark mode (GUI-15, PR #124), and the console follows the theme: light in the light themes, dark in the dark ones (CON-13, PR #125). rani reported the console was always dark |
+| 2026-10-17 | Installer and releases planned (INS-1 to INS-13, M6): per-user setup exe and portable zip, silent uninstall of the old version keeping the settings, PATH and `.rdtw` options, versions from the git tag starting at 1.0.0, draft GitHub Releases built by Actions, release notes with only new features and bug fixes, an update check, MIT licence. rani answered the twelve plan questions; the repository goes public first |
 
 ## 9. Appendix: binary protocol (planned)
 
