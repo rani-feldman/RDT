@@ -22,17 +22,19 @@ a developer. Small changes (tweaks, refactors, documentation, tests) get no line
      sets the version in `rdt/_version.py`, and commits that to main;
    - runs the tests, builds `RDT-Setup-1.2.0.exe` and `RDT-1.2.0-portable.zip`;
    - installs, upgrades and uninstalls the setup on a clean machine to check it (packaging/smoke_test.ps1);
-   - tags the commit `v1.2.0` and creates a **draft** release with the files and the notes.
+   - pushes that commit to main and creates a **draft** release with the files and the notes. No
+     git tag yet: GitHub creates `v1.2.0` when you publish the draft.
 4. Click **Releases** on the repository's main page, open the draft, download the installer and
    try it on your bench.
-5. If it is good, click **Edit** (the pencil), then **Publish release**. From then on, RDT tells
-   its users the new version is out.
+5. If it is good, click **Edit** (the pencil), then **Publish release**. GitHub tags the commit
+   `v1.2.0` at that moment, and from then on RDT tells its users the new version is out.
 
 If the workflow fails, nothing is released and main is not changed (the commit is pushed only
 after the build and the test pass). Fix the cause and run it again.
 
 If a published release turns out bad, don't delete it: fix the bug and release the next patch
-version. A draft you don't want can be deleted with its tag.
+version. If the draft is bad, delete it (**Delete** on the draft): there is no tag to clean up.
+Main keeps the release commit, so fix the bug and release the next patch version (1.2.1).
 
 ## By hand
 
