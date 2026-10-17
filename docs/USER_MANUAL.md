@@ -298,7 +298,7 @@ Press **Memory** (Ctrl+3). Choose the MCU, type an address (`0x20000000`) or a v
 
 ![The SCPI console](images/manual-console.png)
 
-Press **Console** (Ctrl+4). The console is a dark terminal: each line has its time, a tag (`TX` sent, `RX` reply, `ERR` error, `SYS` RDT's own notes) and the text. Type a command on the last line, after the prompt (`COM3 >`), and press Enter.
+Press **Console** (Ctrl+4). The console is a terminal, dark or light with the theme: each line has its time, a tag (`TX` sent, `RX` reply, `ERR` error, `SYS` RDT's own notes) and the text. Type a command on the last line, after the prompt (`COM3 >`), and press Enter.
 
 - A command whose header ends in `?` waits for a reply. A failed command gets no reply, so it shows `(no reply)`; type `SYST:ERR?` to read why from the firmware's error queue.
 - As you type, a list of matching commands from your history and the known commands opens, with the best match in grey after the cursor. → takes the grey text; ↑ and ↓ move in the list; Tab or Enter takes the highlighted command; Esc closes the list.
