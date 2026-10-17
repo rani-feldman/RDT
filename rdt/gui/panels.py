@@ -43,11 +43,21 @@ CONSOLE_KEYS = [
     ("Ctrl+= / Ctrl+- / Ctrl+wheel", "Larger / smaller console text"),
     ("Ctrl+0", "Default console text size"),
 ]
-# The console is a dark terminal whatever the window's theme (CON-13).
-TERMINAL = {"background": "#0d1117", "text": "#c9d1d9", "stamp": "#6e7681", "prompt": "#3fb950",
-            "border": "#30363d", "placeholder": "#6e7681"}
-LINE_COLORS = {"tx": "#7ee787", "rx": "#c9d1d9", "error": "#ff7b72", "note": "#8b949e"}
-LINE_TAGS = {"tx": ("TX", "#3fb950"), "rx": ("RX", "#58a6ff"), "error": ("ERR", "#f85149"), "note": ("SYS", "#8b949e")}
+# The console is a terminal (CON-13) in the theme's colours: dark in the dark themes, light in the
+# light ones (rani, 2026-10-17). Console.restyle switches the three tables below.
+TERMINAL_DARK = ({"background": "#0d1117", "text": "#c9d1d9", "stamp": "#6e7681", "prompt": "#3fb950",
+                  "border": "#30363d", "placeholder": "#6e7681", "selection": "#264f78"},
+                 {"tx": "#7ee787", "rx": "#c9d1d9", "error": "#ff7b72", "note": "#8b949e"},
+                 {"tx": ("TX", "#3fb950"), "rx": ("RX", "#58a6ff"), "error": ("ERR", "#f85149"),
+                  "note": ("SYS", "#8b949e")})
+TERMINAL_LIGHT = ({"background": "#ffffff", "text": "#1f2328", "stamp": "#6e7781", "prompt": "#1a7f37",
+                   "border": "#d0d7de", "placeholder": "#8c959f", "selection": "#b6d7ff"},
+                  {"tx": "#116329", "rx": "#1f2328", "error": "#cf222e", "note": "#6e7781"},
+                  {"tx": ("TX", "#1a7f37"), "rx": ("RX", "#0969da"), "error": ("ERR", "#a40e26"),
+                   "note": ("SYS", "#6e7781")})
+TERMINAL = dict(TERMINAL_DARK[0])
+LINE_COLORS = dict(TERMINAL_DARK[1])
+LINE_TAGS = dict(TERMINAL_DARK[2])
 TAG_WIDTH = 4
 
 
@@ -270,11 +280,6 @@ class Console(QWidget):
         # The terminal: transcript, then the prompt as its last line (CON-13).
         self.terminal = QWidget(objectName="terminal")
         self.terminal.setAttribute(Qt.WA_StyledBackground, True)
-        self.terminal.setStyleSheet(
-            f"#terminal {{ background: {TERMINAL['background']}; border: 1px solid {TERMINAL['border']}; }}"
-            f"#terminal QPlainTextEdit, #terminal QLineEdit {{ background: {TERMINAL['background']};"
-            f" color: {TERMINAL['text']}; border: none; selection-background-color: #264f78; }}"
-            f"#terminal QLabel {{ color: {TERMINAL['stamp']}; }}")
         term = QVBoxLayout(self.terminal)
         term.setContentsMargins(4, 2, 4, 2)
         term.setSpacing(0)
@@ -282,9 +287,7 @@ class Console(QWidget):
         self.output = Terminal()
         self.output.setFont(mono())
         self.output.setMaximumBlockCount(TRANSCRIPT_LINES)
-        self.output.text_color = TERMINAL["text"]
-        self.output.ghost_color = TERMINAL["placeholder"]
-        self.output.arrow_color = TERMINAL["stamp"]
+        self._terminal_colors()
         self.output.viewport().installEventFilter(self)
         self.output.setContextMenuPolicy(Qt.CustomContextMenu)
         self.output.customContextMenuRequested.connect(self._context_menu)
@@ -669,6 +672,28 @@ class Console(QWidget):
         self.entries.clear()
         self.output.clear_transcript()
         self._search()
+
+    def restyle(self, dark: bool) -> None:
+        """The terminal in the theme's colours: dark or light. The transcript is drawn again."""
+        terminal, lines, tags = TERMINAL_DARK if dark else TERMINAL_LIGHT
+        if terminal == TERMINAL:
+            return
+        TERMINAL.update(terminal)
+        LINE_COLORS.update(lines)
+        LINE_TAGS.update(tags)
+        self._terminal_colors()
+        self._show_prompt()
+        self.rerender()
+
+    def _terminal_colors(self) -> None:
+        self.terminal.setStyleSheet(
+            f"#terminal {{ background: {TERMINAL['background']}; border: 1px solid {TERMINAL['border']}; }}"
+            f"#terminal QPlainTextEdit, #terminal QLineEdit {{ background: {TERMINAL['background']};"
+            f" color: {TERMINAL['text']}; border: none; selection-background-color: {TERMINAL['selection']}; }}"
+            f"#terminal QLabel {{ color: {TERMINAL['stamp']}; }}")
+        self.output.text_color = TERMINAL["text"]
+        self.output.ghost_color = TERMINAL["placeholder"]
+        self.output.arrow_color = TERMINAL["stamp"]
 
     def rerender(self) -> None:
         self.output.clear_transcript()

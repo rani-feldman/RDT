@@ -778,6 +778,7 @@ class MainWindow(QMainWindow):
         self.density_actions[str(self.ui.value("ui/density", "compact"))].setChecked(True)
         t = theme()
         self.chart.set_dark(is_dark())
+        self.console.restyle(is_dark())
         if t.chart:
             self.chart.set_colors(*t.chart)
         self.symbols.restyle()
