@@ -24,7 +24,7 @@ The host application loads one ELF file per MCU and reads its DWARF debug inform
 - **Scope now:** the PC application only. The firmware side is a specification (section 5); a Python simulated device implements it, so the application is built and tested end to end before the firmware has its memory commands.
 - **Not in v1:** breakpoints, stepping, local (stack) variables, flashing, authentication, map files.
 
-**Status (2026-10-15):** milestones M0 to M5 are done, and so are the GUI redesign (MCU cards, panel buttons, themes and the look and feel, GUI-12 to GUI-18, LNF-1 to LNF-8) and the split workspace files (WSP-4 to WSP-8). The simulator, host core, CLI, symbols, workspace, GUI, watch tabs, live chart, statistics, CSV log and console features are all built and tested. rani's firmware answers the memory read command on the first real board (an STM32H7, over COM3, since 2026-10-13). Only the installer and releases (M6, INS-1 to INS-14, planned with rani on 2026-10-17) and the binary protocol (RM-4) are still planned.
+**Status (2026-10-17):** milestones M0 to M6 are done, and so are the GUI redesign (MCU cards, panel buttons, themes and the look and feel, GUI-12 to GUI-18, LNF-1 to LNF-8) and the split workspace files (WSP-4 to WSP-8). The simulator, host core, CLI, symbols, workspace, GUI, watch tabs, live chart, statistics, CSV log and console features are all built and tested. rani's firmware answers the memory read command on the first real board (an STM32H7, over COM3, since 2026-10-13). The installer and releases (M6, INS-1 to INS-14) were built on 2026-10-17. Only the binary protocol (RM-4) is still planned.
 
 **How to use RDT:** the [user manual](USER_MANUAL.md) explains how to operate it from the GUI and the CLI.
 
@@ -270,24 +270,24 @@ Console features taken from ComPort-Zone (an open serial terminal); rani approve
 
 ### 2.19 Installer and releases
 
-Agreed with rani on 2026-10-17 (thread "Installer and releases plan", milestone M6). Nothing is built yet; rani makes the repository public first (for the update check and free GitHub Actions).
+Agreed with rani on 2026-10-17 (thread "Installer and releases plan", milestone M6). Built in PR #131 (the licence in PR #130), merged 2026-10-17; the build and a Windows install, upgrade and uninstall smoke test passed on the merged main.
 
 | ID | Requirement | Status | Design |
 | --- | --- | --- | --- |
-| INS-1 | Windows installer `RDT-Setup-X.Y.Z.exe` that carries Python and every package RDT needs (no Python, pip or internet needed on the PC), per user in `%LOCALAPPDATA%\Programs\RDT`, no admin rights; Start menu shortcut, optional desktop shortcut (2026-10-17) | Planned | [D-INS-1](#d-ins-1-windows-installer) |
-| INS-2 | Uninstall from Settings > Apps or the Start menu; it asks whether to delete `%LOCALAPPDATA%\rdt` (No preselected) (2026-10-17) | Planned | [D-INS-2](#d-ins-2-uninstall) |
-| INS-3 | A new setup closes RDT, silently uninstalls the old version and then installs; user settings are always kept; installing an older version warns and lets you continue (2026-10-17) | Planned | [D-INS-3](#d-ins-3-upgrade-over-an-old-version) |
-| INS-4 | An "Add rdt to PATH" checkbox, ticked by default; removed on uninstall (2026-10-17) | Planned | [D-INS-4](#d-ins-4-rdt-on-path) |
-| INS-5 | `.rdtw` files open in RDT on double-click and show the RDT icon (2026-10-17) | Planned | [D-INS-5](#d-ins-5-rdtw-file-association) |
-| INS-6 | A portable zip with each release; the simulator (`rdt-sim`, the example firmware and workspace) is in both (2026-10-17) | Planned | [D-INS-6](#d-ins-6-portable-zip-and-simulator) |
-| INS-7 | Version from the git tag, shown in Help > About, `rdt --version` and the exe properties; first release 1.0.0; semantic versioning (2026-10-17) | Planned | [D-INS-7](#d-ins-7-versions) |
-| INS-8 | A GitHub Release per `v*` tag, built by Actions as a draft (setup, zip, SHA256SUMS, changelog notes); rani publishes after a smoke test; the same build script runs locally (2026-10-17) | Planned | [D-INS-8](#d-ins-8-release-build) |
-| INS-9 | On start, RDT checks the repository's latest Release and shows when a newer version is available (needs the repository public) (2026-10-17) | Planned | [D-INS-9](#d-ins-9-update-check) |
-| INS-10 | A code signing step in the build, off until a certificate is configured (2026-10-17) | Planned | [D-INS-10](#d-ins-10-code-signing) |
-| INS-11 | Settings files carry `format = N`; a newer RDT migrates them after a `.bak` copy; crash log in `%LOCALAPPDATA%\rdt\logs` (2026-10-17) | Planned | [D-INS-11](#d-ins-11-settings-formats-and-crash-log) |
-| INS-12 | MIT licence and third-party notices; the user manual is bundled and opened from Help (2026-10-17) | Planned | [D-INS-12](#d-ins-12-licence-and-bundled-manual) |
-| INS-13 | Release notes from `CHANGELOG.md`: only New features and Bug fixes, one line per feature or bug-fix PR, small changes left out; copied into each GitHub Release; bundled and shown from Help > Release notes (2026-10-17) | Planned | [D-INS-13](#d-ins-13-release-notes) |
-| INS-14 | A release starts from the **Run workflow** button (Actions > Release, type the version): it renames `## Unreleased` in CHANGELOG.md to the version and date, commits that to main, tags `vX.Y.Z` and builds the draft Release in the same run; pushing a `v*` tag by hand still works (2026-10-17) | Planned | [D-INS-14](#d-ins-14-run-workflow-button) |
+| INS-1 | Windows installer `RDT-Setup-X.Y.Z.exe` that carries Python and every package RDT needs (no Python, pip or internet needed on the PC), per user in `%LOCALAPPDATA%\Programs\RDT`, no admin rights; Start menu shortcut, optional desktop shortcut (2026-10-17) | Done (PR #131) | [D-INS-1](#d-ins-1-windows-installer) |
+| INS-2 | Uninstall from Settings > Apps or the Start menu; it asks whether to delete `%LOCALAPPDATA%\rdt` (No preselected) (2026-10-17) | Done (PR #131) | [D-INS-2](#d-ins-2-uninstall) |
+| INS-3 | A new setup closes RDT, silently uninstalls the old version and then installs; user settings are always kept; installing an older version warns and lets you continue (2026-10-17) | Done (PR #131) | [D-INS-3](#d-ins-3-upgrade-over-an-old-version) |
+| INS-4 | An "Add rdt to PATH" checkbox, ticked by default; removed on uninstall (2026-10-17) | Done (PR #131) | [D-INS-4](#d-ins-4-rdt-on-path) |
+| INS-5 | `.rdtw` files open in RDT on double-click and show the RDT icon (2026-10-17) | Done (PR #131) | [D-INS-5](#d-ins-5-rdtw-file-association) |
+| INS-6 | A portable zip with each release; the simulator (`rdt-sim`, the example firmware and workspace) is in both (2026-10-17) | Done (PR #131) | [D-INS-6](#d-ins-6-portable-zip-and-simulator) |
+| INS-7 | Version from the git tag, shown in Help > About, `rdt --version` and the exe properties; first release 1.0.0; semantic versioning (2026-10-17) | Done (PR #131) | [D-INS-7](#d-ins-7-versions) |
+| INS-8 | A GitHub Release per `v*` tag, built by Actions as a draft (setup, zip, SHA256SUMS, changelog notes); rani publishes after a smoke test; the same build script runs locally (2026-10-17) | Done (PR #131) | [D-INS-8](#d-ins-8-release-build) |
+| INS-9 | On start, RDT checks the repository's latest Release and shows when a newer version is available (needs the repository public) (2026-10-17) | Done (PR #131) | [D-INS-9](#d-ins-9-update-check) |
+| INS-10 | A code signing step in the build, off until a certificate is configured (2026-10-17) | Done (PR #131) | [D-INS-10](#d-ins-10-code-signing) |
+| INS-11 | Settings files carry `format = N`; a newer RDT migrates them after a `.bak` copy; crash log in `%LOCALAPPDATA%\rdt\logs` (2026-10-17) | Done (PR #131) | [D-INS-11](#d-ins-11-settings-formats-and-crash-log) |
+| INS-12 | MIT licence and third-party notices; the user manual is bundled and opened from Help (2026-10-17) | Done (PR #130) | [D-INS-12](#d-ins-12-licence-and-bundled-manual) |
+| INS-13 | Release notes from `CHANGELOG.md`: only New features and Bug fixes, one line per feature or bug-fix PR, small changes left out; copied into each GitHub Release; bundled and shown from Help > Release notes (2026-10-17) | Done (PR #131) | [D-INS-13](#d-ins-13-release-notes) |
+| INS-14 | A release starts from the **Run workflow** button (Actions > Release, type the version): it renames `## Unreleased` in CHANGELOG.md to the version and date, commits that to main, tags `vX.Y.Z` and builds the draft Release in the same run; pushing a `v*` tag by hand still works (2026-10-17) | Done (PR #131) | [D-INS-14](#d-ins-14-run-workflow-button) |
 
 Requirements on the firmware itself (FW-1 to FW-10) are in [section 5](#5-firmware-specification).
 
@@ -1382,11 +1382,11 @@ User-defined buttons that each sent one SCPI command, with an optional parameter
 
 ### 4.19 Installer and releases
 
-Planned (rani, 2026-10-17). The packaging files live in `packaging/` (PyInstaller spec, Inno Setup script, icon, notices), the build in `tools/build_release.ps1` and the release workflow in `.github/workflows/release.yml`. The plan with rani's twelve answers is in the project files (`plans/installer-plan.md`).
+Done (rani, 2026-10-17; PR #131). The packaging files live in `packaging/` (PyInstaller spec `rdt.spec`, Inno Setup script `rdt.iss`, entry points, `smoke_test.ps1`), the build in `tools/build_release.ps1` and the release workflow in `.github/workflows/release.yml`. The plan with rani's twelve answers is in the project files (`plans/installer-plan.md`).
 
 #### D-INS-1 Windows installer
 
-A PyInstaller one-folder build holds `RDT.exe` (the GUI, no console window), `rdt.exe` (the CLI) and `rdt-sim.exe`, sharing one `_internal` folder. The build bundles Python itself and every package RDT uses (PySide6, pyqtgraph, pyelftools, pyserial, pyreadline3, numpy), in the setup and in the portable zip alike, so the PC needs no Python, pip or internet to install or run RDT (rani, 2026-10-17). A one-folder build starts faster and trips fewer antivirus false alarms than a one-file build. Inno Setup wraps it as `RDT-Setup-X.Y.Z.exe`, installed per user in `%LOCALAPPDATA%\Programs\RDT` with no admin rights, with a Start menu shortcut, an optional desktop shortcut and an entry under Settings > Apps.
+A PyInstaller one-folder build holds `rdt-gui.exe` (the GUI, no console window; not `RDT.exe`, which Windows would not tell apart from `rdt.exe`), `rdt.exe` (the CLI) and `rdt-sim.exe`, sharing one `_internal` folder. The build bundles Python itself and every package RDT uses (PySide6, pyqtgraph, pyelftools, pyserial, pyreadline3, numpy), in the setup and in the portable zip alike, so the PC needs no Python, pip or internet to install or run RDT (rani, 2026-10-17). A one-folder build starts faster and trips fewer antivirus false alarms than a one-file build. Inno Setup wraps it as `RDT-Setup-X.Y.Z.exe`, installed per user in `%LOCALAPPDATA%\Programs\RDT` with no admin rights, with a Start menu shortcut, an optional desktop shortcut and an entry under Settings > Apps.
 
 #### D-INS-2 Uninstall
 
@@ -1402,7 +1402,7 @@ The setup has an "Add rdt to PATH" checkbox, ticked by default, which adds the i
 
 #### D-INS-5 .rdtw file association
 
-The setup registers `.rdtw` for the current user, with the RDT icon, so a double-click opens the workspace in `RDT.exe`. The uninstaller removes the association.
+The setup registers `.rdtw` for the current user, with the RDT icon, so a double-click opens the workspace in `rdt-gui.exe`. The uninstaller removes the association.
 
 #### D-INS-6 Portable zip and simulator
 
@@ -1410,7 +1410,7 @@ Each release also has `RDT-X.Y.Z-portable.zip`, the same folder ready to run unz
 
 #### D-INS-7 Versions
 
-The git tag is the only source of the version (setuptools-scm or a small step that writes it). It appears in `pyproject`, `rdt.__version__`, the exe file properties, a new **Help > About** box and `rdt --version`. Semantic versioning: patch for fixes, minor for features, major for breaking file formats. The first release is 1.0.0, tag `v1.0.0`.
+`rdt/_version.py` is the one place the version is written; a release sets it (`tools/release.py`) and the tag `vX.Y.Z` names the same version. It appears in `pyproject` (dynamic version), `rdt.__version__`, the exe file properties, a new **Help > About** box and `rdt --version`. Semantic versioning: patch for fixes, minor for features, major for breaking file formats. The first release is 1.0.0, tag `v1.0.0`.
 
 #### D-INS-8 Release build
 
@@ -1418,7 +1418,7 @@ Pushing a `v*` tag, or the **Run workflow** button (D-INS-14), runs `.github/wor
 
 #### D-INS-9 Update check
 
-`rdt/gui/updates.py` makes one HTTPS GET to `api.github.com/repos/rani-feldman/RDT/releases/latest`, with no sign-in, at most once a day, on start. When the tag is newer than the running version the GUI shows "RDT X.Y.Z is available" with a link to the Release. It can be turned off in `ui.toml`, and any failure stays silent. It needs the repository to be public.
+`rdt/updates.py` makes one HTTPS GET to `api.github.com/repos/rani-feldman/RDT/releases/latest`, with no sign-in, at most once a day, on start. When the tag is newer than the running version the GUI shows "RDT X.Y.Z is available" with a link to the Release. **Help > Check for updates** checks at once, and **Help > Check for updates at start** turns the start-up check off (saved in `ui.toml`); any failure stays silent. It needs the repository to be public.
 
 #### D-INS-10 Code signing
 
@@ -1426,7 +1426,7 @@ Releases are unsigned for now. The build script has a signing step for the exes 
 
 #### D-INS-11 Settings formats and crash log
 
-Each settings file (the workspace files, the target file, `ui.toml`) gets a `format = N` key. A newer RDT migrates an older file after copying it to `.bak`; an older RDT reading a newer file ignores the keys it does not know and warns once. Unexpected errors are written to `%LOCALAPPDATA%\rdt\logs\rdt.log` (rotated), and a dialog shows the error.
+The `.rdtw` workspace file carries `format = N` (`FORMAT` in `rdt/workspace.py`, now 1). A version that changes what the files mean raises it and moves older files over after keeping a `.bak` copy; an older RDT reading a newer file ignores the keys it does not know and warns once. Unexpected errors are written to `%LOCALAPPDATA%\rdt\logs\rdt.log` (`rdt/gui/crash.py`, kept to 3 files of 1 MB), and a dialog shows the error.
 
 #### D-INS-12 Licence and bundled manual
 
@@ -1518,7 +1518,7 @@ Later, with the firmware: region-boundary tests on the target, and measuring the
 | Console | Console features from ComPort-Zone, CON-1 to CON-12; terminal look and typing in it CON-13, CON-14 | Done 2026-10-12 |
 | M5 | ELF identity check (SYM-8), global read-only default (WS-4), reopen last workspace (WSP-3) | Done 2026-10-12 |
 | GUI and files | MCU tags, layout C, dark theme, drag and drop, one-row title bar, profile dialog (GUI-12 to GUI-18); four more themes and the look and feel (LNF-1 to LNF-8); split workspace files (WSP-4 to WSP-8) | Done 2026-10-15 |
-| M6 | Installer and releases (INS-1 to INS-14): setup exe, portable zip, versions, GitHub Releases, update check | Planned |
+| M6 | Installer and releases (INS-1 to INS-14): setup exe, portable zip, versions, GitHub Releases, update check (PR #130, PR #131) | Done 2026-10-17 |
 | Later | Binary protocol (RM-4) | Waiting on firmware |
 
 The application is built against the simulator. With the firmware's read and write commands of section 5, it works on real hardware with only the target file changed; it has read memory on rani's STM32H7 board over COM3 since 2026-10-13.
@@ -1588,6 +1588,7 @@ The application is built against the simulator. With the firmware's read and wri
 | 2026-10-15 | The per-MCU identity variable is removed (the Identity variable column in Target > MCUs and ELF files, the `[[mcu]] identity` key, which old files drop on save, and its check); the ELF check uses the GNU build ID when present, else the flash sample (SYM-8), at rani's request since RDT reads the image from the flash |
 | 2026-10-17 | The Light theme gets its own white palette, independent of Windows dark mode (GUI-15, PR #124), and the console follows the theme: light in the light themes, dark in the dark ones (CON-13, PR #125). rani reported the console was always dark |
 | 2026-10-17 | Installer and releases planned (INS-1 to INS-14, M6): per-user setup exe and portable zip, silent uninstall of the old version keeping the settings, PATH and `.rdtw` options, versions from the git tag starting at 1.0.0, draft GitHub Releases built by Actions, release notes with only new features and bug fixes, an update check, MIT licence. rani answered the twelve plan questions; the repository goes public first |
+| 2026-10-17 | Installer and releases built (M6, INS-1 to INS-14, PR #131; MIT licence PR #130). The GUI exe is `rdt-gui.exe`, since `RDT.exe` would clash with `rdt.exe` on Windows. The version lives in `rdt/_version.py`, set by the release |
 
 ## 9. Appendix: binary protocol (planned)
 
