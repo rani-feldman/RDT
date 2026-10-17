@@ -415,9 +415,10 @@ def test_console_transcript(qtbot, win, tmp_path, monkeypatch):
 
     blocks = {kind: fragments(con.output.document().findBlockByNumber(i))
               for i, (_, kind, _) in enumerate(con.entries) if kind in ("tx", "error", "note")}
-    assert blocks["tx"][0] == ("TX  ", "#3fb950") and blocks["tx"][1][1] == "#7ee787"
-    assert blocks["error"][0] == ("ERR ", "#f85149") and blocks["error"][1][1] == "#ff7b72"
-    assert blocks["note"][0] == ("SYS ", "#8b949e")
+    from rdt.gui.panels import LINE_COLORS, LINE_TAGS   # the theme's colours (dark or light)
+    assert blocks["tx"][0] == ("TX  ", LINE_TAGS["tx"][1]) and blocks["tx"][1][1] == LINE_COLORS["tx"]
+    assert blocks["error"][0] == ("ERR ", LINE_TAGS["error"][1]) and blocks["error"][1][1] == LINE_COLORS["error"]
+    assert blocks["note"][0] == ("SYS ", LINE_TAGS["note"][1])
     assert "Tab" in con.output.hint
 
     # search: every match highlighted, Enter and Shift+Enter step, newest first
@@ -1019,6 +1020,10 @@ def test_dark_theme_is_remembered(qtbot, win):
     assert not is_dark() and win.chart.axis_text == "#404040"
     pal = QApplication.palette()   # white, even with Windows in dark mode
     assert pal.window().color().name() == pal.base().color().name() == "#ffffff"
+    assert "#ffffff" in win.console.terminal.styleSheet()     # the console follows the theme
+    win.set_theme("dark")
+    assert "#0d1117" in win.console.terminal.styleSheet()
+    win.set_theme("light")
     win.set_theme("system")
     assert QApplication.palette().base().color().name() == system and win.ui.value("ui/theme") == "system"
 
