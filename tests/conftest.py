@@ -1,6 +1,13 @@
+import os
+import sys
 from pathlib import Path
 
 import pytest
+
+# Qt's offscreen platform on Windows finds no fonts unless told where they are, and every font then
+# looks proportional; point it at the Windows fonts before any test makes a QApplication.
+if sys.platform == "win32" and os.environ.get("WINDIR"):
+    os.environ.setdefault("QT_QPA_FONTDIR", os.path.join(os.environ["WINDIR"], "Fonts"))
 
 from sim import Device, Memory, Mcu, Profile, Region
 
