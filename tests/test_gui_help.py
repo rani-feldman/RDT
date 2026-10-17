@@ -1,0 +1,112 @@
+"""The Help menu and the update link in the status bar (INS-7, INS-9, INS-12, INS-13)."""
+
+import os
+
+import pytest
+
+os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+pytest.importorskip("PySide6.QtWidgets", exc_type=ImportError)
+pytest.importorskip("pytestqt")
+
+from PySide6.QtWidgets import QMessageBox  # noqa: E402
+
+from rdt import updates  # noqa: E402
+from rdt._version import __version__  # noqa: E402
+from rdt.gui import crash, help as helpmenu  # noqa: E402
+from rdt.gui.app import MainWindow  # noqa: E402
+
+
+@pytest.fixture
+def win(qtbot, tmp_path, monkeypatch):
+    monkeypatch.setenv("RDT_UI_FILE", str(tmp_path / "ui.toml"))
+    w = MainWindow()
+    qtbot.addWidget(w, before_close_func=lambda w: setattr(w, "dirty", False))
+    return w
+
+
+def help_actions(win):
+    for top in win.menu_bar.actions():
+        if top.text().replace("&", "") == "Help":
+            return {a.text().replace("&", ""): a for a in top.menu().actions() if a.text()}
+    raise AssertionError("no Help menu")
+
+
+def test_help_menu_has_the_documents_and_about(win):
+    names = set(help_actions(win))
+    assert {"User manual", "Keyboard shortcuts", "Release notes", "Check for updates",
+            "Check for updates at start", "Licence", "Third-party notices", "About RDT"} <= names
+
+
+def test_release_notes_and_manual_open(win):
+    notes = win.show_doc("RDT release notes", "changelog")
+    assert "Unreleased" in notes.browser.toPlainText()
+    manual = win.show_doc("RDT user manual", "manual")
+    assert "RDT User Manual" in manual.browser.toPlainText()
+
+
+def test_about_names_the_version(win):
+    assert f"RDT {__version__}" in helpmenu.about_text()
+    box = helpmenu.about(win)
+    assert __version__ in box.text()
+    box.close()
+
+
+def test_status_bar_shows_a_newer_release_only(win):
+    win.show_update("0.0.1")
+    assert win.update_label.isHidden()
+    win.show_update("999.0.0", "https://example/r")
+    assert not win.update_label.isHidden()
+    assert "999.0.0" in win.update_label.text() and "https://example/r" in win.update_label.text()
+
+
+def test_update_check_saves_what_it_found(win, monkeypatch):
+    win._update_checked(updates.Release("999.0.0", "https://example/r"))
+    assert win.ui.value("updates/latest") == "999.0.0"
+    assert not updates.due(win.ui.value("updates/last_check"))
+    assert not win.update_label.isHidden()
+
+
+def test_update_check_on_start_respects_the_setting(win, monkeypatch):
+    started = []
+    monkeypatch.setattr(win.update_check, "start", lambda: started.append(1))
+    win.set_update_check(False)
+    win.start_update_check()
+    assert started == []
+    win.set_update_check(True)
+    win.start_update_check()
+    assert started == [1]
+    win.ui.set_value("updates/last_check", "2999-01-01")   # already checked today
+    win.start_update_check()
+    assert started == [1]
+
+
+def test_manual_check_says_when_up_to_date(win, monkeypatch):
+    shown = []
+    monkeypatch.setattr(QMessageBox, "information", lambda *a: shown.append(a[2]))
+    win._manual_check = True
+    win._update_checked(updates.Release(__version__, "https://example/r"))
+    assert shown and "latest version" in shown[0]
+    win._manual_check = True
+    win._update_checked(None)
+    assert "Could not reach GitHub" in shown[1]
+
+
+def test_crash_log_is_written(tmp_path, monkeypatch):
+    import sys
+    path = tmp_path / "logs" / "rdt.log"
+    hook = sys.excepthook
+    try:
+        assert crash.install(path) == path
+        monkeypatch.setattr(QMessageBox, "critical", lambda *a: None)
+        try:
+            raise ValueError("boom")
+        except ValueError:
+            sys.excepthook(*sys.exc_info())
+    finally:
+        sys.excepthook = hook
+        import logging
+        for h in list(logging.getLogger().handlers):
+            if getattr(h, "baseFilename", None) == str(path):
+                logging.getLogger().removeHandler(h)
+                h.close()
+    assert "ValueError: boom" in path.read_text(encoding="utf-8")

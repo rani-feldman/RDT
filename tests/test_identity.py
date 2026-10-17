@@ -147,7 +147,7 @@ def test_flash_samples_without_a_build_id(sim, tmp_path):
         assert "1 of 3 flash blocks (112 bytes) differ, first at 0x08000008" in ident.detail
         with pytest.raises(ImageMismatch):
             t.read("main", 0x20000000, 4)
-    big = flash_samples("/bin/ls")
+    big = flash_samples("/bin/ls") if Path("/bin/ls").is_file() else []   # a large ELF, where there is one
     if big:                                                    # a large image: about 4 KB, in words
         assert 2000 < sum(len(b) for _, b in big) < 8000 and all(a % 4 == 0 and len(b) % 4 == 0 for a, b in big)
 

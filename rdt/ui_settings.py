@@ -37,11 +37,14 @@ SETTINGS: dict[str, type] = {
     "memory/decimal": bool,
     "ui/theme": str,          # system, light, dark, studio, islands, instrument or light_pro (GUI-15, LNF-1)
     "ui/density": str,        # compact or comfortable rows (LNF-6)
+    "updates/check": bool,    # look for a newer release on GitHub once a day (INS-9); on unless false
 }
 STATE: dict[str, type] = {
     "session/last_workspace": str,   # not a setting: never exported, kept on import
     "session/layout": str,           # the panels' layout, as QMainWindow.saveState in base64 (GUI-14)
     "session/watch_shown": bool,     # whether the watch tabs were shown
+    "updates/last_check": str,       # the day GitHub was last asked for the latest release (ISO date)
+    "updates/latest": str,           # the latest release it reported, such as "1.1.0"
 }
 KNOWN = {**SETTINGS, **STATE}
 

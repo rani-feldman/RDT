@@ -12,8 +12,7 @@ from .session import LinkState, Session
 from .symbols import EnumValue, Location
 from .target import ConnectionConfig, McuConfig, Target, TargetConfig
 from .workspace import Tab, Watch, Workspace
-
-__version__ = "0.1.0"
+from ._version import __version__
 
 __all__ = [
     "AccessRefused", "BadReply", "CommandRejected", "CommandTimeout", "ConfigError", "ConnectionConfig",

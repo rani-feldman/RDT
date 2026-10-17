@@ -1,0 +1,103 @@
+name: release
+
+# Builds the RDT installer and portable zip (INS-8, INS-14):
+# - Run workflow (Actions > release > Run workflow) with a version: closes Unreleased in
+#   CHANGELOG.md, sets rdt/_version.py, commits to main, tags vX.Y.Z, builds, smoke-tests and
+#   creates a DRAFT GitHub release. Press Publish on it after trying the installer.
+# - Pushing a vX.Y.Z tag by hand does the same from the tag (its version must already be set).
+# - A pull request that touches the packaging builds and smoke-tests, with no release.
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Version to release, such as 1.2.0"
+        required: true
+  push:
+    tags: ["v*.*.*"]
+  pull_request:
+    paths:
+      - "packaging/**"
+      - "tools/build_release.ps1"
+      - "tools/release.py"
+      - ".github/workflows/release.yml"
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: windows-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Prepare the version (Run workflow)
+        if: github.event_name == 'workflow_dispatch'
+        shell: pwsh
+        env:
+          VERSION: ${{ inputs.version }}
+        run: |
+          if ("${{ github.ref }}" -ne "refs/heads/main") { throw "Run the release workflow on main" }
+          python tools/release.py prepare $env:VERSION
+          if ($LASTEXITCODE) { exit 1 }
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add CHANGELOG.md rdt/_version.py
+          git commit -m "Release $env:VERSION"
+
+      - name: Version
+        id: version
+        shell: pwsh
+        run: |
+          if ("${{ github.event_name }}" -eq "push") {
+            $v = python tools/release.py check "${{ github.ref_name }}"
+          } else {
+            $v = python tools/release.py version
+          }
+          if ($LASTEXITCODE) { exit 1 }
+          "version=$v" >> $env:GITHUB_OUTPUT
+          Write-Host "RDT $v"
+
+      - name: Build
+        shell: pwsh
+        run: tools/build_release.ps1
+
+      - name: Smoke test (install, upgrade, uninstall)
+        shell: pwsh
+        run: packaging/smoke_test.ps1 -Setup "release/RDT-Setup-${{ steps.version.outputs.version }}.exe" -Version "${{ steps.version.outputs.version }}"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: RDT-${{ steps.version.outputs.version }}
+          path: release/
+          retention-days: 14
+
+      - name: Tag (Run workflow)
+        if: github.event_name == 'workflow_dispatch'
+        shell: pwsh
+        run: |
+          $v = "${{ steps.version.outputs.version }}"
+          git tag "v$v"
+          git push origin HEAD:main "v$v"
+          if ($LASTEXITCODE) { exit 1 }
+
+      - name: Draft release
+        if: github.event_name != 'pull_request'
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $v = "${{ steps.version.outputs.version }}"
+          python tools/release.py notes $v | Out-File -Encoding utf8 release-notes.md
+          gh release create "v$v" --draft --title "RDT $v" --notes-file release-notes.md `
+            "release/RDT-Setup-$v.exe" "release/RDT-$v-portable.zip" "release/SHA256SUMS.txt"

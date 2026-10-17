@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "rdt"
-version = "0.1.0"
+dynamic = ["version"]
 description = "Remote Debugger Tool: read and write firmware variables and memory over a COM port or LAN"
 requires-python = ">=3.11"
 license = {text = "MIT"}
@@ -25,6 +25,9 @@ rdt-sim = "sim.__main__:main"
 
 [project.gui-scripts]
 rdt-gui = "rdt.gui.app:main"
+
+[tool.setuptools.dynamic]
+version = {attr = "rdt._version.__version__"}
 
 [tool.setuptools.packages.find]
 include = ["rdt*", "sim*"]
