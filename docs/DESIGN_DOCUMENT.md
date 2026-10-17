@@ -287,7 +287,7 @@ Agreed with rani on 2026-10-17 (thread "Installer and releases plan", milestone 
 | INS-11 | Settings files carry `format = N`; a newer RDT migrates them after a `.bak` copy; crash log in `%LOCALAPPDATA%\rdt\logs` (2026-10-17) | Done (PR #131) | [D-INS-11](#d-ins-11-settings-formats-and-crash-log) |
 | INS-12 | MIT licence and third-party notices; the user manual is bundled and opened from Help (2026-10-17) | Done (PR #130) | [D-INS-12](#d-ins-12-licence-and-bundled-manual) |
 | INS-13 | Release notes from `CHANGELOG.md`: only New features and Bug fixes, one line per feature or bug-fix PR, small changes left out; copied into each GitHub Release; bundled and shown from Help > Release notes (2026-10-17) | Done (PR #131) | [D-INS-13](#d-ins-13-release-notes) |
-| INS-14 | A release starts from the **Run workflow** button (Actions > Release, type the version): it renames `## Unreleased` in CHANGELOG.md to the version and date, commits that to main, tags `vX.Y.Z` and builds the draft Release in the same run; pushing a `v*` tag by hand still works (2026-10-17) | Done (PR #131) | [D-INS-14](#d-ins-14-run-workflow-button) |
+| INS-14 | A release starts from the **Run workflow** button (Actions > Release, type the version): it renames `## Unreleased` in CHANGELOG.md to the version and date, commits that to main and builds the draft Release in the same run, with no tag yet: the tag `vX.Y.Z` is created only when rani publishes the draft, so a discarded draft leaves no tag; pushing a `v*` tag by hand still works (2026-10-17, updated 2026-10-17) | In review (PR #133) | [D-INS-14](#d-ins-14-run-workflow-button) |
 
 Requirements on the firmware itself (FW-1 to FW-10) are in [section 5](#5-firmware-specification).
 
@@ -1438,7 +1438,7 @@ The repository gets an MIT `LICENSE`, and the app ships a third-party notices fi
 
 #### D-INS-14 Run workflow button
 
-`.github/workflows/release.yml` also has a `workflow_dispatch` trigger with one input, the version (`X.Y.Z`). Pressing **Run workflow** under Actions > Release and typing it renames `## Unreleased` in `CHANGELOG.md` to `## X.Y.Z (date)` with an empty `## Unreleased` above it, commits that to main, tags `vX.Y.Z`, and then runs the same build as a pushed tag (D-INS-8), ending in the draft Release. A `v*` tag pushed by hand still starts the build without the CHANGELOG step (rani, 2026-10-17).
+`.github/workflows/release.yml` also has a `workflow_dispatch` trigger with one input, the version (`X.Y.Z`). Pressing **Run workflow** under Actions > Release and typing it renames `## Unreleased` in `CHANGELOG.md` to `## X.Y.Z (date)` with an empty `## Unreleased` above it, sets the version, commits that to main, and then runs the same build as a pushed tag (D-INS-8), ending in the draft Release. It pushes no tag: the draft is created with `gh release create --draft --target <commit>`, and GitHub creates the tag `vX.Y.Z` on that commit when rani presses **Publish**. A draft found to be bad is deleted and leaves no tag in git; the next attempt uses the next patch version (rani, 2026-10-17, PR #133; `docs/RELEASING.md`). A `v*` tag pushed by hand still starts the build without the CHANGELOG step.
 
 ## 5. Firmware specification
 
@@ -1589,6 +1589,7 @@ The application is built against the simulator. With the firmware's read and wri
 | 2026-10-17 | The Light theme gets its own white palette, independent of Windows dark mode (GUI-15, PR #124), and the console follows the theme: light in the light themes, dark in the dark ones (CON-13, PR #125). rani reported the console was always dark |
 | 2026-10-17 | Installer and releases planned (INS-1 to INS-14, M6): per-user setup exe and portable zip, silent uninstall of the old version keeping the settings, PATH and `.rdtw` options, versions from the git tag starting at 1.0.0, draft GitHub Releases built by Actions, release notes with only new features and bug fixes, an update check, MIT licence. rani answered the twelve plan questions; the repository goes public first |
 | 2026-10-17 | Installer and releases built (M6, INS-1 to INS-14, PR #131; MIT licence PR #130). The GUI exe is `rdt-gui.exe`, since `RDT.exe` would clash with `rdt.exe` on Windows. The version lives in `rdt/_version.py`, set by the release |
+| 2026-10-17 | The release tag is created only when rani publishes the draft, not by Run workflow, so a draft found to be bad leaves no wrong tag in git; the next attempt takes the next patch version (INS-14, PR #133) |
 
 ## 9. Appendix: binary protocol (planned)
 
