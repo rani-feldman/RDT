@@ -24,7 +24,7 @@ The host application loads one ELF file per MCU and reads its DWARF debug inform
 - **Scope now:** the PC application only. The firmware side is a specification (section 5); a Python simulated device implements it, so the application is built and tested end to end before the firmware has its memory commands.
 - **Not in v1:** breakpoints, stepping, local (stack) variables, flashing, authentication, map files.
 
-**Status (2026-10-15):** milestones M0 to M5 are done, and so are the GUI redesign (MCU cards, panel buttons, themes and the look and feel, GUI-12 to GUI-18, LNF-1 to LNF-8) and the split workspace files (WSP-4 to WSP-8). The simulator, host core, CLI, symbols, workspace, GUI, watch tabs, live chart, statistics, CSV log and console features are all built and tested. rani's firmware answers the memory read command on the first real board (an STM32H7, over COM3, since 2026-10-13). Only the installer and releases (M6, INS-1 to INS-12, planned with rani on 2026-10-17) and the binary protocol (RM-4) are still planned.
+**Status (2026-10-15):** milestones M0 to M5 are done, and so are the GUI redesign (MCU cards, panel buttons, themes and the look and feel, GUI-12 to GUI-18, LNF-1 to LNF-8) and the split workspace files (WSP-4 to WSP-8). The simulator, host core, CLI, symbols, workspace, GUI, watch tabs, live chart, statistics, CSV log and console features are all built and tested. rani's firmware answers the memory read command on the first real board (an STM32H7, over COM3, since 2026-10-13). Only the installer and releases (M6, INS-1 to INS-13, planned with rani on 2026-10-17) and the binary protocol (RM-4) are still planned.
 
 **How to use RDT:** the [user manual](USER_MANUAL.md) explains how to operate it from the GUI and the CLI.
 
@@ -286,6 +286,7 @@ Agreed with rani on 2026-10-17 (thread "Installer and releases plan", milestone 
 | INS-10 | A code signing step in the build, off until a certificate is configured (2026-10-17) | Planned | [D-INS-10](#d-ins-10-code-signing) |
 | INS-11 | Settings files carry `format = N`; a newer RDT migrates them after a `.bak` copy; crash log in `%LOCALAPPDATA%\rdt\logs` (2026-10-17) | Planned | [D-INS-11](#d-ins-11-settings-formats-and-crash-log) |
 | INS-12 | MIT licence and third-party notices; the user manual is bundled and opened from Help (2026-10-17) | Planned | [D-INS-12](#d-ins-12-licence-and-bundled-manual) |
+| INS-13 | Release notes from `CHANGELOG.md`: only New features and Bug fixes, one line per feature or bug-fix PR, small changes left out; copied into each GitHub Release; bundled and shown from Help > Release notes (2026-10-17) | Planned | [D-INS-13](#d-ins-13-release-notes) |
 
 Requirements on the firmware itself (FW-1 to FW-10) are in [section 5](#5-firmware-specification).
 
@@ -1430,6 +1431,10 @@ Each settings file (the workspace files, the target file, `ui.toml`) gets a `for
 
 The repository gets an MIT `LICENSE`, and the app ships a third-party notices file (PySide6/Qt under LGPL, pyqtgraph, pyelftools, pyserial). The user manual (USER_MANUAL.md) is bundled and opened from **Help > User manual**.
 
+#### D-INS-13 Release notes
+
+`CHANGELOG.md` holds the release notes. Each PR that adds a feature or fixes a bug adds one line under `## Unreleased`, in **New features** or **Bug fixes**; there are no other headings, and small changes (tweaks, refactors, docs, tests) get no entry (rani, 2026-10-17). The release build renames the section to the version and date and copies it into the GitHub Release notes (D-INS-8). The app bundles the file and shows it from **Help > Release notes**; nothing pops up after an upgrade.
+
 ## 5. Firmware specification
 
 The firmware side is not written yet; rani adds it to the existing firmware later. This section is the contract it must meet. The simulator meets it today.
@@ -1508,7 +1513,7 @@ Later, with the firmware: region-boundary tests on the target, and measuring the
 | Console | Console features from ComPort-Zone, CON-1 to CON-12; terminal look and typing in it CON-13, CON-14 | Done 2026-10-12 |
 | M5 | ELF identity check (SYM-8), global read-only default (WS-4), reopen last workspace (WSP-3) | Done 2026-10-12 |
 | GUI and files | MCU tags, layout C, dark theme, drag and drop, one-row title bar, profile dialog (GUI-12 to GUI-18); four more themes and the look and feel (LNF-1 to LNF-8); split workspace files (WSP-4 to WSP-8) | Done 2026-10-15 |
-| M6 | Installer and releases (INS-1 to INS-12): setup exe, portable zip, versions, GitHub Releases, update check | Planned |
+| M6 | Installer and releases (INS-1 to INS-13): setup exe, portable zip, versions, GitHub Releases, update check | Planned |
 | Later | Binary protocol (RM-4) | Waiting on firmware |
 
 The application is built against the simulator. With the firmware's read and write commands of section 5, it works on real hardware with only the target file changed; it has read memory on rani's STM32H7 board over COM3 since 2026-10-13.
@@ -1577,7 +1582,7 @@ The application is built against the simulator. With the firmware's read and wri
 | 2026-10-15 | The MCUs dialog shows the ELF path on one line, cut in the middle so the file name stays visible, with the full path as the tooltip (GUI-19), at rani's request |
 | 2026-10-15 | The per-MCU identity variable is removed (the Identity variable column in Target > MCUs and ELF files, the `[[mcu]] identity` key, which old files drop on save, and its check); the ELF check uses the GNU build ID when present, else the flash sample (SYM-8), at rani's request since RDT reads the image from the flash |
 | 2026-10-17 | The Light theme gets its own white palette, independent of Windows dark mode (GUI-15, PR #124), and the console follows the theme: light in the light themes, dark in the dark ones (CON-13, PR #125). rani reported the console was always dark |
-| 2026-10-17 | Installer and releases planned (INS-1 to INS-12, M6): per-user setup exe and portable zip, silent uninstall of the old version keeping the settings, PATH and `.rdtw` options, versions from the git tag starting at 1.0.0, draft GitHub Releases built by Actions, an update check, MIT licence. rani answered the twelve plan questions; the repository goes public first |
+| 2026-10-17 | Installer and releases planned (INS-1 to INS-13, M6): per-user setup exe and portable zip, silent uninstall of the old version keeping the settings, PATH and `.rdtw` options, versions from the git tag starting at 1.0.0, draft GitHub Releases built by Actions, release notes with only new features and bug fixes, an update check, MIT licence. rani answered the twelve plan questions; the repository goes public first |
 
 ## 9. Appendix: binary protocol (planned)
 
