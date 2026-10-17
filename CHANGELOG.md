@@ -9,6 +9,12 @@ section. RDT shows this file in **Help > Release notes**.
 
 ### New features
 
+### Bug fixes
+
+## 1.0.0 (2026-10-17)
+
+### New features
+
 - First release. RDT reads and writes firmware variables and memory over a COM port or TCP/UDP, using
   the firmware's SCPI commands, for one or more MCUs, each with its ELF file: watch tabs, live chart,
   statistics, CSV log, memory view, SCPI console, ELF-to-device check, simulator and command line.
@@ -18,5 +24,3 @@ section. RDT shows this file in **Help > Release notes**.
 - RDT says in the status bar when a newer release is on GitHub (**Help > Check for updates**).
 - **Help** menu: user manual, release notes, licence, third-party notices and About.
 - Unexpected errors are shown in a window and written to `%LOCALAPPDATA%\rdt\logs\rdt.log`.
-
-### Bug fixes
