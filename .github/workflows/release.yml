@@ -2,8 +2,9 @@ name: release
 
 # Builds the RDT installer and portable zip (INS-8, INS-14):
 # - Run workflow (Actions > release > Run workflow) with a version: closes Unreleased in
-#   CHANGELOG.md, sets rdt/_version.py, commits to main, tags vX.Y.Z, builds, smoke-tests and
-#   creates a DRAFT GitHub release. Press Publish on it after trying the installer.
+#   CHANGELOG.md, sets rdt/_version.py, builds, smoke-tests, commits to main and creates a DRAFT
+#   GitHub release. Press Publish on it after trying the installer: GitHub creates the vX.Y.Z tag
+#   only then, so a draft you discard leaves no tag behind.
 # - Pushing a vX.Y.Z tag by hand does the same from the tag (its version must already be set).
 # - A pull request that touches the packaging builds and smoke-tests, with no release.
 on:
@@ -82,13 +83,13 @@ jobs:
           path: release/
           retention-days: 14
 
-      - name: Tag (Run workflow)
+      # No tag here: the draft release below names the commit, and GitHub creates the tag when
+      # the draft is published.
+      - name: Push the release commit (Run workflow)
         if: github.event_name == 'workflow_dispatch'
         shell: pwsh
         run: |
-          $v = "${{ steps.version.outputs.version }}"
-          git tag "v$v"
-          git push origin HEAD:main "v$v"
+          git push origin HEAD:main
           if ($LASTEXITCODE) { exit 1 }
 
       - name: Draft release
@@ -99,5 +100,5 @@ jobs:
         run: |
           $v = "${{ steps.version.outputs.version }}"
           python tools/release.py notes $v | Out-File -Encoding utf8 release-notes.md
-          gh release create "v$v" --draft --title "RDT $v" --notes-file release-notes.md `
+          gh release create "v$v" --draft --target (git rev-parse HEAD) --title "RDT $v" --notes-file release-notes.md `
             "release/RDT-Setup-$v.exe" "release/RDT-$v-portable.zip" "release/SHA256SUMS.txt"
