@@ -65,11 +65,20 @@ DARK = _pal("#202226", "#1a1b1e", "#222428", "#dcdfe4", "#8b919a", "#2a2c31", "#
             "#2b2e34")
 DARK.update({QPalette.Light: "#3a3d43", QPalette.Midlight: "#33363b", QPalette.Dark: "#151618",
              QPalette.Shadow: "#0b0c0d"})
+# White, set in full: Fusion's own standard palette follows Windows, so with Windows in dark mode
+# it is dark, and otherwise it is grey (rani, 2026-10-17: "The light theme is not white").
+LIGHT = _pal("#ffffff", "#ffffff", "#f5f6f7", "#1e1e1e", "#8a8f98", "#ffffff", "#cde3ff", "#1e1e1e", "#d0d3d8")
+LIGHT.update({QPalette.Light: "#ffffff", QPalette.Midlight: "#e6e8eb", QPalette.Dark: "#a0a4aa",
+              QPalette.Shadow: "#6b7078", QPalette.ToolTipBase: "#ffffdc", QPalette.Link: "#1a5fb4"})
+LIGHT_CONNECT = {"up": ("#ffffff", "#1a7f37", "#1a7f37"), "busy": ("#1f2328", "#d4a72c", "#fff3c4"),
+                 "down": ("#ffffff", "#cf222e", "#cf222e"), "off": ("#1a5fb4", "#1a5fb4", "#e8f0fc")}
+LIGHT_DISABLED = {QPalette.WindowText: "#a0a4aa", QPalette.Text: "#a0a4aa", QPalette.ButtonText: "#a0a4aa"}
 DARK_DISABLED = {QPalette.WindowText: "#6b7078", QPalette.Text: "#6b7078", QPalette.ButtonText: "#6b7078"}
 
 THEME = {
     "system": Theme("&System", strip=STRIP, modes=MODES),
-    "light": Theme("&Light", strip=STRIP, modes=MODES),
+    "light": Theme("&Light", LIGHT, chart=("#ffffff", "#606060", "#404040"), flash="#fff1a8", strip=STRIP,
+                   modes=MODES, connect=LIGHT_CONNECT),
     "dark": Theme("&Dark", DARK, chart=("#1a1b1e", "#80858d", "#c8ccd2"), strip=STRIP, modes=MODES),
     # Like VS Code and Segger Ozone: flat, square, the panel buttons as icons at the left edge.
     "studio": Theme(
@@ -210,7 +219,8 @@ def apply_theme(name: str, density: str | None = None) -> str:
             p = QPalette()
             for role, color in t.palette.items():
                 p.setColor(role, QColor(color))
-            for role, color in DARK_DISABLED.items() if QColor(t.palette[QPalette.Base]).lightness() < 128 else ():
+            dark = QColor(t.palette[QPalette.Base]).lightness() < 128
+            for role, color in (DARK_DISABLED if dark else LIGHT_DISABLED).items():
                 p.setColor(QPalette.Disabled, role, QColor(color))
             app.setPalette(p)
     app.setStyleSheet(t.qss + _DENSITY_QSS[_density])
