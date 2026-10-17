@@ -10,7 +10,7 @@ from __future__ import annotations
 import logging
 import sys
 import time
-from datetime import datetime
+from datetime import date, datetime
 from pathlib import Path
 
 from PySide6.QtCore import QByteArray, QSettings, QSize, Qt, QTimer
@@ -27,6 +27,8 @@ from ..errors import ConfigError, LinkDown
 from ..profile import Profile
 from ..session import LinkState
 from ..target import ConnectionConfig, McuConfig, TargetConfig, mcu_color
+from .. import updates
+from .._version import __version__
 from ..ui_settings import SETTINGS, UiSettings, workspace_dir
 from ..workspace import Workspace, default_target
 from .chart import ChartPanel
@@ -34,7 +36,7 @@ from .cards import McuCards
 from .device import Device, describe_error
 from .dnd import DropTarget
 from .panels import CONSOLE_KEYS, Console, McuDialog, MemoryView, ProfileDialog, mono
-from . import titlebar
+from . import crash, help as helpmenu, titlebar
 from .style import DENSITY, THEMES, TITLE_BAR, apply_theme, is_dark, line_icon, shade, theme
 from .variables import WatchTabs, WatchTree
 
@@ -498,6 +500,10 @@ class MainWindow(QMainWindow):
         self.statusBar().addWidget(self.message, 1)
         self.log_label = QLabel()
         self.statusBar().addPermanentWidget(self.log_label)
+        self.update_label = QLabel()  # "RDT 1.1.0 is available", a link to the release (INS-9)
+        self.update_label.setOpenExternalLinks(True)
+        self.update_label.hide()
+        self.statusBar().addPermanentWidget(self.update_label)
         self.link_label = QLabel()    # the link and each MCU's reply time, on the coloured strip (LNF-5)
         self.statusBar().addPermanentWidget(self.link_label)
         self._strip = None
@@ -513,6 +519,10 @@ class MainWindow(QMainWindow):
         self.elf_timer.start(ELF_CHECK_MS)
         self.resize(1200, 800)
         self.show_workspace()
+        self.update_check = helpmenu.UpdateCheck(self)
+        self.update_check.done.connect(self._update_checked)
+        self._manual_check = False
+        self.show_update(self.ui.value("updates/latest"))
 
     # --- menus -------------------------------------------------------------------------------
 
@@ -602,7 +612,18 @@ class MainWindow(QMainWindow):
             group.addAction(a)
             self.density_actions[name] = a
         m = self.menu_bar.addMenu("&Help")
+        action(m, "&User manual", lambda: self.show_doc("RDT user manual", "manual"))
         action(m, "&Keyboard shortcuts", self.show_shortcuts, "F1")
+        action(m, "&Release notes", lambda: self.show_doc("RDT release notes", "changelog"))
+        m.addSeparator()
+        action(m, "&Check for updates", self.check_updates)
+        self.update_check_action = action(m, "Check for updates at &start", self.set_update_check)
+        self.update_check_action.setCheckable(True)
+        self.update_check_action.setChecked(bool(self.ui.value("updates/check", True)))
+        m.addSeparator()
+        action(m, "&Licence", lambda: self.show_doc("RDT licence", "license", (640, 480)))
+        action(m, "&Third-party notices", lambda: self.show_doc("Third-party notices", "notices"))
+        action(m, "&About RDT", lambda: helpmenu.about(self))
 
     def shortcut_rows(self) -> list[tuple[str, str, str]]:
         """(where, what, keys) for every menu shortcut, read from the menus themselves, then the
@@ -616,6 +637,56 @@ class MainWindow(QMainWindow):
                                  a.shortcut().toString(QKeySequence.NativeText)))
         rows += [("Console", what, keys) for keys, what in CONSOLE_KEYS]
         return rows
+
+    def show_doc(self, title: str, name: str, size=(760, 640)) -> QDialog:
+        dlg = helpmenu.DocDialog(self, title, name, size)
+        dlg.show()
+        return dlg
+
+    # --- updates (INS-9) -------------------------------------------------------------------------
+
+    def start_update_check(self) -> None:
+        """Ask GitHub for the latest release, once a day, unless turned off in Help."""
+        if self.ui.value("updates/check", True) and updates.due(self.ui.value("updates/last_check")):
+            self.update_check.start()
+
+    def check_updates(self) -> None:
+        self._manual_check = True
+        self.message.setText("Checking GitHub for a newer RDT...")
+        self.update_check.start()
+
+    def set_update_check(self, on: bool) -> None:
+        self.ui.set_value("updates/check", bool(on))
+
+    def _update_checked(self, release) -> None:
+        manual, self._manual_check = self._manual_check, False
+        if release is None:
+            if manual:
+                self.message.setText("")
+                QMessageBox.information(self, "Check for updates",
+                                        f"Could not reach GitHub. The releases are at {updates.RELEASES_URL}")
+            return
+        self.ui.set_value("updates/last_check", date.today().isoformat())
+        self.ui.set_value("updates/latest", release.version)
+        self.show_update(release.version, release.url)
+        if manual:
+            self.message.setText("")
+            if updates.is_newer(release.version):
+                box = QMessageBox(self)
+                box.setWindowTitle("Check for updates")
+                box.setTextFormat(Qt.RichText)
+                box.setText(f'RDT {release.version} is available (you have {__version__}).<br>'
+                            f'<a href="{release.url}">Download it from GitHub</a>')
+                box.exec()
+            else:
+                QMessageBox.information(self, "Check for updates", f"RDT {__version__} is the latest version.")
+
+    def show_update(self, version: str | None, url: str = updates.RELEASES_URL) -> None:
+        """The status bar link, while a newer release than this one is known."""
+        newer = bool(version) and updates.is_newer(version)
+        if newer:
+            self.update_label.setText(f'<a href="{url}">RDT {version} is available</a>')
+        self.update_label.setVisible(newer)
 
     def show_shortcuts(self) -> QDialog:
         dlg = QDialog(self)
@@ -1401,7 +1472,9 @@ class MainWindow(QMainWindow):
 
 def main(argv: list[str] | None = None) -> int:
     argv = sys.argv[1:] if argv is None else argv
-    logging.basicConfig(level=logging.WARNING)
+    if sys.stderr is not None:            # the installed rdt-gui.exe has no console
+        logging.basicConfig(level=logging.WARNING)
+    crash.install()
     app = QApplication.instance() or QApplication([sys.argv[0]])
     app.setApplicationName("RDT")
     app.setOrganizationName("RDT")
@@ -1409,6 +1482,8 @@ def main(argv: list[str] | None = None) -> int:
         try:
             import ctypes
             ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID("RDT.RemoteDebuggerTool")
+            # Setup looks for this mutex to ask for RDT to be closed before it upgrades it (INS-3)
+            app._mutex = ctypes.windll.kernel32.CreateMutexW(None, False, "RDT.RemoteDebuggerTool")
         except Exception:
             pass
     app.setWindowIcon(QIcon(str(Path(__file__).parent / "assets" / "rdt.png")))
@@ -1418,6 +1493,7 @@ def main(argv: list[str] | None = None) -> int:
     elif not win.reopen_last() and (local := default_target()) is not None:
         win.open_path(local)              # the CLI's default target file, as a starting point
     win.show()
+    QTimer.singleShot(2000, win.start_update_check)
     return app.exec()
 
 

@@ -5,6 +5,10 @@ Remote debugger tool: read and write firmware variables and memory over a COM po
 
 See [docs/DESIGN_DOCUMENT.md](docs/DESIGN_DOCUMENT.md) for the requirements and the design.
 
+## Install
+
+Download `RDT-Setup-<version>.exe` from [Releases](https://github.com/rani-feldman/rdt/releases) and run it (Windows, per user, no admin rights, nothing else to install). What's new is in [CHANGELOG.md](CHANGELOG.md); how a release is made is in [docs/RELEASING.md](docs/RELEASING.md).
+
 ## Host and CLI
 
 ```

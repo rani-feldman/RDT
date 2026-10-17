@@ -58,6 +58,9 @@ from .target import Target, TargetConfig
 
 POLL_KINDS = ("global", "manual")
 DEFAULT_POLL_MS = 500
+# The .rdtw file format. A version that changes what the files mean raises it, and moves older
+# files over after keeping a .bak copy; a file from a newer RDT loads with a warning (INS-11).
+FORMAT = 1
 WATCH_SUFFIX = ".watch.toml"        # bench.rdtw keeps its watch tabs in bench.watch.toml
 COMMANDS_SUFFIX = ".commands.toml"  # and its known commands in bench.commands.toml
 PROFILE_SUFFIX = ".profile.toml"    # and its SCPI profile in bench.profile.toml
@@ -208,6 +211,9 @@ class Workspace:
 
     @classmethod
     def from_dict(cls, raw: dict, base: Path = Path(".")) -> Workspace:
+        fmt = raw.get("format", FORMAT)
+        if not isinstance(fmt, int) or isinstance(fmt, bool) or fmt < 1:
+            raise ConfigError("format must be a whole number, such as 1")
         poll = raw.get("poll_ms", DEFAULT_POLL_MS)
         if poll == "off":
             poll = 0
@@ -218,6 +224,9 @@ class Workspace:
         if not isinstance(read_only, bool):
             raise ConfigError("read_only must be true or false")
         ws = cls(TargetConfig.from_dict(raw, base), tabs, poll, chart, _commands_from(raw), read_only)
+        if fmt > FORMAT:
+            ws.warnings.append(f"the workspace was saved by a newer RDT (file format {fmt}); settings this "
+                               "version doesn't know are ignored, and are lost if you save it")
         if raw.get("button"):
             ws.warnings.append("command buttons are no longer supported: the [[button]] tables are ignored "
                                "and are left out when the workspace is saved")
@@ -245,7 +254,7 @@ class Workspace:
 
     def to_dict(self, base: Path) -> dict:
         cfg = self.config
-        d: dict = {}
+        d: dict = {"format": FORMAT}
         if cfg.profile_path is not None:
             d["profile"] = _rel(cfg.profile_path, base)
         d["poll_ms"] = self.poll_ms

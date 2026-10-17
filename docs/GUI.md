@@ -173,6 +173,8 @@ The console is a terminal in the theme's colours: dark in the dark themes, white
 
 **Help > Keyboard shortcuts** (F1) lists every shortcut in the menus and the console in one table.
 
+The rest of the **Help** menu: **User manual** and **Release notes** (what each version added or fixed), **Check for updates** (asks GitHub now) and **Check for updates at start** (once a day, on unless turned off; a newer release shows as a link in the status bar), **Licence**, **Third-party notices** and **About RDT** (the version). An unexpected error is shown in a window and written to `%LOCALAPPDATA%\rdt\logs\rdt.log`.
+
 ## SCPI profile editor
 
 The profile says how the firmware spells a memory read and write and how it encodes the reply. The editor has every field of the `[scpi]` table (see [CLI.md](CLI.md#scpi-profile)), shows the read and write commands as they will be sent, and refuses a template that would not work (for example a read without `{len}`). While connected, **Test read** sends one read with the edited profile and shows the reply and the decoded bytes, before you apply it.

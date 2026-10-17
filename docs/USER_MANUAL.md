@@ -46,19 +46,32 @@ This manual walks through setting up a bench and operating RDT. The reference pa
 
 ### Install
 
-RDT runs on Windows (the code is portable, so Linux works too) with Python 3.11 or later. From the repository folder:
+Download `RDT-Setup-<version>.exe` from the [releases page](https://github.com/rani-feldman/rdt/releases) and run it. It installs RDT for your Windows user only, in `%LOCALAPPDATA%\Programs\RDT`, with no admin rights, and everything it needs (Python and every package) comes with it.
+
+- Windows may show "Windows protected your PC" the first time, because RDT is not signed yet: click **More info**, then **Run anyway**.
+- Setup offers **Add rdt to PATH** (ticked), so the `rdt` command line works in any new terminal, and a desktop shortcut (not ticked).
+- `.rdtw` workspaces open in RDT on a double-click.
+- The release also has `RDT-<version>-portable.zip`: unzip it anywhere and run `rdt-gui.exe`, with nothing installed. It keeps its settings in the same place as the installed RDT.
+
+The installation has three programs:
+
+| Program | What it is |
+| --- | --- |
+| `rdt-gui` | The window (Start menu: **RDT**) |
+| `rdt` | The command line |
+| `rdt-sim` | The simulated device (Start menu: **RDT simulator**) |
+
+**Upgrade:** run the newer setup. It closes RDT, removes the old version and installs the new one; your settings and workspaces are kept. RDT checks GitHub once a day and says in the status bar when a newer version is out (turn this off in **Help > Check for updates at start**; **Help > Check for updates** checks now). Installing an older version over a newer one asks first. What changed in each version is in **Help > Release notes**.
+
+**Uninstall:** Windows **Settings > Apps > Installed apps > RDT > Uninstall**. It asks whether to delete your settings and workspaces too (`%LOCALAPPDATA%\rdt`); the answer is No unless you choose Yes.
+
+**From the source code** (to develop RDT, or on Linux), with Python 3.11 or later, from the repository folder:
 
 ```
 python -m pip install -e .[dev]
 ```
 
-This installs three commands:
-
-| Command | What it is |
-| --- | --- |
-| `rdt-gui` | The window (also `python -m rdt.gui`) |
-| `rdt` | The command line (also `python -m rdt`) |
-| `rdt-sim` | The simulated device (also `python -m sim`) |
+This installs the same three commands (also `python -m rdt.gui`, `python -m rdt` and `python -m sim`).
 
 ### Try it on the simulator
 
@@ -568,5 +581,7 @@ Some memory, such as registers, or a core's tightly coupled memory reached throu
 | `console_history.txt` | `%LOCALAPPDATA%\rdt` (`RDT_HISTORY_FILE` overrides) | The console history, shared by the GUI and CLI |
 | Symbol cache | `%LOCALAPPDATA%\rdt\cache` (`RDT_CACHE_DIR` overrides) | Parsed ELF files, so a large ELF loads fast; safe to delete |
 | `sim.toml` | The current folder | The simulator's default config |
+| `logs\rdt.log` | `%LOCALAPPDATA%\rdt\logs` | The GUI's warnings and unexpected errors; safe to delete |
+| The installed RDT | `%LOCALAPPDATA%\Programs\RDT` | The programs, the example workspace (`examples`) and the simulator's files; removed by uninstall |
 
 The file formats are in [CLI.md](CLI.md#workspace), and the simulator's in [SIMULATOR.md](SIMULATOR.md#config).

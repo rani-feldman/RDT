@@ -9,3 +9,4 @@ dist/
 # Your own default configs (python -m sim and rdt pick them up from the current folder)
 /sim.toml
 /rdt.toml
+release/
