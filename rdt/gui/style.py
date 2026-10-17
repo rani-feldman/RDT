@@ -8,7 +8,7 @@ import math
 from dataclasses import dataclass
 
 from PySide6.QtCore import QPointF, QRectF, Qt
-from PySide6.QtGui import QColor, QFont, QFontDatabase, QIcon, QPainter, QPainterPath, QPalette, QPen, QPixmap
+from PySide6.QtGui import QColor, QFont, QFontDatabase, QFontInfo, QIcon, QPainter, QPainterPath, QPalette, QPen, QPixmap
 from PySide6.QtWidgets import QApplication, QStyle, QStyledItemDelegate
 
 from ..target import McuConfig, mcu_color, mcu_short
@@ -301,9 +301,27 @@ def line_icon(kind: str, color: str, size: int = 20) -> QIcon:
     return QIcon(pm)
 
 
+FIXED_FAMILIES = ("Consolas", "Cascadia Mono", "Courier New", "DejaVu Sans Mono", "Liberation Mono")
+
+
+def fixed_font() -> QFont:
+    """The system's fixed-width font; when Qt can't name one that is really fixed (the family
+    "monospace" on some platforms), the first fixed family that is installed."""
+    f = QFontDatabase.systemFont(QFontDatabase.FixedFont)
+    f.setStyleHint(QFont.TypeWriter)
+    if QFontInfo(f).fixedPitch():
+        return f
+    for family in FIXED_FAMILIES:
+        g = QFont(f)
+        g.setFamily(family)
+        if QFontInfo(g).fixedPitch():
+            return g
+    return f
+
+
 def mono_font(base: QFont) -> QFont:
     """The fixed-width font at ``base``'s size, for values whose digits must line up (LNF-8)."""
-    f = QFontDatabase.systemFont(QFontDatabase.FixedFont)
+    f = fixed_font()
     if base.pointSizeF() > 0:
         f.setPointSizeF(base.pointSizeF())
     return f

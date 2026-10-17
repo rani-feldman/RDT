@@ -9,7 +9,7 @@ from datetime import datetime
 from pathlib import Path
 
 from PySide6.QtCore import QEvent, QObject, QStringListModel, Qt, QTimer
-from PySide6.QtGui import QColor, QFont, QFontDatabase, QKeySequence, QShortcut, QTextCharFormat, QTextCursor
+from PySide6.QtGui import QColor, QFont, QKeySequence, QShortcut, QTextCharFormat, QTextCursor
 from PySide6.QtWidgets import (
     QAbstractItemView, QApplication, QCheckBox, QColorDialog, QComboBox, QCompleter, QDialog, QDialogButtonBox, QFileDialog, QFormLayout, QHBoxLayout,
     QHeaderView, QLabel, QLineEdit, QListWidget, QMenu, QMessageBox, QPlainTextEdit, QPushButton, QSpinBox, QTableWidget,
@@ -23,6 +23,7 @@ from ..profile import Profile, align_span, parse_int
 from ..target import MCU_COLORS, McuConfig, Target, check_color, check_short, mcu_short
 from ..workspace import Workspace
 from .device import describe_error
+from .style import fixed_font
 from .terminal import Terminal
 
 BYTES_PER_ROW = 16
@@ -75,7 +76,7 @@ def _common_prefix(words: list[str]) -> str:
 
 
 def mono() -> QFont:
-    return QFontDatabase.systemFont(QFontDatabase.FixedFont)
+    return fixed_font()
 
 
 def run_command(t: Target, text: str) -> str | None:
