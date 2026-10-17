@@ -155,7 +155,7 @@ The console is a dark terminal. Each line shows its time, a tag (`TX` sent, `RX`
 
 **View > Theme** chooses how the window looks:
 
-- **System** (the default) follows Windows; **Light** and **Dark** are plain light and dark colours.
+- **System** (the default) follows Windows. **Light** is white whatever Windows uses, and **Dark** is plain dark colours.
 - **Studio dark**, like VS Code and Segger Ozone: flat grey, square buttons, and the Watch, Scope, Memory and Console buttons become an icon strip down the window's left edge (hover for their names).
 - **Islands**, like the JetBrains IDEs and Windows 11: rounded panels with gaps between them and one blue accent.
 - **Instrument**, like an oscilloscope: black plot, bold square buttons, green for what is on.
