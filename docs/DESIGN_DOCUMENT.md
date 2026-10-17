@@ -175,7 +175,7 @@ Each requirement links to its design section.
 | GUI-12 | Each MCU has an optional short name and tag colour, and each watch row shows its MCU as a coloured tag with the short name before the expression (2026-10-14) | Done | [D-GUI-12](#d-gui-12-mcu-tags) |
 | GUI-13 | A watched value that changed since the previous read is highlighted for a moment (2026-10-14) | Done | [D-GUI-13](#d-gui-13-change-highlight) |
 | GUI-14 | Layout C: a Target panel with one card per MCU (link and ELF state, variables, memory ranges) replaces the Variables panel and the toolbar image box, and four toolbar buttons, Watch, Scope, Memory and Console, each show or hide their own panel, with the layout saved (2026-10-14; the buttons changed from mode tabs on 2026-10-14) | Done | [D-GUI-14](#d-gui-14-layout-c) |
-| GUI-15 | A dark theme: View > Theme offers System, Light or Dark, saved per user (2026-10-14) | Done | [D-GUI-15](#d-gui-15-dark-theme) |
+| GUI-15 | A dark theme: View > Theme offers System, Light or Dark, saved per user; Light is white whatever Windows uses (2026-10-14, updated 2026-10-17) | Done | [D-GUI-15](#d-gui-15-dark-theme) |
 | GUI-16 | Drag variables and watch rows onto a watch tab, a tab's title or the chart (2026-10-14) | Done | [D-GUI-16](#d-gui-16-drag-and-drop) |
 | GUI-17 | One title bar row: the app icon, the menus and the minimise, maximise and close buttons in a single line, with no title text and no standard Windows title bar above it (rani, 2026-10-14) | Done | [D-GUI-17](#d-gui-17-one-row-title-bar) |
 | GUI-18 | Load a profile file from inside the SCPI profile dialog; **Target > Load profile file...** is removed (2026-10-15) | Done | [D-SCPI-9](#d-scpi-9-profile-editor) |
@@ -250,7 +250,7 @@ Console features taken from ComPort-Zone (an open serial terminal); rani approve
 | CON-10 | Send a serial break on a COM port link (2026-10-12) | Done | [D-CON-10](#d-con-10-serial-break) |
 | CON-11 | The console text size can be changed and long lines wrapped or not, remembered per user (2026-10-12) | Done | [D-CON-11](#d-con-11-text-size-and-wrap) |
 | CON-12 | The GUI lists every keyboard shortcut in one window (2026-10-12) | Done | [D-CON-12](#d-con-12-keyboard-shortcuts) |
-| CON-13 | The GUI console looks like a terminal: dark, each line with its time and a TX, RX, ERR or SYS tag, and the prompt as its last line, with no separate line or button for sending (2026-10-12) | Done | [D-CON-13](#d-con-13-terminal-look) |
+| CON-13 | The GUI console looks like a terminal in the theme's colours (dark in the dark themes, light in the light ones), each line with its time and a TX, RX, ERR or SYS tag, and the prompt as its last line, with no separate line or button for sending (2026-10-12, updated 2026-10-17) | In review (PR #125) | [D-CON-13](#d-con-13-terminal-look) |
 | CON-14 | Commands are typed on the console's next free line, inside the transcript, and the best suggestion from the history or the known commands shows while typing, without pressing Tab (2026-10-12) | Done | [D-CON-14](#d-con-14-typing-in-the-transcript) |
 | CON-15 | The list of matching commands opens as soon as something is typed, without Tab; Tab or Enter takes the highlighted command (2026-10-13) | Done | [D-CON-2](#d-con-2-autocomplete) |
 
@@ -961,7 +961,7 @@ Polling, the chart and the CSV log keep running while a panel is hidden.
 
 #### D-GUI-15 Dark theme
 
-**View > Theme** offers **System** (the default: Qt's own style), **Light** (Fusion with its standard palette) and **Dark** (Fusion with the `DARK` palette), applied by `apply_theme` in `rdt/gui/style.py`. The choice is saved per user as `ui/theme` in `ui.toml` and exported with the interface settings (D-WSP-5). The chart follows the theme (`ChartPanel.set_dark`); the console keeps its dark terminal look.
+**View > Theme** offers **System** (the default: Qt's own style), **Light** (Fusion with the white `LIGHT` palette, white whatever Windows uses, with light Connect-button colours `LIGHT_CONNECT`) and **Dark** (Fusion with the `DARK` palette), applied by `apply_theme` in `rdt/gui/style.py`. The choice is saved per user as `ui/theme` in `ui.toml` and exported with the interface settings (D-WSP-5). The chart follows the theme (`ChartPanel.set_dark`); so does the console (`Console.restyle`, D-CON-13).
 
 #### D-GUI-16 Drag and drop
 
@@ -1334,7 +1334,7 @@ Ctrl+= (or Ctrl++), Ctrl+- and Ctrl+mouse wheel over the transcript change the c
 
 #### D-CON-13 Terminal look
 
-The console panel (`Console` in `rdt/gui/panels.py`) is a dark terminal whatever the window's theme, styled from the `TERMINAL`, `LINE_COLORS` and `LINE_TAGS` tables:
+The console panel (`Console` in `rdt/gui/panels.py`) is a terminal in the theme's colours, styled from the `TERMINAL`, `LINE_COLORS` and `LINE_TAGS` tables. They hold the dark set (`TERMINAL_DARK`) in the dark themes and the light set (`TERMINAL_LIGHT`: white background, dark text) in Light, Light pro and a light System; `MainWindow.set_theme` calls `Console.restyle(dark)`, which swaps the set and redraws the transcript (rani, 2026-10-17). The colours below are the dark set; the light set uses darker shades of the same green, blue and red:
 
 - **Lines:** `HH:MM:SS.mmm` in grey (when **Timestamps** is on), a four-character tag, then the text. `TX` (sent) is green with light green text, `RX` (reply) blue with the normal light text, `ERR` red with red text, `SYS` (RDT's notes) grey with grey italic text. The lines of a multi-line reply are indented to line up under the first line's text. A command is shown as typed, without the old `> `; the session log file (D-CON-5) keeps its own `>`, `<`, `!`, `#` marks.
 - **Prompt:** the last line of the transcript is the link's address (`COM3`, `192.168.1.20:5025`), green while the link is up and grey when it is not, then `>`, then what you type (D-CON-14). Enter sends; there is no **Send** button or separate input row.
@@ -1505,6 +1505,7 @@ The application is built against the simulator. With the firmware's read and wri
 | 2026-10-15 | The SCPI profile is saved in its own file beside the `.rdtw` (`bench.profile.toml`, every field written), which the `.rdtw` names like the watch and commands files; the profile dialog's **Load from file...** only fills the fields (WSP-7, replacing GUI-18's link to the loaded file), at rani's request |
 | 2026-10-15 | The MCUs dialog shows the ELF path on one line, cut in the middle so the file name stays visible, with the full path as the tooltip (GUI-19), at rani's request |
 | 2026-10-15 | The per-MCU identity variable is removed (the Identity variable column in Target > MCUs and ELF files, the `[[mcu]] identity` key, which old files drop on save, and its check); the ELF check uses the GNU build ID when present, else the flash sample (SYM-8), at rani's request since RDT reads the image from the flash |
+| 2026-10-17 | The Light theme gets its own white palette, independent of Windows dark mode (GUI-15, PR #124), and the console follows the theme: light in the light themes, dark in the dark ones (CON-13, PR #125). rani reported the console was always dark |
 
 ## 9. Appendix: binary protocol (planned)
 
