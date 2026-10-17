@@ -1017,6 +1017,8 @@ def test_dark_theme_is_remembered(qtbot, win):
     assert type(win).__name__ and win.chart.axis_text == "#c8ccd2"
     win.set_theme("light")
     assert not is_dark() and win.chart.axis_text == "#404040"
+    pal = QApplication.palette()   # white, even with Windows in dark mode
+    assert pal.window().color().name() == pal.base().color().name() == "#ffffff"
     win.set_theme("system")
     assert QApplication.palette().base().color().name() == system and win.ui.value("ui/theme") == "system"
 
