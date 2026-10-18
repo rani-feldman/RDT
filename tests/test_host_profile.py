@@ -34,6 +34,19 @@ def test_a_template_may_pad_but_not_change_the_base():
             Profile(read=template)
 
 
+
+@pytest.mark.parametrize("template", ["MEM:RD? {mcu},{addr:8X},{len}", "MEM:RD? {mcu},{addr:X},{len}",
+                                      "MEM:RD? {mcu},{addr:04X},{len}"])
+def test_an_address_is_always_8_zero_padded_digits(template):
+    """L5: {addr:8X} pads with spaces and {addr:X} or {addr:04X} gives fewer than 8 digits; the
+    firmware rejects all of them, so the profile is refused."""
+    with pytest.raises(ConfigError):
+        Profile(read=template)
+    with pytest.raises(ConfigError, match="zero-padded"):
+        Profile(write="MEM:WR {mcu},{addr},{value:4X},{size}")
+    assert Profile(read="R? {mcu},{addr:010X},{len}").format_read(0, 0x100, 4) == "R? 0,0000000100,4"
+
+
 @pytest.mark.parametrize("table", [
     {"read": "MEM:RD? {mcu},{address},{len}"},   # unknown placeholder
     {"read": "MEM:RD? {mcu},{addr}"},            # no length
@@ -43,6 +56,10 @@ def test_a_template_may_pad_but_not_change_the_base():
     {"max_write": 2},                            # narrower than the 4-byte align
     {"max_response": 2},
     {"timeout": 500},                            # typo for timeout_ms
+    {"timeout_ms": "500"},                       # L6: wrong value types are config errors too
+    {"retries": 1.5},
+    {"max_response": True},
+    {"read": 5},
 ])
 def test_bad_profiles_are_refused(table):
     with pytest.raises(ConfigError):
