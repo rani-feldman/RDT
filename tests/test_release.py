@@ -1,7 +1,6 @@
 """Versions, release notes and the update check (INS-7, INS-9, INS-11, INS-13, INS-14)."""
 
 import importlib.util
-import json
 import re
 from datetime import date
 from pathlib import Path
@@ -98,34 +97,45 @@ def test_check_once_a_day():
     assert not updates.due("2026-10-17", date(2026, 10, 17))
 
 
-def test_release_from_github_answer():
-    r = updates.release_from({"tag_name": "v1.2.0", "html_url": "https://github.com/x/releases/tag/v1.2.0"})
+def test_release_from_the_latest_redirect():
+    r = updates.release_from_location("https://github.com/x/releases/tag/v1.2.0")
     assert r == updates.Release("1.2.0", "https://github.com/x/releases/tag/v1.2.0")
-    assert updates.release_from({"tag_name": "v1.2.0", "draft": True}) is None
-    assert updates.release_from({"tag_name": "v1.3.0-beta", "prerelease": True}) is None
-    assert updates.release_from({"message": "Not Found"}) is None
+    assert updates.release_from_location("/rani-feldman/rdt/releases/tag/v1.3.0") == \
+        updates.Release("1.3.0", f"{updates.RELEASES_URL}/tag/v1.3.0")
+    assert updates.release_from_location("https://github.com/x/releases") is None     # no release yet
+    assert updates.release_from_location("https://github.com/x/releases/tag/nightly") is None
+    assert updates.release_from_location("") is None
 
 
 def test_fetch_latest_gives_none_when_github_cannot_be_read(monkeypatch):
     def fail(*a, **k):
         raise OSError("no network")
-    monkeypatch.setattr(updates.urllib.request, "urlopen", fail)
+    monkeypatch.setattr(updates._no_redirect, "open", fail)
     assert updates.fetch_latest() is None
 
 
-def test_fetch_latest_reads_the_api(monkeypatch):
-    class Answer:
-        def __enter__(self):
-            return self
+def _answer(monkeypatch, status, location=""):
+    sent = []
 
-        def __exit__(self, *a):
-            return False
+    def open_(req, timeout):
+        sent.append(req)
+        raise updates.urllib.error.HTTPError(req.full_url, status, "", {"Location": location}, None)
+    monkeypatch.setattr(updates._no_redirect, "open", open_)
+    return sent
 
-        def read(self, *a):
-            return json.dumps({"tag_name": "v9.0.0", "html_url": "https://example/r"}).encode()
 
-    monkeypatch.setattr(updates.urllib.request, "urlopen", lambda req, timeout: Answer())
-    assert updates.fetch_latest() == updates.Release("9.0.0", "https://example/r")
+def test_fetch_latest_reads_the_redirect_not_the_api(monkeypatch):
+    sent = _answer(monkeypatch, 302, "https://github.com/rani-feldman/RDT/releases/tag/v9.0.0")
+    assert updates.fetch_latest() == updates.Release("9.0.0", "https://github.com/rani-feldman/RDT/releases/tag/v9.0.0")
+    assert sent[0].full_url == "https://github.com/rani-feldman/rdt/releases/latest"
+    assert "api.github.com" not in sent[0].full_url
+
+
+def test_fetch_latest_gives_none_on_a_rate_limit_or_error(monkeypatch):
+    _answer(monkeypatch, 429)
+    assert updates.fetch_latest() is None
+    _answer(monkeypatch, 404)
+    assert updates.fetch_latest() is None
 
 
 def test_shipped_documents_are_found_in_the_repository():
@@ -147,3 +157,59 @@ def test_workspace_from_a_newer_rdt_loads_with_a_warning():
     assert any("newer RDT" in w for w in ws.warnings)
     with pytest.raises(Exception, match="format"):
         Workspace.from_dict({**raw, "format": "two"})
+
+
+CHANGELOG = """# Release notes
+
+## Unreleased
+
+### New features
+
+- Not out yet.
+
+## 1.2.0 (2026-11-02)
+
+### New features
+
+- Faster block reads.
+
+### Bug fixes
+
+## 1.1.0 (2026-10-25)
+
+### Bug fixes
+
+- The COM port list is rescanned.
+
+## 1.0.0 (2026-10-17)
+
+### New features
+
+- First release.
+"""
+
+
+def test_changes_since_keeps_only_newer_versions():
+    notes = updates.changes_since(CHANGELOG, "1.0.0")
+    assert notes.startswith("## 1.2.0") and "## 1.1.0" in notes and "Faster block reads" in notes
+    assert "COM port list" in notes
+    assert "First release" not in notes and "Not out yet" not in notes
+    assert "### Bug fixes\n\n## 1.1.0" not in notes          # an empty heading is left out
+    assert updates.changes_since(CHANGELOG, "1.2.0") == ""
+    assert updates.changes_since("", "1.0.0") == ""
+
+
+def test_fetch_latest_adds_the_changes_when_newer(monkeypatch):
+    _answer(monkeypatch, 302, "https://github.com/rani-feldman/rdt/releases/tag/v1.2.0")
+    asked = []
+    monkeypatch.setattr(updates, "fetch_changelog", lambda v, t=None: asked.append(v) or CHANGELOG)
+    r = updates.fetch_latest(current="1.1.0")
+    assert r.version == "1.2.0" and "Faster block reads" in r.notes and "COM port" not in r.notes
+    assert asked == ["1.2.0"]
+    assert updates.fetch_latest(current="1.2.0").notes == ""     # not newer: no second request
+    assert asked == ["1.2.0"]
+
+
+def test_changelog_comes_from_the_tag_not_the_api():
+    url = updates.CHANGELOG_URL.format(tag="v1.2.0")
+    assert url == "https://raw.githubusercontent.com/rani-feldman/rdt/v1.2.0/CHANGELOG.md"

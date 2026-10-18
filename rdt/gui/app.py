@@ -522,8 +522,9 @@ class MainWindow(QMainWindow):
         self.statusBar().addWidget(self.message, 1)
         self.log_label = QLabel()
         self.statusBar().addPermanentWidget(self.log_label)
-        self.update_label = QLabel()  # "RDT 1.1.0 is available", a link to the release (INS-9)
-        self.update_label.setOpenExternalLinks(True)
+        self.update_label = QLabel()  # "RDT 1.1.0 is available": opens what changed (INS-9)
+        self._latest_release = None
+        self.update_label.linkActivated.connect(lambda _url: self.show_update_dialog())
         self.update_label.hide()
         self.statusBar().addPermanentWidget(self.update_label)
         self.link_label = QLabel()    # the link and each MCU's reply time, on the coloured strip (LNF-5)
@@ -690,18 +691,19 @@ class MainWindow(QMainWindow):
             return
         self.ui.set_value("updates/last_check", date.today().isoformat())
         self.ui.set_value("updates/latest", release.version)
+        self._latest_release = release
         self.show_update(release.version, release.url)
         if manual:
             self.message.setText("")
-            if updates.is_newer(release.version):
-                box = QMessageBox(self)
-                box.setWindowTitle("Check for updates")
-                box.setTextFormat(Qt.RichText)
-                box.setText(f'RDT {release.version} is available (you have {__version__}).<br>'
-                            f'<a href="{release.url}">Download it from GitHub</a>')
-                box.exec()
-            else:
+        if not updates.is_newer(release.version):
+            if manual:
                 QMessageBox.information(self, "Check for updates", f"RDT {__version__} is the latest version.")
+            return
+        # What changed pops up once per new version on its own; Help > Check for updates and the
+        # status bar link show it again whenever asked.
+        if manual or self.ui.value("updates/notified") != release.version:
+            self.ui.set_value("updates/notified", release.version)
+            self.show_update_dialog()
 
     def show_update(self, version: str | None, url: str = updates.RELEASES_URL) -> None:
         """The status bar link, while a newer release than this one is known."""
@@ -709,6 +711,19 @@ class MainWindow(QMainWindow):
         if newer:
             self.update_label.setText(f'<a href="{url}">RDT {version} is available</a>')
         self.update_label.setVisible(newer)
+
+    def show_update_dialog(self):
+        """What changed in the newer release, with a Download button; the release page when the
+        changes aren't known yet (the link came from a check on an earlier day)."""
+        release = self._latest_release
+        if release is None:
+            version = self.ui.value("updates/latest")
+            if not version:
+                return None
+            release = updates.Release(version, f"{updates.RELEASES_URL}/tag/v{version}")
+        dlg = helpmenu.UpdateDialog(self, release)
+        dlg.show()
+        return dlg
 
     def show_shortcuts(self) -> QDialog:
         dlg = QDialog(self)

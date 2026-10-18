@@ -9,8 +9,11 @@ section. RDT shows this file in **Help > Release notes**.
 
 ### New features
 
+- When a newer RDT is out, a window shows what changed in it, with a Download button.
+
 ### Bug fixes
 
+- The update check no longer uses GitHub's API, so many PCs on one office network can't hit GitHub's limit of 60 checks an hour.
 - The COM port list is rescanned each time you open it, so unplugged ports go and newly plugged ones show.
 
 ## 1.0.0 (2026-10-17)

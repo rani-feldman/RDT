@@ -45,6 +45,7 @@ STATE: dict[str, type] = {
     "session/watch_shown": bool,     # whether the watch tabs were shown
     "updates/last_check": str,       # the day GitHub was last asked for the latest release (ISO date)
     "updates/latest": str,           # the latest release it reported, such as "1.1.0"
+    "updates/notified": str,         # the newer release whose changes were last shown on their own
 }
 KNOWN = {**SETTINGS, **STATE}
 

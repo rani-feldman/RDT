@@ -173,7 +173,7 @@ The console is a terminal in the theme's colours: dark in the dark themes, white
 
 **Help > Keyboard shortcuts** (F1) lists every shortcut in the menus and the console in one table.
 
-The rest of the **Help** menu: **User manual** and **Release notes** (what each version added or fixed), **Check for updates** (asks GitHub now) and **Check for updates at start** (once a day, on unless turned off; a newer release shows as a link in the status bar), **Licence**, **Third-party notices** and **About RDT** (the version). An unexpected error is shown in a window and written to `%LOCALAPPDATA%\rdt\logs\rdt.log`.
+The rest of the **Help** menu: **User manual** and **Release notes** (what each version added or fixed), **Check for updates** (asks GitHub now) and **Check for updates at start** (once a day, on unless turned off; a newer release shows as a link in the status bar, and a window lists what changed since the running version: on its own once per new version, and whenever the link or Check for updates is clicked), **Licence**, **Third-party notices** and **About RDT** (the version). An unexpected error is shown in a window and written to `%LOCALAPPDATA%\rdt\logs\rdt.log`.
 
 ## SCPI profile editor
 
