@@ -76,6 +76,11 @@ def test_codec_checks_range_and_parses_user_values():
     assert codec.parse_value("-7", "i16") == -7
     assert codec.parse_value("2.5e3", "f32") == 2500.0
     assert codec.parse_value("0x3FC00000", "f32") == 1.5   # bit pattern
+    for bad in ("-0x1", "0x1FFFFFFFF"):   # L4: a message, not a struct.error
+        with pytest.raises(ValueError, match="32-bit pattern"):
+            codec.parse_value(bad, "f32")
+    with pytest.raises(ValueError, match="64-bit pattern"):
+        codec.parse_value("0x1" + "0" * 16, "f64")
     assert codec.encode(1.5, "f32", "little") == bytes.fromhex("0000C03F")
 
 

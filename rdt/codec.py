@@ -55,6 +55,10 @@ def parse_value(text: str, type_name: str) -> int | float:
         if t.lower().startswith(("0x", "-0x", "+0x")) and "." not in t and "p" not in t.lower():
             # A hex integer for a float is taken as its bit pattern, as the firmware sees it.
             raw = parse_int(t)
+            bits = 32 if type_name == "f32" else 64
+            if not 0 <= raw < 1 << bits:
+                raise ValueError(f"{text!r} is not a {bits}-bit pattern for {type_name} "
+                                 f"(0x0..0x{(1 << bits) - 1:X})")
             fmt = "<I" if type_name == "f32" else "<Q"
             return struct.unpack("<f" if type_name == "f32" else "<d", struct.pack(fmt, raw))[0]
         try:

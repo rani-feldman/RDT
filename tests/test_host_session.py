@@ -1,6 +1,7 @@
 """The host core end to end against the simulated device, over every transport."""
 
 import itertools
+import os
 import socket
 import sys
 import threading
@@ -175,7 +176,8 @@ def test_small_write_is_a_read_modify_write(two_mcus):
             sent.clear()
             t.write_value("@main:0x2000000A:u16", 0xBEEF)
             assert t.read("main", 0x20000008, 4) == before[:2] + bytes.fromhex("EFBE")   # neighbour kept
-        assert sent[:3] == ["MEMory:READ? 0,20000008,4",                                  # read the word
+        assert sent[:4] == ["MEMory:READ? 0,20000008,4",                                  # read the word
+                            "MEMory:READ? 0,20000008,4",                                  # twice, to agree
                             f"MEMory:WRITE 0,20000008,BEEF{before[1]:02X}{before[0]:02X},4",  # write it whole
                             "MEMory:READ? 0,20000008,4"]                                  # and confirm
 
@@ -197,6 +199,62 @@ def test_read_modify_write_confirms_only_the_value(two_mcus):
         with make_target("tcp", s.tcp_address) as t:
             t.write_value("@main:0x2000000A:u16", 0x1234)
             assert t.read("main", 0x20000008, 4) == bytes.fromhex("55553412")
+
+
+def _late_first_reply(dev, command, late_s):
+    """Make the device answer ``command`` the first time only ``late_s`` seconds after it, as a
+    busy firmware does; the device is busy for that time, so later commands wait too."""
+    handle = dev.handle
+    first = [True]
+
+    def busy(line, client=""):
+        if line == command and first[0]:
+            first[0] = False
+            time.sleep(late_s)
+        return handle(line, client)
+
+    dev.handle = busy
+
+
+def test_a_late_reply_is_not_taken_for_the_next_read(two_mcus):
+    """H1: a read times out and its reply comes just after. Replies carry no tag, so the next
+    read, here a read-modify-write's, must not take that reply for its own."""
+    dev = Device(two_mcus)
+    dev.mcus[0].write(0x20000000, bytes.fromhex("AAAAAAAA"))
+    dev.mcus[0].write(0x20000004, bytes.fromhex("11111111"))
+    _late_first_reply(dev, "MEMory:READ? 0,20000000,4", 0.15)
+    with Simulator(dev, TransportConfig(tcp="127.0.0.1:0", udp=None)) as s:
+        with make_target("tcp", s.tcp_address, Profile(timeout_ms=100, retries=0)) as t:
+            with pytest.raises(CommandTimeout):
+                t.read("main", 0x20000000, 4)
+            t.write_value("@main:0x20000006:u16", 0x3333)
+            assert dev.mcus[0].read(0x20000004, 4) == bytes.fromhex("11113333")   # not AAAA3333
+            assert t.read("main", 0x20000000, 8) == bytes.fromhex("AAAAAAAA11113333")
+
+
+def test_read_modify_write_needs_two_reads_that_agree(two_mcus):
+    """H1: a stray reply later than the wait for it can still fool one read. The words a
+    read-modify-write patches are used only when two reads in a row agree."""
+    dev = Device(two_mcus)
+    dev.mcus[0].write(0x20000004, bytes.fromhex("11111111"))
+    with Simulator(dev, TransportConfig(tcp="127.0.0.1:0", udp=None)) as s:
+        with make_target("tcp", s.tcp_address) as t:
+            real = t.session.read
+            stale = [bytes.fromhex("AAAAAAAA")]
+
+            def read(mcu, addr, size, retries=None):
+                return stale.pop() if stale else real(mcu, addr, size, retries)
+
+            t.session.read = read
+            t.write_value("@main:0x20000006:u16", 0x3333)          # the stray reply is outvoted
+            assert dev.mcus[0].read(0x20000004, 4) == bytes.fromhex("11113333")
+
+            sent = _record(t)
+            t.session.read = lambda mcu, addr, size, retries=None: os.urandom(size)   # never agree
+            with pytest.raises(WriteNotConfirmed, match="never agreed"):
+                t.write_value("@main:0x20000006:u16", 0x4444)
+            assert not any(c.startswith("MEMory:WRITE") for c in sent)               # nothing written
+            assert dev.mcus[0].read(0x20000004, 4) == bytes.fromhex("11113333")
 
 
 def test_read_replies_are_comma_separated_words(two_mcus):
@@ -481,3 +539,29 @@ def test_idle_serial_link_goes_down_when_the_port_disappears():
             t.check()
     finally:
         t.close()
+
+
+def test_timeouts_counted_by_the_gui_while_the_worker_adds_them():
+    """L13: the GUI thread prunes the list of timeouts while the session's thread adds to it;
+    no timeout may be lost, or the MCU card can stay green."""
+    from rdt.session import McuStatus
+
+    st = McuStatus()
+    stop = threading.Event()
+
+    def gui():
+        while not stop.is_set():
+            st.recent_timeouts()
+
+    reader = threading.Thread(target=gui)
+    old = sys.getswitchinterval()
+    sys.setswitchinterval(1e-6)
+    try:
+        reader.start()
+        for _ in range(100):
+            st.add_timeout()
+    finally:
+        stop.set()
+        reader.join()
+        sys.setswitchinterval(old)
+    assert st.recent_timeouts() == 100

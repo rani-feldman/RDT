@@ -225,6 +225,9 @@ class Mcu:
             return False
         log.info("MCU %s: reloaded %s", self.name, self._cfg.elf)
         self.identity, self.allow_mismatch = None, False   # the new ELF has not been checked yet
+        # Checked before the next read or write, so one queued before the GUI's own check of the
+        # new ELF does not go out unchecked (M11).
+        self.identity_stale = True
         return True
 
     def identity_area(self) -> tuple[int, int, str] | None:
@@ -338,15 +341,19 @@ class Target:
             return []
         return [m.name for m in self.mcus.values() if m.identity_stale and not self.is_silent(m)]
 
-    def check_identity(self, mcu: str | Mcu | None = None) -> list[Identity]:
+    def check_identity(self, mcu: str | Mcu | None = None, *, keep_allowed: bool = False) -> list[Identity]:
         """Compare each MCU's ELF with the firmware it runs: read the identity bytes from the
         device and from the ELF file. A mismatch makes writes to that MCU refused until
-        ``allow_mismatch`` is called. A silent MCU is marked ``unread`` and is not blocked."""
+        ``allow_mismatch`` is called. A silent MCU is marked ``unread`` and is not blocked.
+
+        ``keep_allowed`` keeps an ``allow_mismatch`` in force: the automatic check after the link
+        or the MCU comes back uses it, so ``--allow-mismatch`` lasts the whole command (M1)."""
         out = []
         for m in [self.mcu(mcu)] if mcu is not None else self.mcus.values():
             m.identity = self._identity(m)
             m.identity_stale = m.identity.status == "unread"   # try again when it answers
-            m.allow_mismatch = False
+            if not keep_allowed:
+                m.allow_mismatch = False
             out.append(m.identity)
             if m.identity.status == "mismatch":
                 log.warning("%s", m.identity)
@@ -394,7 +401,9 @@ class Target:
                                             f"differ, first at 0x{differ[0]:08X}")
 
     def allow_mismatch(self, mcu: str | Mcu) -> None:
-        """Let reads and writes through to an MCU whose ELF does not match, until the next check."""
+        """Let reads and writes through to an MCU whose ELF does not match, until the next check
+        asked for (connect, reconnect, a new ELF); the automatic checks after the link or the MCU
+        comes back keep it."""
         self.mcu(mcu).allow_mismatch = True
 
     def send_break(self, ms: float = 250) -> None:
@@ -435,11 +444,12 @@ class Target:
 
     # --- memory ------------------------------------------------------------------------------
 
-    def read(self, mcu: str | Mcu, addr: int, size: int) -> bytes:
+    def read(self, mcu: str | Mcu, addr: int, size: int, *, retries: int | None = None) -> bytes:
+        """Read raw bytes. ``retries`` overrides the profile's retries after a timeout."""
         m = self.mcu(mcu)
         self._check(m, addr, size, write=False)
         self._require_image(m)
-        return self.session.read(m.id, addr, size)
+        return self.session.read(m.id, addr, size, retries)
 
     def _read_unchecked(self, m: Mcu, addr: int, size: int) -> bytes:
         """A read for the identity check itself, which must work while the image does not match."""
@@ -457,7 +467,7 @@ class Target:
         """Refuse reads and writes to an MCU whose ELF does not match its firmware (SYM-8),
         checking again first when the link or the MCU came back since the last check."""
         if m.identity_stale and self.session.is_up and not self.is_silent(m):
-            self.check_identity(m)
+            self.check_identity(m, keep_allowed=True)
         if m.identity is not None and m.identity.status == "mismatch" and not m.allow_mismatch:
             raise ImageMismatch(f"MCU {m.name}: reads and writes are refused because its ELF does not match "
                                 f"the firmware ({m.identity.detail}); load the right ELF, or allow access anyway")

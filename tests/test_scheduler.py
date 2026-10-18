@@ -1,6 +1,7 @@
 """The poll scheduler (block merging), statistics and the CSV log."""
 
 import csv
+import time
 from pathlib import Path
 
 import pytest
@@ -38,9 +39,9 @@ def counted(t, monkeypatch):
     reads = []
     real = t.read
 
-    def read(mcu, addr, size):
+    def read(mcu, addr, size, **kw):
         reads.append((t.mcu(mcu).name, addr, size))
-        return real(mcu, addr, size)
+        return real(mcu, addr, size, **kw)
 
     monkeypatch.setattr(t, "read", read)
     return reads
@@ -100,15 +101,42 @@ def test_read_many_keeps_errors_per_item(target):
 def test_a_failing_merged_block_is_read_item_by_item(target, monkeypatch):
     real = target.read
 
-    def read(mcu, addr, size):
+    def read(mcu, addr, size, **kw):
         if size > 4:
             raise CommandTimeout("no reply")
-        return real(mcu, addr, size)
+        return real(mcu, addr, size, **kw)
 
     monkeypatch.setattr(target, "read", read)
     samples = read_many(target, ["main:motor.speed", "main:motor.target", "main:motor"])
     assert [s.error is None for s in samples] == [True, True, False]
     assert isinstance(samples[2].error, CommandTimeout)
+
+
+def test_a_hung_mcu_costs_a_poll_a_few_timeouts(sim):
+    """M2: when MCU 0 stops answering, a merged block's items are not each read with full
+    retries; after two items in a row get no reply the rest keep the block's error, and the
+    other MCUs are still read."""
+    exprs = ["main:motor.speed", "main:motor.target", "main:tick_count"] + [f"main:gains[{i}]" for i in range(4)] \
+        + ["motorctl:pwm_duty"]
+    with make_target("tcp", sim.tcp_address, Profile(timeout_ms=100, retries=2)) as t:
+        reads = []
+        real = t.session.read
+
+        def read(mcu, addr, size, retries=None):
+            reads.append((mcu, size, retries))
+            return real(mcu, addr, size, retries)
+
+        t.session.read = read
+        handle = sim.device.handle
+        sim.device.handle = lambda line, client="": None if line.startswith("MEMory:READ? 0,") else handle(line, client)
+        started = time.monotonic()
+        samples = read_many(t, exprs)
+        took = time.monotonic() - started
+        assert all(isinstance(s.error, CommandTimeout) for s in samples[:-1])
+        assert samples[-1].error is None and samples[-1].data is not None   # MCU 1 is still read
+        # the block with its retries, then two items tried once each, then MCU 1
+        assert [(m, r) for m, _, r in reads] == [(0, None), (0, 0), (0, 0), (1, None)] and reads[0][1] == 0x24
+        assert took < 1.5   # 3 + 2 timeouts of 0.1 s and the waits for late replies; was 3 + 7 x 3
 
 
 def test_workspace_read_many_scales_like_read(target):
