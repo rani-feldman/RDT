@@ -115,6 +115,34 @@ def port_name(text: str) -> str:
     return text.split(" - ", 1)[0].strip()
 
 
+class PortBox(QComboBox):
+    """The COM port box: it rescans the ports each time its list opens, so unplugged ports go and new ones show."""
+
+    def __init__(self):
+        super().__init__(editable=True)
+
+    def refresh(self) -> None:
+        """Fill the list with the ports present now, keeping the port shown (typed or picked)."""
+        shown = self.currentText()
+        self.blockSignals(True)
+        self.clear()
+        for port, desc in serial_ports():
+            self.addItem(port_label(port, desc), port)
+        self.view().setMinimumWidth(self.view().sizeHintForColumn(0) + 24)
+        i = self.findData(port_name(shown))
+        if i >= 0:
+            self.setCurrentIndex(i)
+        else:
+            self.setEditText(shown)
+        self.blockSignals(False)
+        if self.currentText() != shown:
+            self.currentTextChanged.emit(self.currentText())
+
+    def showPopup(self) -> None:
+        self.refresh()
+        super().showPopup()
+
+
 class ConnectionBar(QToolBar):
     """Transport, address (IP and port, or COM port and baud), SCPI profile, and connect."""
 
@@ -130,7 +158,7 @@ class ConnectionBar(QToolBar):
         self.host.setMaximumWidth(160)
         self.port = QSpinBox()
         self.port.setRange(1, 65535)
-        self.com = QComboBox(editable=True)
+        self.com = PortBox()
         self.com.setMinimumWidth(110)
         self.baud = QComboBox(editable=True)
         self.baud.addItems(BAUDS)
@@ -206,13 +234,7 @@ class ConnectionBar(QToolBar):
         for a in self._serial:
             a.setVisible(kind == "serial")
         if kind == "serial" and self.com.count() == 0:
-            typed = self.com.currentText()
-            self.com.blockSignals(True)
-            for port, desc in serial_ports():
-                self.com.addItem(port_label(port, desc), port)
-            self.com.view().setMinimumWidth(self.com.view().sizeHintForColumn(0) + 24)
-            self.set_port(typed)
-            self.com.blockSignals(False)
+            self.com.refresh()
 
     def set_port(self, port: str) -> None:
         """Show ``port`` in the COM box: its list entry, with the description, when it is listed."""

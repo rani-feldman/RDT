@@ -11,6 +11,8 @@ section. RDT shows this file in **Help > Release notes**.
 
 ### Bug fixes
 
+- The COM port list is rescanned each time you open it, so unplugged ports go and newly plugged ones show.
+
 ## 1.0.0 (2026-10-17)
 
 ### New features
