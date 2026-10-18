@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 import time
 from dataclasses import dataclass, field
 
@@ -66,6 +67,28 @@ class MonoDelegate(QStyledItemDelegate):
         editor = super().createEditor(parent, opt, idx)
         editor.setFont(mono_font(editor.font()))
         return editor
+
+
+class ValueDelegate(MonoDelegate):
+    """The value column's editor. A typed value is written only when the user commits it: Qt
+    reloads an open editor whenever its cell changes (a poll, the change highlight fading), so the
+    editor is filled once when it opens and never again, and the write is made here, from the
+    editor's text, not from the tree's itemChanged, which every display update also sends (H2, M3)."""
+
+    def __init__(self, tree: "WatchTree"):
+        super().__init__(tree)
+        self.tree = tree
+
+    def setEditorData(self, editor, idx) -> None:
+        if editor.property("rdt_filled"):
+            return
+        super().setEditorData(editor, idx)
+        editor.setProperty("rdt_filled", True)
+        editor.setProperty("rdt_start", editor.text())
+
+    def setModelData(self, editor, model, idx) -> None:
+        # the cell keeps showing the device's value; the read-back after the write updates it
+        self.tree._commit(idx.siblingAtColumn(COL_NAME).data(PATH_ROLE), editor.text(), editor.property("rdt_start"))
 
 
 class RowDelegate(TagDelegate):
@@ -160,12 +183,14 @@ class WatchTree(DragTree):
         self.setContextMenuPolicy(Qt.CustomContextMenu)
         self.customContextMenuRequested.connect(self._menu)
         self.itemDoubleClicked.connect(self._double_clicked)
-        self.itemChanged.connect(self._item_changed)
         self.itemExpanded.connect(self._expanded)
         self.setItemDelegateForColumn(COL_NAME, RowDelegate(self))
         mono = MonoDelegate(self)
-        for c in (COL_VALUE, COL_ADDR, COL_MIN, COL_MAX, COL_MEAN):
+        for c in (COL_ADDR, COL_MIN, COL_MAX, COL_MEAN):
             self.setItemDelegateForColumn(c, mono)
+        values = ValueDelegate(self)
+        values.closeEditor.connect(self._editor_closed)
+        self.setItemDelegateForColumn(COL_VALUE, values)
         self.setMouseTracking(True)
         self.viewport().setAttribute(Qt.WA_Hover)
         DropTarget(self.viewport(), self.dropped, ignore=self)
@@ -347,7 +372,8 @@ class WatchTree(DragTree):
                     else f"[{r.type_name.rsplit('[', 1)[-1]}"
                 item.setText(COL_VALUE, text if not item.isExpanded() or not n else "")
             else:
-                item.setText(COL_VALUE, r.text)
+                if not self._is_editing(r.path):   # shown once the editor closes (M3)
+                    item.setText(COL_VALUE, r.text)
                 self._show_stats(item, self.stats.add(r.path, r.value))
                 if prev is not None and prev.text is not None and prev.text != r.text:
                     self._flash(r.path, item)
@@ -439,7 +465,8 @@ class WatchTree(DragTree):
                                                            else describe_error(e))
         for node in st.nodes.values():
             node.setForeground(COL_VALUE, GREY)
-        st.item.setText(COL_VALUE, text)
+        if not self._is_editing(st.watch.expr):
+            st.item.setText(COL_VALUE, text)
         st.item.setForeground(COL_VALUE, GREY if isinstance(e, (LinkDown, McuSilent)) else ERROR)
         st.item.setToolTip(COL_VALUE, describe_error(e))
         self.blockSignals(False)
@@ -458,8 +485,11 @@ class WatchTree(DragTree):
         st.gone = new is None
         st.force = True
         if st.gone:
-            st.item.setText(COL_VALUE, "gone")
+            self.blockSignals(True)
+            if not self._is_editing(expr):
+                st.item.setText(COL_VALUE, "gone")
             st.item.setForeground(COL_VALUE, GREY)
+            self.blockSignals(False)
         self._decorate(st)
 
     # --- writing -----------------------------------------------------------------------------
@@ -491,9 +521,15 @@ class WatchTree(DragTree):
         item.setText(COL_VALUE, self._edit_text(st, path, row))
         self.blockSignals(False)
         self.editItem(item, COL_VALUE)
+        if self.state() != QAbstractItemView.EditingState:   # no editor opened: nothing is being edited
+            self._editor_closed()
+
+    def _is_editing(self, path: str) -> bool:
+        return self._editing is not None and self._editing[1] == path
 
     def _edit_text(self, st: _ItemState, path: str, row: Shown) -> str:
-        unit = st.watch.display.unit if path == st.watch.expr else ""
+        # a struct's or array's fields show the item's unit too (L8)
+        unit = st.watch.display.unit
         text = row.text or ""
         if unit and text.endswith(" " + unit):
             text = text[: -len(unit) - 1]
@@ -503,17 +539,35 @@ class WatchTree(DragTree):
             text = name or head
         return text
 
-    def _item_changed(self, item: QTreeWidgetItem, column: int) -> None:
-        if self._editing is None or column != COL_VALUE:
+    def _commit(self, path: str | None, text: str, start: str | None) -> None:
+        """The user committed the value editor (Enter, or leaving it): write what they typed. An
+        editor left unchanged writes nothing, so opening one and clicking away doesn't write back
+        a value that may be a poll old (rani, 2026-10-18, code review)."""
+        if self._editing is None or path != self._editing[1]:
             return
-        expr, path = self._editing
-        if item.data(COL_NAME, PATH_ROLE) != path:
+        expr, _ = self._editing
+        text = text.strip()
+        if text == (start or "").strip():
+            self.main.status(f"{path}: unchanged, nothing written")
             return
-        self._editing = None
+        self.write(path, text, expr)
+
+    def _editor_closed(self, *_) -> None:
+        """The value editor closed, committed or not (Esc): stop editing and show the latest value."""
+        editing, self._editing = self._editing, None
+        if editing is None:
+            return
+        expr, path = editing
+        st = self.states.get(expr)
+        node = st.nodes.get(path) if st is not None else None
+        if node is None or not shiboken6.isValid(node):
+            return
         self.blockSignals(True)
-        item.setFlags(item.flags() & ~Qt.ItemIsEditable)
+        node.setFlags(node.flags() & ~Qt.ItemIsEditable)
+        row = st.shown.get(path)
+        if row is not None and row.text is not None:
+            node.setText(COL_VALUE, row.text)
         self.blockSignals(False)
-        self.write(path, item.text(COL_VALUE).strip(), expr)
 
     def write(self, path: str, text: str, owner: str | None = None) -> None:
         """Write ``text`` (in shown units) to ``path`` through the workspace's write safety."""
@@ -867,8 +921,8 @@ class WatchDialog(QDialog):
         self.format.setCurrentText(d.format)
         self.q = QLineEdit(d.q or "")
         self.q.setPlaceholderText("none, or Q15, Q31, Q3.12")
-        self.scale = QLineEdit(f"{d.k:g}")
-        self.offset = QLineEdit(f"{d.offset:g}")
+        self.scale = QLineEdit(_number(d.k))
+        self.offset = QLineEdit(_number(d.offset))
         self.unit = QLineEdit(d.unit)
         poll_row = QHBoxLayout()
         self.poll = QComboBox()
@@ -890,8 +944,8 @@ class WatchDialog(QDialog):
         self.read_only.addItems(READ_ONLY_CHOICES)
         self.read_only.setCurrentIndex({None: 0, True: 1, False: 2}[w.read_only])
         self.read_only.setToolTip("Workspace default follows Watch > All items read-only")
-        self.min = QLineEdit("" if w.min is None else f"{w.min:g}")
-        self.max = QLineEdit("" if w.max is None else f"{w.max:g}")
+        self.min = QLineEdit("" if w.min is None else _number(w.min))
+        self.max = QLineEdit("" if w.max is None else _number(w.max))
         for e in (self.min, self.max):
             e.setPlaceholderText("no limit")
         self.confirm = QCheckBox("Ask before writing")
@@ -925,8 +979,26 @@ class WatchDialog(QDialog):
         display = Display(self.format.currentText(), self.q.text().strip() or None, float(self.scale.text() or 1),
                           float(self.offset.text() or 0), self.unit.text().strip())
         return Watch(self.expr, display, poll, (None, True, False)[self.read_only.currentIndex()],
-                     float(self.min.text()) if self.min.text().strip() else None,
-                     float(self.max.text()) if self.max.text().strip() else None, self.confirm.isChecked())
+                     _limit(self.min.text(), "minimum"), _limit(self.max.text(), "maximum"), self.confirm.isChecked())
+
+
+def _number(v: float) -> str:
+    """A setting shown for editing: the shortest text that reads back as exactly the same number,
+    so OK without a change keeps it (L7); 1.0 shows as 1."""
+    text = repr(float(v))
+    return text[:-2] if text.endswith(".0") else text
+
+
+def _limit(text: str, what: str) -> float | None:
+    """A write limit typed in the dialog. nan or inf would quietly turn the limit off, as no value
+    compares below nan, so they are refused (H3)."""
+    text = text.strip()
+    if not text:
+        return None
+    v = float(text)
+    if not math.isfinite(v):
+        raise ValueError(f"the {what} must be a finite number, not {text!r}")
+    return v
 
 
 class SymbolBrowser(QWidget):

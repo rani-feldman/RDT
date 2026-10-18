@@ -52,6 +52,7 @@ class Trace:
         self._t = np.empty(capacity)
         self._v = np.empty(capacity)
         self._a = self._b = 0
+        self._good = -1   # index of the newest sample that is not a gap, so last() needn't scan (L10)
 
     def __len__(self) -> int:
         return self._b - self._a
@@ -62,9 +63,12 @@ class Trace:
             size = len(self._t) * 2 if n * 2 > len(self._t) else len(self._t)
             t_new, v_new = np.empty(size), np.empty(size)
             t_new[:n], v_new[:n] = self._t[self._a:self._b], self._v[self._a:self._b]
+            self._good -= self._a
             self._t, self._v, self._a, self._b = t_new, v_new, 0, n
         self._t[self._b] = t
         self._v[self._b] = v
+        if not math.isnan(v):
+            self._good = self._b
         self._b += 1
 
     def trim(self, before: float) -> None:
@@ -72,6 +76,7 @@ class Trace:
 
     def clear(self) -> None:
         self._a = self._b = 0
+        self._good = -1
 
     @property
     def t(self) -> np.ndarray:
@@ -86,10 +91,16 @@ class Trace:
         i = int(np.searchsorted(self.t, when, side="right")) - 1
         return float(self.v[i]) if i >= 0 else None
 
+    def window(self, t0: float, t1: float) -> tuple[np.ndarray, np.ndarray]:
+        """The samples from ``t0`` to ``t1``, with one more on each side so the line reaches the edges."""
+        t = self.t
+        i = max(int(np.searchsorted(t, t0)) - 1, 0)
+        j = min(int(np.searchsorted(t, t1, side="right")) + 1, len(t))
+        return t[i:j], self.v[i:j]
+
     def last(self) -> float | None:
-        v = self.v
-        good = v[~np.isnan(v)]
-        return float(good[-1]) if len(good) else None
+        """The newest value that is not a gap."""
+        return float(self._v[self._good]) if self._good >= self._a else None
 
 
 class TimeAxis(pg.AxisItem):
@@ -142,6 +153,7 @@ class ChartPanel(QWidget):
         self.paused = False
         self.window_s = DEFAULT_WINDOW_S
         self._dirty = False
+        self._drawn: tuple[float, float] | None = None   # the time span last given to the plot
         self._last_trim = 0.0
 
         layout = QVBoxLayout(self)
@@ -458,12 +470,17 @@ class ChartPanel(QWidget):
                 s.trace.trim(now - HISTORY_S)
         if not self.paused and self.series:
             self.views[0].setXRange(now - self.window_s, now, padding=0)
+        (x0, x1), _ = self.views[0].viewRange()
+        if (x0, x1) != self._drawn:
+            self._dirty = True   # followed, zoomed or panned: other samples are in view
         if not self._dirty:
             return
         self._dirty = False
+        self._drawn = (x0, x1)
+        # only the samples in view go to the plot, not the whole 10-minute history (L10)
         for s in self.series.values():
             if s.visible:
-                s.curve.setData(s.trace.t, s.trace.v)
+                s.curve.setData(*s.trace.window(x0, x1))
         self._update_values()
 
     def _update_values(self) -> None:

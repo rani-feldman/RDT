@@ -139,17 +139,85 @@ def test_write_inline_with_limits_and_confirm(qtbot, win, monkeypatch):
     wait_value(qtbot, win, "main:motor.current_ma", lambda v: v == "1.25 A")
 
 
+def open_editor(tree, node):
+    """Double-click a value: the tree opens its line editor on it."""
+    from PySide6.QtWidgets import QLineEdit
+    tree._double_clicked(node, COL_VALUE)
+    assert node.flags() & Qt.ItemIsEditable and tree._editing is not None
+    return tree.viewport().findChildren(QLineEdit)[-1]
+
+
 def test_inline_edit_writes(qtbot, win):
+    from PySide6.QtTest import QTest
     connect(qtbot, win)
     tree = win.watch_tree
     tree.add_watch("main:gains")
     wait_value(qtbot, win, "main:gains[1]", lambda v: True)
     tree.states["main:gains"].item.setExpanded(True)
-    node = tree.states["main:gains"].nodes["main:gains[1]"]
-    tree._double_clicked(node, COL_VALUE)
-    assert node.flags() & Qt.ItemIsEditable
-    node.setText(COL_VALUE, "-42")
-    wait_value(qtbot, win, "main:gains[1]", lambda v: v.startswith("-42"))
+    st = tree.states["main:gains"]
+    node = st.nodes["main:gains[1]"]
+    editor = open_editor(tree, node)
+    editor.setText("-42")
+    QTest.keyClick(editor, Qt.Key_Return)
+    qtbot.waitUntil(lambda: st.shown["main:gains[1]"].text.startswith("-42"), timeout=3000)
+    assert tree._editing is None and not node.flags() & Qt.ItemIsEditable
+
+
+def test_display_updates_while_editing_never_write(qtbot, win, monkeypatch):
+    """H2, M3: the highlight fading, a poll or an ELF remap changing the cell under an open editor
+    neither writes nor replaces what is being typed; only a commit writes, and Esc writes nothing."""
+    from PySide6.QtTest import QTest
+    connect(qtbot, win)
+    tree = win.watch_tree
+    path = "main:motor.speed"
+    wait_value(qtbot, win, path, lambda v: v.endswith("rpm"))
+    win.poll_timer.stop()
+    qtbot.waitUntil(lambda: not win.device.busy("poll"), timeout=3000)
+    st = tree.states[path]
+    writes = []
+    monkeypatch.setattr(tree, "write", lambda p, text, owner=None: writes.append((p, text)))
+    row = st.shown[path]
+    tree._fill(st, [dataclasses.replace(row, text="1.5 rpm")])
+    tree._fill(st, [dataclasses.replace(row, text="2.5 rpm")])   # changed: highlighted
+    assert path in tree.flashing
+    editor = open_editor(tree, st.item)
+    assert editor.text() == "2.5"   # the unit is not part of the value typed
+    editor.setText("777")
+    tree._fill(st, [dataclasses.replace(row, text="3.25 rpm")])   # a poll arrives
+    tree.fade(time.monotonic() + 5)                               # the highlight goes
+    tree.remapped(path, object(), "moved")
+    assert editor.text() == "777" and st.item.text(COL_VALUE) == "2.5"
+    assert writes == []
+    QTest.keyClick(editor, Qt.Key_Escape)
+    assert tree._editing is None and writes == []
+    assert st.item.text(COL_VALUE) == "3.25 rpm"   # the latest value, once the editor is gone
+    tree.remapped(path, None, "gone")
+    assert writes == []
+    st.gone = False
+    editor = open_editor(tree, st.item)
+    editor.setText("777")
+    QTest.keyClick(editor, Qt.Key_Return)   # Qt commits on the next turn of the event loop
+    qtbot.waitUntil(lambda: tree._editing is None, timeout=1000)
+    assert writes == [(path, "777")]
+    editor = open_editor(tree, st.item)   # opened and left unchanged: nothing written
+    QTest.keyClick(editor, Qt.Key_Return)
+    qtbot.waitUntil(lambda: tree._editing is None, timeout=1000)
+    assert writes == [(path, "777")] and "unchanged" in win.message.text()
+
+
+def test_struct_field_edit_drops_the_unit(qtbot, win):
+    """L8: a field of a struct shows the struct's unit; editing it starts from the bare number."""
+    from rdt.workspace import Watch
+    connect(qtbot, win)
+    tree = win.watch_tree
+    tree.add_watch("main:motor")
+    st = tree.states["main:motor"]
+    tree.replace_watch(st.watch, Watch.from_dict({"expr": "main:motor", "unit": "u"}))
+    tree.read_now("main:motor")
+    qtbot.waitUntil(lambda: (r := st.shown.get("main:motor.speed")) is not None and r.text.endswith(" u"),
+                    timeout=5000)
+    row = st.shown["main:motor.speed"]
+    assert tree._edit_text(st, "main:motor.speed", row) == row.text[:-2]
 
 
 def test_symbol_browser_adds_and_save_round_trips(qtbot, win, tmp_path):
@@ -1225,3 +1293,143 @@ def test_row_hover_buttons_and_mono_values(qtbot, win):
     vopt = QStyleOptionViewItem()
     value.initStyleOption(vopt, tree.model().index(0, 1))
     assert QFontInfo(vopt.font).fixedPitch()
+
+
+def test_watch_dialog_keeps_exact_numbers_and_refuses_nan_limits(qtbot, win):
+    """L7: OK without a change keeps scale, offset and limits exactly; H3: nan or inf is no limit."""
+    from rdt.scaling import Display
+    from rdt.workspace import Watch
+    w = Watch("main:motor.speed", Display(k=0.1234567891, offset=1e-7), min=-0.000123456789, max=3000.0001)
+    dlg = WatchDialog(w, win)
+    qtbot.addWidget(dlg)
+    out = dlg.result_watch()
+    assert (out.display.k, out.display.offset, out.min, out.max) == (0.1234567891, 1e-7, -0.000123456789, 3000.0001)
+    assert dlg.max.text() == "3000.0001"
+    other = WatchDialog(Watch("main:x", max=3000.0), win)
+    qtbot.addWidget(other)
+    assert other.max.text() == "3000"
+    for bad in ("nan", "inf", "-inf"):
+        dlg.min.setText(bad)
+        with pytest.raises(ValueError, match="finite"):
+            dlg.result_watch()
+    dlg.min.setText("")
+    dlg.max.setText("NaN")
+    with pytest.raises(ValueError, match="maximum"):
+        dlg.result_watch()
+
+
+def test_memory_refresh_leaves_the_cell_being_edited(qtbot, win):
+    """M4: a refresh while a memory cell is being edited changes neither the editor nor the cell."""
+    from PySide6.QtTest import QTest
+    from PySide6.QtWidgets import QLineEdit
+    connect(qtbot, win)
+    mem = win.memory
+    mem.mcu.setCurrentText("main")
+    mem.address.setText("gains")
+    mem.length.setValue(16)
+    mem.read()
+    qtbot.waitUntil(lambda: mem.base == 0x20000014, timeout=3000)
+    item = mem.table.item(0, 4)
+    before = item.text()
+    mem.table.editItem(item)
+    editor = mem.table.viewport().findChildren(QLineEdit)[-1]
+    editor.setText("7F")
+    other = bytes([(mem.data[0] + 1) & 0xFF]) + mem.data[1:]
+    mem._show(("main", mem.base, other, mem.order))   # Refresh read something new
+    assert editor.text() == "7F" and item.text() == before
+    QTest.keyClick(editor, Qt.Key_Escape)
+    assert mem.table.item(0, 4).text() == f"{other[0]:02X}"
+
+
+def test_memory_writes_keep_read_only_and_confirm_items(qtbot, win, monkeypatch):
+    """M12: a memory-view write over a read-only watched item is refused, and one over an item that
+    asks before writing asks too."""
+    connect(qtbot, win)
+    mem = win.memory
+    mem.mcu.setCurrentText("main")
+    writes = []
+    target = win.device.target
+    real = target.write
+    monkeypatch.setattr(target, "write", lambda *a: (writes.append(a), real(*a))[1])
+    mem.address.setText("motor.mode")             # read-only in the workspace
+    mem.length.setValue(4)
+    mem.read()
+    qtbot.waitUntil(lambda: mem.message.text().startswith("main: 4 bytes"), timeout=3000)
+    first = mem.base
+    cell = mem.table.item(0, first % 16)
+    cell.setText(f"{(int(cell.text(), 16) + 1) & 0xFF:02X}")   # a new value, so the cell changes
+    qtbot.waitUntil(lambda: "not written" in win.banner.error, timeout=3000)
+    assert "main:motor.mode" in win.banner.error and writes == []
+    mem.address.setText("motor.target")           # asks before writing
+    mem.read()
+    qtbot.waitUntil(lambda: mem.base != first, timeout=3000)
+    col = mem.base % 16
+    row = (mem.base - mem._row_start()) // 16
+    asked = []
+    monkeypatch.setattr(QMessageBox, "question", lambda *a, **k: asked.append(a[2]) or QMessageBox.No)
+    cell = mem.table.item(row, col)
+    old = int(cell.text(), 16)
+    cell.setText(f"{(old + 1) & 0xFF:02X}")
+    qtbot.waitUntil(lambda: "cancelled" in win.message.text(), timeout=3000)
+    assert writes == [] and "main:motor.target" in asked[0]
+    qtbot.waitUntil(lambda: mem.table.item(row, col).text() == f"{old:02X}", timeout=3000)   # read again
+    monkeypatch.setattr(QMessageBox, "question", lambda *a, **k: QMessageBox.Yes)
+    mem.table.item(row, col).setText(f"{(old + 1) & 0xFF:02X}")
+    qtbot.waitUntil(lambda: len(writes) == 1, timeout=3000)
+
+
+def test_profile_test_read_is_checked_like_any_read(qtbot, win, monkeypatch):
+    """L9: the Test read is refused outside the sections and ranges, and on an ELF mismatch."""
+    from rdt.target import Identity
+    connect(qtbot, win)
+    dlg = ProfileDialog(win.ws.config.profile, win.device, win)
+    qtbot.addWidget(dlg)
+    sent = []
+    target = win.device.target
+    real = target.command
+    monkeypatch.setattr(target, "command", lambda text, *a, **k: (sent.append(text), real(text, *a, **k))[1])
+    dlg.test_addr.setText("0x30000000")           # in no section and no listed range
+    dlg.test_len.setValue(4)
+    dlg.test()
+    qtbot.waitUntil(lambda: "⚠" in dlg.test_result.text(), timeout=3000)
+    assert "MCU main" in dlg.test_result.text() and sent == []
+    dlg.test_mcu.setValue(7)
+    dlg.test_addr.setText("0x20000010")
+    dlg.test()
+    qtbot.waitUntil(lambda: "no MCU with id 7" in dlg.test_result.text(), timeout=3000)
+    dlg.test_mcu.setValue(0)
+    m = target.mcus["main"]
+    monkeypatch.setattr(m, "identity", Identity("main", "mismatch", "flash differs"))
+    monkeypatch.setattr(m, "identity_stale", False)
+    dlg.test()
+    qtbot.waitUntil(lambda: "does not match" in dlg.test_result.text(), timeout=3000)
+    assert sent == []
+
+
+def test_chart_draws_only_the_window_and_keeps_the_last_value(qtbot):
+    """L10: a redraw gives the plot only the samples in view, and the last value needs no scan."""
+    from rdt.gui.chart import ChartPanel, Trace
+    tr = Trace(4)
+    assert tr.last() is None
+    for i in range(10):
+        tr.add(float(i), float(i * 10))
+    tr.add(10.0, float("nan"))
+    assert tr.last() == 90.0
+    t, v = tr.window(3.5, 6.0)
+    assert list(t) == [3.0, 4.0, 5.0, 6.0, 7.0]
+    tr.trim(10.0)
+    assert tr.last() is None
+    tr.clear()
+    assert tr.last() is None and len(tr) == 0
+    chart = ChartPanel()
+    qtbot.addWidget(chart)
+    chart.timer.stop()
+    chart.add("main:x", "")
+    s = chart.series["main:x"]
+    now = time.time()
+    for i in range(600):                      # a minute of history at 10 a second
+        s.trace.add(now - 60 + i * 0.1, float(i))
+    chart._dirty = True
+    chart.redraw()
+    assert len(s.curve.xData) < 120 and s.curve.xData[-1] >= now - 1   # the 10 s window, not all 600
+    assert s.item.text(2) == "599"
