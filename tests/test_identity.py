@@ -8,7 +8,7 @@ from pathlib import Path
 import pytest
 from host_helpers import FIRMWARE, Relay, make_target
 
-from rdt import ImageMismatch, McuConfig, WriteRefused
+from rdt import ImageMismatch, LinkState, McuConfig, WriteRefused
 from rdt.cli import main
 from rdt.memmap import build_id_note, elf_bytes, flash_samples
 from sim import Simulator, TransportConfig, load_config
@@ -81,6 +81,34 @@ def test_mismatch_refuses_writes_until_allowed(sim, tmp_path):
         t.write_value("main:gains[0]", 5)
         t.reconnect()                                    # checked again, and blocked again
         assert t.mcus["main"].identity.status == "mismatch" and not t.mcus["main"].allow_mismatch
+
+
+def test_allowed_mismatch_lasts_through_the_automatic_check_again(sim, tmp_path):
+    """M1: --allow-mismatch must survive the check made after the link comes back or after
+    three missed replies; only a check the user asks for (connect, reconnect) resets it."""
+    with make_target("tcp", sim.tcp_address, mcus=mcus(other_build(tmp_path))) as t:
+        t.allow_mismatch("main")
+        t.session._set_state(LinkState.NO_REPLY, "test")   # as after 3 reads with no reply
+        t.session._set_state(LinkState.UP)
+        assert t.mcus["main"].identity_stale
+        assert t.read_value("main:gains[0]") == 10           # checked again, still allowed
+        m = t.mcus["main"]
+        assert not m.identity_stale and m.identity.status == "mismatch" and m.allow_mismatch
+        t.write_value("main:gains[0]", 5)
+
+
+def test_a_reloaded_elf_is_checked_before_the_next_access(sim, tmp_path):
+    """M11: after Mcu.reload the next read or write checks the new ELF first, even when it is
+    queued before the GUI's own check."""
+    elf = tmp_path / "main.elf"
+    shutil.copy(FIRMWARE / "main.elf", elf)
+    with make_target("tcp", sim.tcp_address, mcus=mcus(elf)) as t:
+        assert t.mcus["main"].identity.status == "match"
+        elf.write_bytes(elf.read_bytes().replace(b"rdt-main\0", b"rdt-mXin\0"))   # rebuilt
+        assert t.mcus["main"].reload()
+        assert t.mcus["main"].identity_stale
+        with pytest.raises(WriteRefused, match="does not match"):
+            t.write_value("main:gains[0]", 5)
 
 
 def test_build_id_in_flash_on_the_h7(tmp_path):
