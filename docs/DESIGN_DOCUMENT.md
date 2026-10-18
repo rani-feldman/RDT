@@ -65,6 +65,7 @@ Each requirement links to its design section.
 | LNK-7 | Connected means the COM port or socket opened; RDT sends nothing to the device on connect or reconnect (no `*IDN?`) and sends no probe; when the link shows as down is LNK-9 (2026-10-14) | Done | [D-LNK-7](#d-lnk-7-connect-without-a-probe) |
 | LNK-8 | The GUI lists each COM port with its description, such as `COM3 - GAC serial port (COM3)` (2026-10-13) | Done | [D-LNK-1](#d-lnk-1-com-port) |
 | LNK-9 | The link shows as down (red `Link down · COM3`) when the port or socket breaks, noticed within a second even with polling off, or when the device answers none of 3 reads in a row from any MCU while the port stays open ("no reply"). While the link is down the MCU cards show `link down` (GUI-14) and writes are refused, and the ELFs are checked again when it comes back (2026-10-14; the default chosen in the thread "Status box on lost connection", not yet confirmed by rani) | Done | [D-LNK-9](#d-lnk-9-noticing-a-lost-link) |
+| LNK-10 | The COM port list in the toolbar is rescanned each time it opens, so unplugged ports disappear and newly plugged ports appear; the port already picked or typed stays shown (rani, 2026-10-18) | Done | [D-LNK-10](#d-lnk-10-com-port-list-rescanned-on-open) |
 
 ### 2.3 SCPI commands
 
@@ -282,12 +283,13 @@ Agreed with rani on 2026-10-17 (thread "Installer and releases plan", milestone 
 | INS-6 | A portable zip with each release; the simulator (`rdt-sim`, the example firmware and workspace) is in both (2026-10-17) | Done (PR #131) | [D-INS-6](#d-ins-6-portable-zip-and-simulator) |
 | INS-7 | Version from the git tag, shown in Help > About, `rdt --version` and the exe properties; first release 1.0.0; semantic versioning (2026-10-17) | Done (PR #131) | [D-INS-7](#d-ins-7-versions) |
 | INS-8 | A GitHub Release per `v*` tag, built by Actions as a draft (setup, zip, SHA256SUMS, changelog notes); rani publishes after a smoke test; the same build script runs locally (2026-10-17) | Done (PR #131) | [D-INS-8](#d-ins-8-release-build) |
-| INS-9 | On start, RDT checks the repository's latest Release and shows when a newer version is available (needs the repository public) (2026-10-17) | Done (PR #131) | [D-INS-9](#d-ins-9-update-check) |
+| INS-9 | On start, RDT checks the repository's latest Release and shows when a newer version is available (needs the repository public), without GitHub's API and its limit of 60 requests an hour per IP address (2026-10-17, updated 2026-10-18) | In review (PR #136) | [D-INS-9](#d-ins-9-update-check) |
 | INS-10 | A code signing step in the build, off until a certificate is configured (2026-10-17) | Done (PR #131) | [D-INS-10](#d-ins-10-code-signing) |
 | INS-11 | Settings files carry `format = N`; a newer RDT migrates them after a `.bak` copy; crash log in `%LOCALAPPDATA%\rdt\logs` (2026-10-17) | Done (PR #131) | [D-INS-11](#d-ins-11-settings-formats-and-crash-log) |
 | INS-12 | MIT licence and third-party notices; the user manual is bundled and opened from Help (2026-10-17) | Done (PR #130) | [D-INS-12](#d-ins-12-licence-and-bundled-manual) |
 | INS-13 | Release notes from `CHANGELOG.md`: only New features and Bug fixes, one line per feature or bug-fix PR, small changes left out; copied into each GitHub Release; bundled and shown from Help > Release notes (2026-10-17) | Done (PR #131) | [D-INS-13](#d-ins-13-release-notes) |
-| INS-14 | A release starts from the **Run workflow** button (Actions > Release, type the version): it renames `## Unreleased` in CHANGELOG.md to the version and date, commits that to main and builds the draft Release in the same run, with no tag yet: the tag `vX.Y.Z` is created only when rani publishes the draft, so a discarded draft leaves no tag; pushing a `v*` tag by hand still works (2026-10-17, updated 2026-10-17) | In review (PR #133) | [D-INS-14](#d-ins-14-run-workflow-button) |
+| INS-14 | A release starts from the **Run workflow** button (Actions > Release, type the version): it renames `## Unreleased` in CHANGELOG.md to the version and date, commits that to main and builds the draft Release in the same run, with no tag yet: the tag `vX.Y.Z` is created only when rani publishes the draft, so a discarded draft leaves no tag; pushing a `v*` tag by hand still works (2026-10-17, updated 2026-10-17) | Done | [D-INS-14](#d-ins-14-run-workflow-button) |
+| INS-15 | When a newer version is found, an **Update available** window shows what changed in it (the release notes of the versions newer than the running one) with a Download button; it opens by itself once per new version and again from the status-bar link or Help > Check for updates (rani, 2026-10-18) | In review (PR #136) | [D-INS-15](#d-ins-15-update-available-window) |
 
 Requirements on the firmware itself (FW-1 to FW-10) are in [section 5](#5-firmware-specification).
 
@@ -386,7 +388,7 @@ port      = "COM5"
 baud      = 115200
 ```
 
-On the CLI: `--serial COM5 --baud 115200`. In the GUI the connection bar lists the COM ports and offers common baud rates. Each port shows with its description from pyserial, such as `COM3 - GAC serial port (COM3)` (LNK-8, rani, 2026-10-13); only the port name is saved and used to connect, and a port typed by hand still works (`serial_ports`, `port_label` and `port_name` in `rdt/gui/app.py`). A COM port can be opened by one program only, so it is never shared (D-LNK-6).
+On the CLI: `--serial COM5 --baud 115200`. In the GUI the connection bar lists the COM ports and offers common baud rates. Each port shows with its description from pyserial, such as `COM3 - GAC serial port (COM3)` (LNK-8, rani, 2026-10-13); only the port name is saved and used to connect, and a port typed by hand still works (`serial_ports`, `port_label` and `port_name` in `rdt/gui/app.py`). The list is rescanned each time it opens (D-LNK-10). A COM port can be opened by one program only, so it is never shared (D-LNK-6).
 
 #### D-LNK-2 TCP
 
@@ -438,6 +440,10 @@ rani reported on 2026-10-14 that the status box stayed green `Connected · COM3`
 - **ELF check:** `Target._link_event` marks every identity stale on down and on no reply, so the GUI runs the image check again when the link comes back up (D-SYM-8).
 - **Known limits:** with its port open and polling off, a hung board is noticed only at the next read (Poll now, F6), because RDT sends no probe. Three bad-address reads in a row also count as no reply, because the firmware does not reply on errors (D-SCPI-5).
 - **Simulator:** `Device.frozen` and `SIMulation:FREEze <seconds>` make the simulated board stop answering with the port open ([SIMULATOR.md](SIMULATOR.md)).
+
+#### D-LNK-10 COM port list rescanned on open
+
+The COM box in the connection bar is `PortBox` in `rdt/gui/app.py`, a `QComboBox` that calls `refresh()` in `showPopup()`: each time the list opens it asks `serial_ports()` for the ports present now and refills the list, so a port that was unplugged disappears and a newly plugged one appears without restarting RDT (rani, 2026-10-18). The port already shown, picked from the list or typed by hand, stays shown even when it is not listed any more. The same `refresh()` fills the list the first time the transport is set to COM port.
 
 ### 4.3 SCPI commands
 
@@ -1418,7 +1424,7 @@ Pushing a `v*` tag, or the **Run workflow** button (D-INS-14), runs `.github/wor
 
 #### D-INS-9 Update check
 
-`rdt/updates.py` makes one HTTPS GET to `api.github.com/repos/rani-feldman/RDT/releases/latest`, with no sign-in, at most once a day, on start. When the tag is newer than the running version the GUI shows "RDT X.Y.Z is available" with a link to the Release. **Help > Check for updates** checks at once, and **Help > Check for updates at start** turns the start-up check off (saved in `ui.toml`); any failure stays silent. It needs the repository to be public.
+`rdt/updates.py` sends one HTTPS `HEAD` to the web page `github.com/rani-feldman/RDT/releases/latest`, with no sign-in, at most once a day, on start. GitHub answers it with a redirect to `/releases/tag/vX.Y.Z`; RDT reads the version from the `Location` header without following the redirect (`release_from_location`). It does not call `api.github.com`, whose limit of 60 requests an hour per IP address many PCs behind one office address could reach (rani, 2026-10-18). Drafts and pre-releases are never "latest". When the version is newer than the running one, the status bar shows "RDT X.Y.Z is available", which opens the Update available window (D-INS-15). **Help > Check for updates** checks at once, and **Help > Check for updates at start** turns the start-up check off (saved in `ui.toml`); any failure stays silent. It needs the repository to be public.
 
 #### D-INS-10 Code signing
 
@@ -1439,6 +1445,10 @@ The repository gets an MIT `LICENSE`, and the app ships a third-party notices fi
 #### D-INS-14 Run workflow button
 
 `.github/workflows/release.yml` also has a `workflow_dispatch` trigger with one input, the version (`X.Y.Z`). Pressing **Run workflow** under Actions > Release and typing it renames `## Unreleased` in `CHANGELOG.md` to `## X.Y.Z (date)` with an empty `## Unreleased` above it, sets the version, commits that to main, and then runs the same build as a pushed tag (D-INS-8), ending in the draft Release. It pushes no tag: the draft is created with `gh release create --draft --target <commit>`, and GitHub creates the tag `vX.Y.Z` on that commit when rani presses **Publish**. A draft found to be bad is deleted and leaves no tag in git; the next attempt uses the next patch version (rani, 2026-10-17, PR #133; `docs/RELEASING.md`). A `v*` tag pushed by hand still starts the build without the CHANGELOG step.
+
+#### D-INS-15 Update available window
+
+When the check finds a newer version, `fetch_latest` also reads that tag's `CHANGELOG.md` from `raw.githubusercontent.com` (not the API either), and `changes_since` keeps the `## X.Y.Z (date)` sections newer than the running version, newest first, leaving out empty headings and Unreleased. `UpdateDialog` in `rdt/gui/help.py` shows them as "RDT X.Y.Z is available (you have A.B.C)" and "What changed", with **Download** (opens the release page) and **Close**. It opens by itself once per new version (the version is saved as `updates/notified` in `ui.toml`) and again whenever the status-bar link or **Help > Check for updates** is used. When the notes cannot be read, it points to the release page instead (rani, 2026-10-18).
 
 ## 5. Firmware specification
 
@@ -1590,6 +1600,8 @@ The application is built against the simulator. With the firmware's read and wri
 | 2026-10-17 | Installer and releases planned (INS-1 to INS-14, M6): per-user setup exe and portable zip, silent uninstall of the old version keeping the settings, PATH and `.rdtw` options, versions from the git tag starting at 1.0.0, draft GitHub Releases built by Actions, release notes with only new features and bug fixes, an update check, MIT licence. rani answered the twelve plan questions; the repository goes public first |
 | 2026-10-17 | Installer and releases built (M6, INS-1 to INS-14, PR #131; MIT licence PR #130). The GUI exe is `rdt-gui.exe`, since `RDT.exe` would clash with `rdt.exe` on Windows. The version lives in `rdt/_version.py`, set by the release |
 | 2026-10-17 | The release tag is created only when rani publishes the draft, not by Run workflow, so a draft found to be bad leaves no wrong tag in git; the next attempt takes the next patch version (INS-14, PR #133) |
+| 2026-10-18 | The COM port list is rescanned each time it opens (LNK-10, PR #134); rani reported that unplugging one port and plugging another left the list stale |
+| 2026-10-18 | The update check reads the latest version from the redirect of the releases web page instead of GitHub's API, to stay clear of its hourly limit, and a newer version opens an Update available window with what changed (INS-9, INS-15, PR #136). rani asked for both |
 
 ## 9. Appendix: binary protocol (planned)
 
