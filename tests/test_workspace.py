@@ -10,7 +10,7 @@ import pytest
 from rdt import ConfigError, Profile, Range, WriteRefused
 from rdt.cli import main
 from rdt.scaling import Display
-from rdt.target import ConnectionConfig, McuConfig, TargetConfig
+from rdt.target import ConnectionConfig, Identity, McuConfig, Target, TargetConfig
 from rdt.tomlw import Hex, dumps
 from rdt.workspace import Tab, Watch, Workspace, canonical
 from sim import Simulator, TransportConfig, load_config
@@ -320,6 +320,24 @@ def test_write_safety(target):
     assert target.read_value("main:motor.target") == 3000.0   # untouched
 
 
+def test_limits_refuse_nan_and_infinity(target):
+    """H3: NaN compares false with everything, so it slipped past min and max; infinity is past
+    any limit too."""
+    ws = Workspace(tabs=one_tab(Watch("main:motor.target", min=0, max=3000),
+                                Watch("main:gains[1]", Display(k=0.5), min=-10)))
+    for text in ("nan", "-nan", "inf", "-inf", "infinity"):
+        with pytest.raises(WriteRefused, match="is not a finite number"):
+            ws.write(target, "main:motor.target", text)
+        with pytest.raises(WriteRefused, match="is not a finite number"):
+            ws.write(target, "main:gains[1]", text)   # scaled, so checked in shown units
+    assert target.read_value("main:motor.target") == 3000.0   # untouched
+    ws.write(target, "main:motor.target", "2500")
+    assert target.read_value("main:motor.target") == 2500.0
+    plain = Workspace(tabs=one_tab(Watch("main:gains[1]", Display(k=0.5))))   # no limits, integer
+    with pytest.raises(ConfigError, match="nan has no raw value"):
+        plain.write(target, "main:gains[1]", "nan")
+
+
 # --- the CLI ---------------------------------------------------------------------------------
 
 def rdt(sim, ws_path, *argv):
@@ -364,6 +382,30 @@ def test_cli_builds_a_workspace_without_a_device(tmp_path, capsys):
     assert [(t.name, [w.expr for w in t.watches]) for t in ws.tabs] == [
         ("Watch", ["main:motor.target"]), ("Motor", ["main:motor.speed", "main:tick_count"])]
     assert ws.watch("main:tick_count").display.format == "dec"
+
+
+def test_cli_bad_numbers_and_a_blank_send_are_errors(sim, tmp_path, capsys):
+    """L14: an rdt: message and exit code 1, not a traceback; a blank command is never sent."""
+    path = Workspace.load(EXAMPLE_TARGET).save(tmp_path / "bench.rdtw")
+    for argv, message in ((["dump", "main:gains", "xyz"], "'xyz' is not a number"),
+                          (["add", "main:tick_count", "--poll", "fast"], "--poll: 'fast' is not a number"),
+                          (["send", " "], "send needs a command"),
+                          (["send", "", "--expect", "x"], "send needs a command")):
+        assert rdt(sim, path, *argv)[0] == 1, argv
+        assert "rdt: " in (err := capsys.readouterr().err) and message in err, (argv, err)
+    assert Workspace.load(path).watch("main:tick_count") is None
+
+
+def test_cli_watch_keeps_allow_mismatch_after_an_elf_rebuild(sim, tmp_path, monkeypatch):
+    """rdt watch --allow-mismatch: the identity check after an ELF rebuild clears the allow flag,
+    so it is set again there, as at startup; otherwise every read after the rebuild is refused."""
+    path = Workspace.load(EXAMPLE_TARGET).save(tmp_path / "bench.rdtw")
+    rebuilt = iter([["main"]])
+    monkeypatch.setattr(Target, "refresh_elfs", lambda self: next(rebuilt, []))
+    monkeypatch.setattr(Target, "_identity", lambda self, m: Identity(m.name, "mismatch", "flash differs"))
+    code, out = rdt(sim, path, "--allow-mismatch", "watch", "main:tick_count", "-i", "100", "-n", "16")
+    assert code == 0 and "# MCU main: flash differs" in out    # the check after the rebuild ran
+    assert "ImageMismatch" not in out and out.count("0x12345678") + out.count("305419896") == 16
 
 
 def test_cli_reads_and_writes_the_watch_list(sim, tmp_path, capsys):

@@ -92,10 +92,12 @@ class UiSettings:
         if key not in KNOWN:
             raise KeyError(f"no interface setting {key!r}")
         value = KNOWN[key](value)
-        if self.values.get(key) == value:
-            return
+        # Read the file before comparing: another window may have changed this key since this
+        # one last saw it, and setting it back must still be saved (L15, rani, 2026-10-18, code review).
         if self.path.is_file():
             self.values = UiSettings.load(self.path).values
+        if self.values.get(key) == value:
+            return
         self.values[key] = value
         self.save()
 

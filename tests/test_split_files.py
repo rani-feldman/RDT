@@ -8,11 +8,11 @@ from pathlib import Path
 import pytest
 
 from rdt import ConfigError
-from rdt.cli import main
+from rdt.cli import build_parser, load_config, main
 from rdt.console import SavedCommand
 from rdt.profile import Range
 from rdt.scaling import Display
-from rdt.target import McuConfig, TargetConfig
+from rdt.target import McuConfig, Target, TargetConfig
 from rdt.ui_settings import UiSettings, ui_path
 from rdt.workspace import Tab, Watch, Workspace
 
@@ -244,6 +244,17 @@ def test_ui_settings_file(tmp_path):
     assert UiSettings.load().values == {}           # a broken file: the defaults
 
 
+def test_ui_setting_set_back_after_another_window_changed_it(tmp_path):
+    """L15: setting a key back to the value this window last saw is still saved when another
+    window changed it in between."""
+    ui = UiSettings.load()
+    ui.set_value("console/font_size", 12)
+    other = UiSettings.load()                       # a second window
+    other.set_value("console/font_size", 14)
+    ui.set_value("console/font_size", 12)           # this window still holds 12
+    assert UiSettings.load().value("console/font_size") == 12
+
+
 # --- CLI ------------------------------------------------------------------------------------
 
 def run(*argv):
@@ -341,6 +352,86 @@ def test_load_memory_map_refuses_overlap(tmp_path):
     with pytest.raises(ConfigError):
         ws.import_memory(tmp_path / "bad.toml")
     assert ws.memory_ranges() == []
+
+
+FIRMWARE = ROOT / "sim" / "examples" / "firmware"
+OVER_DATA = '[[ranges]]\nname = "BAD"\nstart = 0x20000000\nsize = 0x100\n'   # a peripheral on .data
+GPIOA = '[[ranges]]\nname = "GPIOA"\nstart = 0x40020000\nsize = 0x400\n'
+
+
+def test_load_memory_map_refuses_a_peripheral_over_an_elf_section(tmp_path):
+    """H5: the ranges are checked against each MCU's ELF sections, as loading checks them."""
+    (tmp_path / "bad.toml").write_text(OVER_DATA.replace('"BAD"', '"BAD"\nmcu = "main"'))
+    ws = Workspace(TargetConfig(mcus=[McuConfig(0, "main", FIRMWARE / "main.elf"),
+                                      McuConfig(1, "motorctl", FIRMWARE / "motorctl.elf")]))
+    with pytest.raises(ConfigError, match="bad.toml: peripheral range BAD overlaps .data"):
+        ws.import_memory(tmp_path / "bad.toml")
+    assert ws.memory_ranges() == []
+    # 0x20000090 is in main's .bss but past motorctl's .data: refused only for main
+    gap = '[[ranges]]\nname = "GAP"\nstart = 0x20000090\nsize = 0x10\nmcu = "{}"\n'
+    (tmp_path / "gap.toml").write_text(gap.format("main"))
+    with pytest.raises(ConfigError, match="GAP overlaps .bss"):
+        ws.import_memory(tmp_path / "gap.toml")
+    (tmp_path / "gap.toml").write_text(gap.format("motorctl"))
+    assert ws.import_memory(tmp_path / "gap.toml") == (1, 0)
+    (tmp_path / "ok.toml").write_text(GPIOA)
+    assert ws.import_memory(tmp_path / "ok.toml") == (1, 0)
+    Target(ws.config)   # loads
+
+
+def test_cli_memory_import_refuses_before_saving_and_fixes_a_broken_workspace(tmp_path, capsys):
+    """H5: rdt memory import refuses a bad map without saving it, and --replace mends a workspace
+    already broken that way, which no longer loads as a target."""
+    ws = Workspace(TargetConfig(mcus=[McuConfig(0, "main", FIRMWARE / "main.elf")]))
+    path = ws.save(tmp_path / "w.rdtw")
+    (tmp_path / "bad.toml").write_text(OVER_DATA)
+    (tmp_path / "ok.toml").write_text(GPIOA)
+    assert run("-w", str(path), "memory", "import", str(tmp_path / "bad.toml"))[0] == 1
+    assert "overlaps .data" in capsys.readouterr().err
+    assert not (tmp_path / "w.memory.toml").exists()
+
+    (tmp_path / "w.memory.toml").write_text(OVER_DATA)   # broken by hand, or by an older RDT
+    path.write_text('memory_file = "w.memory.toml"\n' + path.read_text())
+    with pytest.raises(ConfigError, match="overlaps .data"):
+        Target(Workspace.load(path).config)
+    assert run("-w", str(path), "list")[0] == 0           # offline commands still open it
+    assert run("-w", str(path), "memory", "import", "--replace", str(tmp_path / "ok.toml"))[0] == 0
+    assert [r.name for r in Workspace.load(path).memory_ranges()] == ["GPIOA"]
+    Target(Workspace.load(path).config)
+
+
+def test_cli_overrides_are_for_this_run_only(tmp_path):
+    """H6: --profile, --timeout, --mcu and the link options change only this run; a command that
+    saves the workspace writes back what its files had. M8: --profile keeps the memory ranges."""
+    ws = Workspace(TargetConfig(mcus=[McuConfig(0, "main", FIRMWARE / "main.elf", timeout_ms=800),
+                                      McuConfig(1, "motorctl", FIRMWARE / "motorctl.elf", timeout_ms=900)]),
+                   [Tab("Motor")])
+    ws.config.profile.ranges = [Range("GPIOA", 0x48000000, 0x400)]
+    path = ws.save(tmp_path / "w.rdtw")
+    other = tmp_path / "other.toml"
+    other.write_text("[scpi]\ntimeout_ms = 123\n")
+    files = ("w.rdtw", "w.profile.toml", "w.memory.toml")
+    before = {f: (tmp_path / f).read_text() for f in files}
+    overrides = ["--profile", str(other), "--timeout", "50", "--mcu", f"main=0:{FIRMWARE / 'main.elf'}",
+                 "--udp", "10.0.0.9:5025"]
+    assert main(["-w", str(path), *overrides, "add", "main:motor.speed", "--unit", "rpm"], io.StringIO()) == 0
+    assert main(["-w", str(path), *overrides, "tab", "add", "Spare"], io.StringIO()) == 0
+    assert {f: (tmp_path / f).read_text() for f in files} == before
+    back = Workspace.load(path)
+    assert [(m.name, m.timeout_ms) for m in back.config.mcus] == [("main", 800), ("motorctl", 900)]
+    assert back.watch("main:motor.speed").display.unit == "rpm" and back.has_tab("Spare")
+
+    cfg = load_config(build_parser().parse_args(["-w", str(path), "--profile", str(other), "info"]))
+    assert cfg.profile.timeout_ms == 123 and [r.name for r in cfg.profile.ranges] == ["GPIOA"]
+    Target(cfg).mcus["main"].memory.check(0x48000000, 4)   # still known memory (M8)
+    assert [r.name for r in Workspace.load(path).config.profile.ranges] == ["GPIOA"]
+
+    # rdt init is the one command that saves them: they are the new workspace's target
+    assert main(["-w", str(path), "--mcu", f"main=0:{FIRMWARE / 'main.elf'}", "--udp", "10.0.0.9:5025",
+                 "init", str(tmp_path / "new.rdtw")], io.StringIO()) == 0
+    new = Workspace.load(tmp_path / "new.rdtw")
+    assert [m.name for m in new.config.mcus] == ["main"] and new.config.connection.address == "10.0.0.9:5025"
+    assert [r.name for r in new.memory_ranges()] == ["GPIOA"]
 
 
 def test_memory_map_from_a_workspace_and_the_cli(tmp_path):

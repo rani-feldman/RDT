@@ -37,6 +37,7 @@ watch list and commands files) are saved relative to the workspace.
 from __future__ import annotations
 
 import csv
+import math
 import os
 import tomllib
 from dataclasses import dataclass, field, fields
@@ -47,7 +48,7 @@ from typing import Callable
 from . import scheduler, tomlw
 from .console import SavedCommand, merge_commands, read_commands, write_commands
 from .errors import ConfigError, RdtError, SymbolError, WriteRefused
-from .memmap import MemoryMap
+from .memmap import MemoryMap, load_elf_sections
 from .profile import Profile, Range, load_memory_file
 from .scaling import Display
 from .symbols import Location, parse
@@ -365,8 +366,12 @@ class Workspace:
                 added += 1
         for m in cfg.mcus:
             shared = [r for r in merged if r.mcu in (None, "", m.name, m.id)]
+            # Check against the ELF's sections as loading the target does, so a peripheral range
+            # over .data is refused here and not saved into a workspace that then won't load (H5).
+            # An ELF that isn't built yet is checked when the target loads it.
+            sections = load_elf_sections(m.elf).sections if m.elf is not None and Path(m.elf).is_file() else []
             try:
-                MemoryMap([], shared)
+                MemoryMap(sections, shared)
             except RdtError as e:
                 raise ConfigError(f"{Path(path).name}: {e}") from None
         cfg.profile.ranges = merged
@@ -637,7 +642,6 @@ class Workspace:
                 shown = float(text)
             except ValueError:
                 raise ConfigError(f"{name}: {text!r} is not a number") from None
-            raw = guard.display.to_raw(shown, is_float)
             check = shown
         else:
             raw = t.parse_value(loc, text)
@@ -645,10 +649,19 @@ class Workspace:
         if guard.min is not None or guard.max is not None:
             if isinstance(check, (bytes, str)) or check is None:
                 raise WriteRefused(f"{name}: limits need a number")
+            # NaN compares false with every limit, so it would pass both checks; infinity is
+            # outside any limit as well (H3, rani, 2026-10-18, code review).
+            if isinstance(check, float) and not math.isfinite(check):
+                raise WriteRefused(f"{name}: {text} is not a finite number, and the item has limits")
             if guard.min is not None and check < guard.min:
                 raise WriteRefused(f"{name}: {text} is below its minimum {guard.min:g}")
             if guard.max is not None and check > guard.max:
                 raise WriteRefused(f"{name}: {text} is above its maximum {guard.max:g}")
+        if guard.display.scaled:   # after the limits, so NaN is refused as out of limits first
+            try:
+                raw = guard.display.to_raw(check, is_float)
+            except ValueError as e:
+                raise ConfigError(f"{name}: {e}") from None
         if guard.confirm or (parent and parent.confirm):
             question = f"Write {text}{' ' + guard.display.unit if guard.display.unit else ''} to {name}?"
             if confirm is None or not confirm(question):
