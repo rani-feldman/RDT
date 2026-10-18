@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import re
 import urllib.error
+import urllib.parse
 import urllib.request
 from dataclasses import dataclass, replace
 from datetime import date
@@ -80,20 +81,32 @@ def _latest_release(timeout: float) -> Release | None:
         _no_redirect.open(req, timeout=timeout).close()
         return None       # no redirect: the repository has no published release
     except urllib.error.HTTPError as e:
-        if e.code not in (301, 302, 303, 307, 308):
-            return None
-        return release_from_location(e.headers.get("Location", ""))
+        try:              # the error carries the open response: close it, not leave it to the GC
+            if e.code not in (301, 302, 303, 307, 308):
+                return None
+            return release_from_location(e.headers.get("Location", ""))
+        finally:
+            e.close()
     except Exception:     # network, proxy, timeout: never worth bothering the user about
         return None
 
 
 def release_from_location(location: str) -> Release | None:
-    """Release("1.2.0", url) from the redirect target ".../releases/tag/v1.2.0"; None otherwise."""
-    m = re.search(r"/releases/tag/([^/?#]+)$", location.strip())
-    if not m or parse_version(m.group(1)) is None:
+    """Release("1.2.0", url) from the redirect target
+    "https://github.com/rani-feldman/rdt/releases/tag/v1.2.0" (or that path alone); None otherwise.
+    Only this repository's release pages on github.com count: the URL becomes the Download
+    button's link, so a redirect anywhere else (a proxy, a captive portal) is ignored. GitHub
+    may spell the repository with other capitals, as RDT (rani, 2026-10-18, code review)."""
+    parts = urllib.parse.urlsplit(location.strip())
+    if parts.scheme or parts.netloc:
+        if parts.scheme != "https" or parts.netloc.lower() != "github.com":
+            return None
+    if parts.query or parts.fragment:
         return None
-    url = location if location.startswith("https://") else f"{RELEASES_URL}/tag/{m.group(1)}"
-    return Release(m.group(1).lstrip("v"), url)
+    m = re.fullmatch(r"/([^/]+/[^/]+)/releases/tag/([^/]+)", parts.path)
+    if not m or m.group(1).lower() != REPO.lower() or parse_version(m.group(2)) is None:
+        return None
+    return Release(m.group(2).lstrip("v"), f"https://github.com{parts.path}")
 
 
 def fetch_changelog(version: str, timeout: float = TIMEOUT_S) -> str:
