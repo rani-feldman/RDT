@@ -384,6 +384,18 @@ def test_cli_builds_a_workspace_without_a_device(tmp_path, capsys):
     assert ws.watch("main:tick_count").display.format == "dec"
 
 
+def test_cli_bad_numbers_and_a_blank_send_are_errors(sim, tmp_path, capsys):
+    """L14: an rdt: message and exit code 1, not a traceback; a blank command is never sent."""
+    path = Workspace.load(EXAMPLE_TARGET).save(tmp_path / "bench.rdtw")
+    for argv, message in ((["dump", "main:gains", "xyz"], "'xyz' is not a number"),
+                          (["add", "main:tick_count", "--poll", "fast"], "--poll: 'fast' is not a number"),
+                          (["send", " "], "send needs a command"),
+                          (["send", "", "--expect", "x"], "send needs a command")):
+        assert rdt(sim, path, *argv)[0] == 1, argv
+        assert "rdt: " in (err := capsys.readouterr().err) and message in err, (argv, err)
+    assert Workspace.load(path).watch("main:tick_count") is None
+
+
 def test_cli_reads_and_writes_the_watch_list(sim, tmp_path, capsys):
     path = tmp_path / "bench.rdtw"
     ws = Workspace.load(EXAMPLE_TARGET)

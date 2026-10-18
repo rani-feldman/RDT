@@ -52,6 +52,15 @@ def _int(text: str) -> int:
         raise argparse.ArgumentTypeError(f"{text!r} is not a number") from None
 
 
+def _number(text: str, what: str = "") -> int:
+    """A number given inside a command, after argparse has run: a ConfigError, so a bad one is
+    an rdt: message and not a traceback (L14)."""
+    try:
+        return parse_int(text)
+    except ValueError:
+        raise ConfigError(f"{what}{text!r} is not a number") from None
+
+
 def _mcu_option(text: str) -> McuConfig:
     """``NAME=ID[:ELF]``. The ELF path may itself contain a colon, as in C:\\fw\\main.elf."""
     name, sep, rest = text.partition("=")
@@ -375,7 +384,7 @@ def cmd_dump(t: Target, args, out) -> int:
             raise ConfigError("dump takes EXPR [LEN], or MCU ADDR LEN")
         loc = t.resolve(what[0])
         mcu, addr = loc.mcu, loc.addr
-        length = _int(what[1]) if len(what) == 2 else loc.size
+        length = _number(what[1]) if len(what) == 2 else loc.size
     else:
         if len(what) != 3:
             raise ConfigError("dump takes MCU ADDR LEN, or a name such as main:rx_buffer")
@@ -484,7 +493,9 @@ EXIT_EXPECT_FAILED = 11
 
 
 def cmd_send(t: Target, args, out) -> int:
-    text = " ".join(args.command)
+    text = " ".join(args.command).strip()
+    if not text:   # refused before anything is sent
+        raise ConfigError("send needs a command, such as rdt send \"*IDN?\"")
     if args.pattern is None:
         return _send(t, text, args.expect, out)
     if args.expect is False:
@@ -654,7 +665,7 @@ def cmd_add(t: Target, args, out) -> int:
         if value is not None:
             d[key] = value
     if args.poll is not None:
-        d["poll"] = args.poll if args.poll in ("global", "manual") else _int(args.poll)
+        d["poll"] = args.poll if args.poll in ("global", "manual") else _number(args.poll, "--poll: ")
     w = Watch.from_dict(d)
     if old:
         ws.replace(w)
