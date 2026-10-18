@@ -435,11 +435,12 @@ class Target:
 
     # --- memory ------------------------------------------------------------------------------
 
-    def read(self, mcu: str | Mcu, addr: int, size: int) -> bytes:
+    def read(self, mcu: str | Mcu, addr: int, size: int, *, retries: int | None = None) -> bytes:
+        """Read raw bytes. ``retries`` overrides the profile's retries after a timeout."""
         m = self.mcu(mcu)
         self._check(m, addr, size, write=False)
         self._require_image(m)
-        return self.session.read(m.id, addr, size)
+        return self.session.read(m.id, addr, size, retries)
 
     def _read_unchecked(self, m: Mcu, addr: int, size: int) -> bytes:
         """A read for the identity check itself, which must work while the image does not match."""

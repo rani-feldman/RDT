@@ -259,9 +259,10 @@ class Session:
 
     # --- reads -------------------------------------------------------------------------------
 
-    def read(self, mcu: int, addr: int, size: int) -> bytes:
+    def read(self, mcu: int, addr: int, size: int, retries: int | None = None) -> bytes:
         """Read ``size`` bytes. The device is asked for whole aligned words, in pieces of at most
-        ``max_response`` bytes, and the bytes asked for are cut out of the result."""
+        ``max_response`` bytes, and the bytes asked for are cut out of the result. ``retries``
+        overrides the profile's for this read (the poll scheduler uses 0 when it splits a block)."""
         if size < 1:
             raise ValueError("size must be at least 1")
         align = self.profile.align
@@ -270,10 +271,10 @@ class Session:
         out = bytearray()
         with self._lock:
             for piece in range(start, end, chunk):
-                out += self._read_piece(mcu, piece, min(chunk, end - piece))
+                out += self._read_piece(mcu, piece, min(chunk, end - piece), retries)
         return bytes(out[addr - start:addr - start + size])
 
-    def _read_piece(self, mcu: int, addr: int, size: int) -> bytes:
+    def _read_piece(self, mcu: int, addr: int, size: int, retries: int | None = None) -> bytes:
         self._require_up()
         st = self.mcu_status(mcu)
         if st.silent:
@@ -281,8 +282,12 @@ class Session:
                 raise McuSilent(f"{self._name(mcu)} is not responding; retried every {self.SILENT_PROBE_S:g} s")
             st.last_probe = time.monotonic()
             attempts = 1
+        elif self.state is LinkState.NO_REPLY:
+            # The device answered none of the last reads: retrying each read would only multiply
+            # the wait; the first reply brings the link back up anyway (M2).
+            attempts = 1
         else:
-            attempts = 1 + self.profile.retries
+            attempts = 1 + (self.profile.retries if retries is None else retries)
         what = f"read of {size} bytes at 0x{addr:08X} on {self._name(mcu)}"
         bad: BadReply | None = None
         delay = self.RETRY_DELAY_S
