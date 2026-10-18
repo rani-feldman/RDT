@@ -1218,7 +1218,7 @@ class ProfileDialog(QDialog):
             except RdtError as e:
                 return f"> {cmd}\n⚠ MCU {m.name}: {e}"
             try:
-                t._require_image(m)
+                t.require_image(m)
             except RdtError as e:
                 return f"> {cmd}\n⚠ {e}"
             reply = t.command(cmd, expect_reply=True, timeout_ms=p.timeout_ms)

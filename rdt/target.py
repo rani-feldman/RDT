@@ -466,6 +466,11 @@ class Target:
         once = any(a.peripheral for a in areas)
         self.session.write(m.id, addr, data, m.byte_order, read_twice=not once)
 
+    def require_image(self, mcu: str | Mcu) -> None:
+        """Raise ImageMismatch when this MCU's ELF does not match its firmware, as a read would.
+        For front ends that send a read of their own, such as the profile dialog's Test read."""
+        self._require_image(self.mcu(mcu))
+
     def _require_image(self, m: Mcu) -> None:
         """Refuse reads and writes to an MCU whose ELF does not match its firmware (SYM-8),
         checking again first when the link or the MCU came back since the last check."""
