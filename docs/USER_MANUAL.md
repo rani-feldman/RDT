@@ -194,7 +194,7 @@ Do this once per bench, then save the workspace.
 
 1. **Start a workspace.** **File > New workspace**, or **File > Open...** a target file or workspace to start from (such as `examples/stm32h7_interface.rdtw`).
 2. **Choose the link.** In the toolbar, pick the transport:
-   - `serial`: pick the COM port (the list shows each port's description, such as `COM3 - GAC serial port (COM3)`) and the baud rate.
+   - `serial`: pick the COM port (the list shows each port's description, such as `COM3 - GAC serial port (COM3)`, and is rescanned each time you open it) and the baud rate.
    - `tcp` or `udp`: type the device's IP address and port.
    The fields can only be changed while disconnected.
 3. **Set the SCPI profile.** Click the gear icon (or **Target > SCPI profile...**). Fill in the read and write templates and the other fields, or press **Load from file...** to fill them from a profile file. The editor shows the commands as they will be sent and refuses a template that can't work. While connected, **Test read** sends one read with the edited profile and shows the reply and the bytes it decodes to, before you apply it. Press **OK** to apply.

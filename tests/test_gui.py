@@ -935,6 +935,24 @@ def test_com_ports_show_their_description(qtbot, win, monkeypatch):
     assert app.port_name("COM3 - GAC serial port (COM3)") == "COM3" and app.port_name(" /dev/ttyUSB0 ") == "/dev/ttyUSB0"
 
 
+def test_com_port_list_rescans_when_opened(qtbot, win, monkeypatch):
+    import rdt.gui.app as app
+    ports = [("COM1", ""), ("COM3", "GAC serial port (COM3)")]
+    monkeypatch.setattr(app, "serial_ports", lambda: list(ports))
+    bar = win.bar
+    bar.transport.setCurrentText("serial")
+    bar.com.setCurrentIndex(0)
+    ports[:] = [("COM1", ""), ("COM7", "USB serial port (COM7)")]   # COM3 unplugged, COM7 plugged in
+    bar.com.showPopup()
+    assert [bar.com.itemText(i) for i in range(bar.com.count())] == ["COM1", "COM7 - USB serial port (COM7)"]
+    assert bar.com.currentText() == "COM1"                           # the chosen port stays chosen
+    bar.com.hidePopup()
+    bar.com.setEditText("COM9")                                      # a port typed by hand is kept too
+    bar.com.showPopup()
+    assert bar.com.currentText() == "COM9"
+    bar.com.hidePopup()
+
+
 def test_settings_files_import_and_export(qtbot, win, bench, tmp_path, monkeypatch):
     file_menu = win.menuBar().actions()[0].menu()
     subs = {a.text().replace("&", ""): a.menu() for a in file_menu.actions() if a.menu()}
