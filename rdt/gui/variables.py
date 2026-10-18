@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 import time
 from dataclasses import dataclass, field
 
@@ -920,8 +921,8 @@ class WatchDialog(QDialog):
         self.format.setCurrentText(d.format)
         self.q = QLineEdit(d.q or "")
         self.q.setPlaceholderText("none, or Q15, Q31, Q3.12")
-        self.scale = QLineEdit(f"{d.k:g}")
-        self.offset = QLineEdit(f"{d.offset:g}")
+        self.scale = QLineEdit(_number(d.k))
+        self.offset = QLineEdit(_number(d.offset))
         self.unit = QLineEdit(d.unit)
         poll_row = QHBoxLayout()
         self.poll = QComboBox()
@@ -943,8 +944,8 @@ class WatchDialog(QDialog):
         self.read_only.addItems(READ_ONLY_CHOICES)
         self.read_only.setCurrentIndex({None: 0, True: 1, False: 2}[w.read_only])
         self.read_only.setToolTip("Workspace default follows Watch > All items read-only")
-        self.min = QLineEdit("" if w.min is None else f"{w.min:g}")
-        self.max = QLineEdit("" if w.max is None else f"{w.max:g}")
+        self.min = QLineEdit("" if w.min is None else _number(w.min))
+        self.max = QLineEdit("" if w.max is None else _number(w.max))
         for e in (self.min, self.max):
             e.setPlaceholderText("no limit")
         self.confirm = QCheckBox("Ask before writing")
@@ -978,8 +979,26 @@ class WatchDialog(QDialog):
         display = Display(self.format.currentText(), self.q.text().strip() or None, float(self.scale.text() or 1),
                           float(self.offset.text() or 0), self.unit.text().strip())
         return Watch(self.expr, display, poll, (None, True, False)[self.read_only.currentIndex()],
-                     float(self.min.text()) if self.min.text().strip() else None,
-                     float(self.max.text()) if self.max.text().strip() else None, self.confirm.isChecked())
+                     _limit(self.min.text(), "minimum"), _limit(self.max.text(), "maximum"), self.confirm.isChecked())
+
+
+def _number(v: float) -> str:
+    """A setting shown for editing: the shortest text that reads back as exactly the same number,
+    so OK without a change keeps it (L7); 1.0 shows as 1."""
+    text = repr(float(v))
+    return text[:-2] if text.endswith(".0") else text
+
+
+def _limit(text: str, what: str) -> float | None:
+    """A write limit typed in the dialog. nan or inf would quietly turn the limit off, as no value
+    compares below nan, so they are refused (H3)."""
+    text = text.strip()
+    if not text:
+        return None
+    v = float(text)
+    if not math.isfinite(v):
+        raise ValueError(f"the {what} must be a finite number, not {text!r}")
+    return v
 
 
 class SymbolBrowser(QWidget):

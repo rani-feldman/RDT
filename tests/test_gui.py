@@ -1293,3 +1293,26 @@ def test_row_hover_buttons_and_mono_values(qtbot, win):
     vopt = QStyleOptionViewItem()
     value.initStyleOption(vopt, tree.model().index(0, 1))
     assert QFontInfo(vopt.font).fixedPitch()
+
+
+def test_watch_dialog_keeps_exact_numbers_and_refuses_nan_limits(qtbot, win):
+    """L7: OK without a change keeps scale, offset and limits exactly; H3: nan or inf is no limit."""
+    from rdt.scaling import Display
+    from rdt.workspace import Watch
+    w = Watch("main:motor.speed", Display(k=0.1234567891, offset=1e-7), min=-0.000123456789, max=3000.0001)
+    dlg = WatchDialog(w, win)
+    qtbot.addWidget(dlg)
+    out = dlg.result_watch()
+    assert (out.display.k, out.display.offset, out.min, out.max) == (0.1234567891, 1e-7, -0.000123456789, 3000.0001)
+    assert dlg.max.text() == "3000.0001"
+    other = WatchDialog(Watch("main:x", max=3000.0), win)
+    qtbot.addWidget(other)
+    assert other.max.text() == "3000"
+    for bad in ("nan", "inf", "-inf"):
+        dlg.min.setText(bad)
+        with pytest.raises(ValueError, match="finite"):
+            dlg.result_watch()
+    dlg.min.setText("")
+    dlg.max.setText("NaN")
+    with pytest.raises(ValueError, match="maximum"):
+        dlg.result_watch()
