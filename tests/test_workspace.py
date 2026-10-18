@@ -320,6 +320,24 @@ def test_write_safety(target):
     assert target.read_value("main:motor.target") == 3000.0   # untouched
 
 
+def test_limits_refuse_nan_and_infinity(target):
+    """H3: NaN compares false with everything, so it slipped past min and max; infinity is past
+    any limit too."""
+    ws = Workspace(tabs=one_tab(Watch("main:motor.target", min=0, max=3000),
+                                Watch("main:gains[1]", Display(k=0.5), min=-10)))
+    for text in ("nan", "-nan", "inf", "-inf", "infinity"):
+        with pytest.raises(WriteRefused, match="is not a finite number"):
+            ws.write(target, "main:motor.target", text)
+        with pytest.raises(WriteRefused, match="is not a finite number"):
+            ws.write(target, "main:gains[1]", text)   # scaled, so checked in shown units
+    assert target.read_value("main:motor.target") == 3000.0   # untouched
+    ws.write(target, "main:motor.target", "2500")
+    assert target.read_value("main:motor.target") == 2500.0
+    plain = Workspace(tabs=one_tab(Watch("main:gains[1]", Display(k=0.5))))   # no limits, integer
+    with pytest.raises(ConfigError, match="nan has no raw value"):
+        plain.write(target, "main:gains[1]", "nan")
+
+
 # --- the CLI ---------------------------------------------------------------------------------
 
 def rdt(sim, ws_path, *argv):
