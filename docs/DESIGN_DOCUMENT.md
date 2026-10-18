@@ -65,7 +65,7 @@ Each requirement links to its design section.
 | LNK-7 | Connected means the COM port or socket opened; RDT sends nothing to the device on connect or reconnect (no `*IDN?`) and sends no probe; when the link shows as down is LNK-9 (2026-10-14) | Done | [D-LNK-7](#d-lnk-7-connect-without-a-probe) |
 | LNK-8 | The GUI lists each COM port with its description, such as `COM3 - GAC serial port (COM3)` (2026-10-13) | Done | [D-LNK-1](#d-lnk-1-com-port) |
 | LNK-9 | The link shows as down (red `Link down · COM3`) when the port or socket breaks, noticed within a second even with polling off, or when the device answers none of 3 reads in a row from any MCU while the port stays open ("no reply"). While the link is down the MCU cards show `link down` (GUI-14) and writes are refused, and the ELFs are checked again when it comes back (2026-10-14; the default chosen in the thread "Status box on lost connection", not yet confirmed by rani) | Done | [D-LNK-9](#d-lnk-9-noticing-a-lost-link) |
-| LNK-10 | The COM port list in the toolbar is rescanned each time it opens, so unplugged ports disappear and newly plugged ports appear; the port already picked or typed stays shown (rani, 2026-10-18) | In review (PR #134) | [D-LNK-10](#d-lnk-10-com-port-list-rescanned-on-open) |
+| LNK-10 | The COM port list in the toolbar is rescanned each time it opens, so unplugged ports disappear and newly plugged ports appear; the port already picked or typed stays shown (rani, 2026-10-18) | Done | [D-LNK-10](#d-lnk-10-com-port-list-rescanned-on-open) |
 
 ### 2.3 SCPI commands
 
