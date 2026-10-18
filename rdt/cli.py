@@ -23,10 +23,12 @@ Without a target file, give the link and the MCUs on the command line:
 from __future__ import annotations
 
 import argparse
+import copy
 import logging
 import re
 import sys
 import time
+from dataclasses import replace as dc_replace
 from datetime import datetime
 from pathlib import Path
 
@@ -216,12 +218,25 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def load_workspace(args: argparse.Namespace) -> Workspace:
+    """The workspace as its files have it. The command line's overrides are not in it: they go
+    into run_config(), so a command that saves the workspace never writes them back."""
     if args.target is None:
         args.target = default_target()
-    ws = Workspace.load(args.target) if args.target else Workspace()
-    cfg = ws.config
+    return Workspace.load(args.target) if args.target else Workspace()
+
+
+def run_config(args: argparse.Namespace, ws: Workspace) -> TargetConfig:
+    """The target for this run: the workspace's, with --profile, --timeout, --mcu and the link
+    options applied to a copy. They are for this run only and never saved into the workspace
+    (H6, M8, rani, 2026-10-18, code review); rdt init is the one command that saves them, as
+    the new workspace's target."""
+    cfg = copy.deepcopy(ws.config)
     if args.profile:
-        cfg.profile = Profile.load(args.profile)
+        # Only the SCPI settings change: the workspace's memory ranges stay. Ranges the profile
+        # file still lists are added for this run, as when it is the only file given.
+        profile = Profile.load(args.profile)
+        profile.ranges = cfg.profile.ranges + [r for r in profile.ranges if r not in cfg.profile.ranges]
+        cfg.profile = profile
         cfg.profile_path = args.profile.resolve()
     if args.tcp:
         cfg.connection = ConnectionConfig("tcp", args.tcp)
@@ -240,11 +255,11 @@ def load_workspace(args: argparse.Namespace) -> Workspace:
     if not cfg.mcus:
         raise ConfigError("no MCUs: give a workspace (-w), put an rdt.toml in the current folder or %LOCALAPPDATA%\\rdt, "
                           "or give --mcu NAME=ID[:ELF], such as --mcu main=0:main.elf")
-    return ws
+    return cfg
 
 
 def load_config(args: argparse.Namespace) -> TargetConfig:
-    return load_workspace(args).config
+    return run_config(args, load_workspace(args))
 
 
 # --- commands --------------------------------------------------------------------------------
@@ -602,8 +617,10 @@ def _need_file(ws: Workspace) -> Workspace:
 def cmd_init(t: Target, args, out) -> int:
     if args.file.exists() and not args.force:
         raise ConfigError(f"{args.file} exists; add --force to overwrite it")
-    path = args.ws.save(args.file)
-    print(f"saved workspace {path} ({len(args.ws.config.mcus)} MCUs, {len(args.ws.watches)} watched items)", file=out)
+    # The new workspace's target is this run's, command-line options included.
+    ws = dc_replace(args.ws, config=t.config, warnings=[])
+    path = ws.save(args.file)
+    print(f"saved workspace {path} ({len(ws.config.mcus)} MCUs, {len(ws.watches)} watched items)", file=out)
     return 0
 
 
@@ -1002,9 +1019,9 @@ def main(argv: list[str] | None = None, out=None) -> int:
         args.ws = load_workspace(args)
         for warning in args.ws.warnings:
             print(f"rdt: {warning}", file=sys.stderr)
+        cfg = run_config(args, args.ws)
         if args.cmd in NO_TARGET:
             return COMMANDS[args.cmd](None, args, out)
-        cfg = args.ws.config
         # One-shot commands fail at once on a broken link; watch and console keep reconnecting.
         target = Target(cfg, auto_reconnect=args.cmd in ("watch", "console"))
         if args.cmd in OFFLINE:

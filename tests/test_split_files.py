@@ -8,7 +8,7 @@ from pathlib import Path
 import pytest
 
 from rdt import ConfigError
-from rdt.cli import main
+from rdt.cli import build_parser, load_config, main
 from rdt.console import SavedCommand
 from rdt.profile import Range
 from rdt.scaling import Display
@@ -398,6 +398,40 @@ def test_cli_memory_import_refuses_before_saving_and_fixes_a_broken_workspace(tm
     assert run("-w", str(path), "memory", "import", "--replace", str(tmp_path / "ok.toml"))[0] == 0
     assert [r.name for r in Workspace.load(path).memory_ranges()] == ["GPIOA"]
     Target(Workspace.load(path).config)
+
+
+def test_cli_overrides_are_for_this_run_only(tmp_path):
+    """H6: --profile, --timeout, --mcu and the link options change only this run; a command that
+    saves the workspace writes back what its files had. M8: --profile keeps the memory ranges."""
+    ws = Workspace(TargetConfig(mcus=[McuConfig(0, "main", FIRMWARE / "main.elf", timeout_ms=800),
+                                      McuConfig(1, "motorctl", FIRMWARE / "motorctl.elf", timeout_ms=900)]),
+                   [Tab("Motor")])
+    ws.config.profile.ranges = [Range("GPIOA", 0x48000000, 0x400)]
+    path = ws.save(tmp_path / "w.rdtw")
+    other = tmp_path / "other.toml"
+    other.write_text("[scpi]\ntimeout_ms = 123\n")
+    files = ("w.rdtw", "w.profile.toml", "w.memory.toml")
+    before = {f: (tmp_path / f).read_text() for f in files}
+    overrides = ["--profile", str(other), "--timeout", "50", "--mcu", f"main=0:{FIRMWARE / 'main.elf'}",
+                 "--udp", "10.0.0.9:5025"]
+    assert main(["-w", str(path), *overrides, "add", "main:motor.speed", "--unit", "rpm"], io.StringIO()) == 0
+    assert main(["-w", str(path), *overrides, "tab", "add", "Spare"], io.StringIO()) == 0
+    assert {f: (tmp_path / f).read_text() for f in files} == before
+    back = Workspace.load(path)
+    assert [(m.name, m.timeout_ms) for m in back.config.mcus] == [("main", 800), ("motorctl", 900)]
+    assert back.watch("main:motor.speed").display.unit == "rpm" and back.has_tab("Spare")
+
+    cfg = load_config(build_parser().parse_args(["-w", str(path), "--profile", str(other), "info"]))
+    assert cfg.profile.timeout_ms == 123 and [r.name for r in cfg.profile.ranges] == ["GPIOA"]
+    Target(cfg).mcus["main"].memory.check(0x48000000, 4)   # still known memory (M8)
+    assert [r.name for r in Workspace.load(path).config.profile.ranges] == ["GPIOA"]
+
+    # rdt init is the one command that saves them: they are the new workspace's target
+    assert main(["-w", str(path), "--mcu", f"main=0:{FIRMWARE / 'main.elf'}", "--udp", "10.0.0.9:5025",
+                 "init", str(tmp_path / "new.rdtw")], io.StringIO()) == 0
+    new = Workspace.load(tmp_path / "new.rdtw")
+    assert [m.name for m in new.config.mcus] == ["main"] and new.config.connection.address == "10.0.0.9:5025"
+    assert [r.name for r in new.memory_ranges()] == ["GPIOA"]
 
 
 def test_memory_map_from_a_workspace_and_the_cli(tmp_path):
