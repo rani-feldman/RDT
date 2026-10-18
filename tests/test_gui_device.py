@@ -104,3 +104,18 @@ def test_shutdown_during_a_long_job_does_not_abort(qtbot, dev):
     release.set()
     devmod._wait_left_running()            # what runs at exit
     assert not dev._thread.isRunning() and t.closed == 1
+
+
+def test_garbage_is_collected_on_the_gui_thread(qtbot, dev):
+    """Widgets freed by a collection on the worker thread crash Qt, so the GUI thread collects."""
+    import gc
+    assert not gc.isenabled() and devmod._gc_timer is not None and devmod._gc_timer.isActive()
+    junk = []
+    junk.append(junk)
+    del junk
+    before = gc.get_count()[0]
+    for _ in range(gc.get_threshold()[0] + 10):
+        x = []
+        x.append(x)
+    assert gc.get_count()[0] > before
+    qtbot.waitUntil(lambda: gc.get_count()[0] < gc.get_threshold()[0], timeout=3000)
