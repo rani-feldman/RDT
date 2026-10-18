@@ -8,6 +8,8 @@ The session is where the firmware's habits are handled:
   of 2 bytes reads the 4-byte word and keeps the 2 bytes asked for. A write smaller than a word,
   or not on a word boundary, reads the word, replaces the bytes and writes the whole word back
   (read-modify-write). A neighbouring value the firmware changes in between is overwritten.
+  The words are read twice and used only when both reads agree, since replies carry no tag and
+  a late reply to an earlier read could otherwise be patched and written back.
 - A secondary MCU that stops answering is marked silent: on a -240 error reply, or after three
   timeouts in a row. Only that MCU's accesses fail, and it is tried again every few seconds.
 - When the port or socket breaks, the session goes down, refuses accesses, and reconnects in the
@@ -388,9 +390,20 @@ class Session:
         return words[:off] + data + words[off + len(data):]
 
     def _read_words(self, mcu: int, addr: int, data: bytes, start: int, end: int) -> bytes:
-        """Read the words a read-modify-write puts ``data`` into."""
+        """Read the words a read-modify-write puts ``data`` into.
+
+        Replies carry no tag, so a late reply to an earlier read can pass for this one, and its
+        bytes would be written back around ``data`` and pass the read-back, which compares only
+        ``data`` (H1). The words are used only when two reads in a row agree on the bytes kept;
+        one stray reply can fool only one of them (rani, 2026-10-18, code review)."""
+        off = addr - start
         try:
-            return self.read(mcu, start, end - start)
+            words = self.read(mcu, start, end - start)
+            for _ in range(1 + self.profile.retries):
+                again = self.read(mcu, start, end - start)
+                if self._patch(again, off, data) == self._patch(words, off, data):
+                    return again
+                words = again
         except (CommandTimeout, BadReply, McuSilent, CommandRejected) as e:
             raise WriteNotConfirmed(f"write to 0x{addr:08X} on {self._name(mcu)} not sent: reading the "
                                     f"{self.profile.align}-byte words around it failed: {e}",
@@ -406,6 +419,8 @@ class Session:
         except (CommandTimeout, BadReply, McuSilent, CommandRejected) as e:
             raise WriteNotConfirmed(f"write to 0x{addr:08X} on {self._name(mcu)} sent, but the read-back failed: {e}",
                                     data, None) from None
+        raise WriteNotConfirmed(f"write to 0x{addr:08X} on {self._name(mcu)} not sent: two reads in a row of the "
+                                f"{self.profile.align}-byte words around it never agreed", data, None)
 
     # --- console -----------------------------------------------------------------------------
 
