@@ -459,9 +459,12 @@ class Target:
     def write(self, mcu: str | Mcu, addr: int, data: bytes) -> None:
         """Write raw bytes and confirm them by reading them back."""
         m = self.mcu(mcu)
-        self._check(m, addr, len(data), write=True)
+        areas = self._check(m, addr, len(data), write=True)
         self._require_image(m)
-        self.session.write(m.id, addr, data, m.byte_order)
+        # A register may clear a flag or pop a FIFO when read, so a peripheral is read once for
+        # a read-modify-write, not twice (rani, 2026-10-18, code review).
+        once = any(a.peripheral for a in areas)
+        self.session.write(m.id, addr, data, m.byte_order, read_twice=not once)
 
     def _require_image(self, m: Mcu) -> None:
         """Refuse reads and writes to an MCU whose ELF does not match its firmware (SYM-8),
@@ -472,9 +475,9 @@ class Target:
             raise ImageMismatch(f"MCU {m.name}: reads and writes are refused because its ELF does not match "
                                 f"the firmware ({m.identity.detail}); load the right ELF, or allow access anyway")
 
-    def _check(self, m: Mcu, addr: int, size: int, write: bool) -> None:
+    def _check(self, m: Mcu, addr: int, size: int, write: bool) -> list:
         try:
-            m.memory.check_aligned(addr, size, self.align, write)
+            return m.memory.check_aligned(addr, size, self.align, write)
         except AccessRefused as e:
             raise AccessRefused(f"MCU {m.name}: {e}") from None
 

@@ -343,12 +343,13 @@ class Session:
 
     # --- writes ------------------------------------------------------------------------------
 
-    def write(self, mcu: int, addr: int, data: bytes, byte_order: str = "little") -> None:
+    def write(self, mcu: int, addr: int, data: bytes, byte_order: str = "little", read_twice: bool = True) -> None:
         """Write ``data`` one value at a time and confirm it by reading it back.
 
         Every write covers whole aligned words. When ``data`` does not, the words are read first
         and ``data`` is put into them (read-modify-write). Values wider than ``max_write`` are
-        split. A multi-piece write is not atomic.
+        split. A multi-piece write is not atomic. ``read_twice`` False reads the words once (for
+        peripheral registers, where a read can have side effects).
         """
         if not data:
             raise ValueError("nothing to write")
@@ -363,7 +364,7 @@ class Session:
             if (start, end) == (addr, addr + len(data)):
                 words = data
             else:
-                words = self._patch(self._read_words(mcu, addr, data, start, end), off, data)
+                words = self._patch(self._read_words(mcu, addr, data, start, end, read_twice), off, data)
             pieces = split_write(start, words, self.profile.max_write)
             try:
                 self._send_pieces(mcu, pieces, byte_order)
@@ -396,7 +397,7 @@ class Session:
     def _patch(words: bytes, off: int, data: bytes) -> bytes:
         return words[:off] + data + words[off + len(data):]
 
-    def _read_words(self, mcu: int, addr: int, data: bytes, start: int, end: int) -> bytes:
+    def _read_words(self, mcu: int, addr: int, data: bytes, start: int, end: int, twice: bool = True) -> bytes:
         """Read the words a read-modify-write puts ``data`` into.
 
         Replies carry no tag, so a late reply to an earlier read can pass for this one, and its
@@ -406,6 +407,8 @@ class Session:
         off = addr - start
         try:
             words = self.read(mcu, start, end - start)
+            if not twice:
+                return words
             for _ in range(1 + self.profile.retries):
                 again = self.read(mcu, start, end - start)
                 if self._patch(again, off, data) == self._patch(words, off, data):

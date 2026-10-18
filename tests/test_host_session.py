@@ -565,3 +565,28 @@ def test_timeouts_counted_by_the_gui_while_the_worker_adds_them():
         reader.join()
         sys.setswitchinterval(old)
     assert st.recent_timeouts() == 100
+
+
+def test_a_peripheral_register_is_read_once_for_a_read_modify_write(two_mcus):
+    """A register may clear a flag or pop a FIFO when read, so the H1 double read is only for
+    memory; a sub-word write into a peripheral range reads the register once (rani, 2026-10-18)."""
+    dev = Device(two_mcus)
+    with Simulator(dev, TransportConfig(tcp="127.0.0.1:0", udp=None)) as s:
+        profile = Profile(timeout_ms=300, ranges=[Range("regs", 0x30000000, 16)])
+        with make_target("tcp", s.tcp_address, profile) as t:
+            reg = bytearray.fromhex("11111111")
+            reads = []
+
+            def read(mcu, addr, size, retries=None):
+                reads.append(addr)
+                return bytes(reg)
+
+            def send(mcu, pieces, byte_order):
+                for a, chunk in pieces:
+                    reg[a - 0x30000000:a - 0x30000000 + len(chunk)] = chunk
+
+            t.session.read = read
+            t.session._send_pieces = send
+            t.write_value("@main:0x30000002:u16", 0x3333)
+            assert bytes(reg) == bytes.fromhex("11113333")
+            assert len(reads) == 2                                 # one read to patch, one read-back
