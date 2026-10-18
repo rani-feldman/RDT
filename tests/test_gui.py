@@ -1404,3 +1404,32 @@ def test_profile_test_read_is_checked_like_any_read(qtbot, win, monkeypatch):
     dlg.test()
     qtbot.waitUntil(lambda: "does not match" in dlg.test_result.text(), timeout=3000)
     assert sent == []
+
+
+def test_chart_draws_only_the_window_and_keeps_the_last_value(qtbot):
+    """L10: a redraw gives the plot only the samples in view, and the last value needs no scan."""
+    from rdt.gui.chart import ChartPanel, Trace
+    tr = Trace(4)
+    assert tr.last() is None
+    for i in range(10):
+        tr.add(float(i), float(i * 10))
+    tr.add(10.0, float("nan"))
+    assert tr.last() == 90.0
+    t, v = tr.window(3.5, 6.0)
+    assert list(t) == [3.0, 4.0, 5.0, 6.0, 7.0]
+    tr.trim(10.0)
+    assert tr.last() is None
+    tr.clear()
+    assert tr.last() is None and len(tr) == 0
+    chart = ChartPanel()
+    qtbot.addWidget(chart)
+    chart.timer.stop()
+    chart.add("main:x", "")
+    s = chart.series["main:x"]
+    now = time.time()
+    for i in range(600):                      # a minute of history at 10 a second
+        s.trace.add(now - 60 + i * 0.1, float(i))
+    chart._dirty = True
+    chart.redraw()
+    assert len(s.curve.xData) < 120 and s.curve.xData[-1] >= now - 1   # the 10 s window, not all 600
+    assert s.item.text(2) == "599"
