@@ -1205,14 +1205,27 @@ class ProfileDialog(QDialog):
             return
         start, end = align_span(addr, length, p.align)   # the firmware takes only whole aligned words
         cmd = p.format_read(mcu, start, end - start)
-        length = end - start
+        asked, length = length, end - start
 
         def job(t: Target):
+            # a test read is a read like any other: refused outside the ELF sections and the listed
+            # ranges, and on an MCU whose ELF does not match its firmware (L9)
+            m = next((m for m in t.mcus.values() if m.id == mcu), None)
+            if m is None:
+                return f"> {cmd}\n⚠ no MCU with id {mcu} in this target, so the read is refused"
+            try:
+                m.memory.check_aligned(addr, asked, p.align)   # with the edited profile's word size
+            except RdtError as e:
+                return f"> {cmd}\n⚠ MCU {m.name}: {e}"
+            try:
+                t._require_image(m)
+            except RdtError as e:
+                return f"> {cmd}\n⚠ {e}"
             reply = t.command(cmd, expect_reply=True, timeout_ms=p.timeout_ms)
             if reply is None:
                 return f"> {cmd}\n(no reply)"
             try:
-                order = next((m.byte_order for m in t.mcus.values() if m.id == mcu), p.byte_order)
+                order = m.byte_order
                 data = p.decode_data(reply.encode("latin-1"), length, order)
             except RdtError as e:
                 return f"> {cmd}\n< {reply[:200]}\n⚠ {e}"

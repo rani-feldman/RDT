@@ -1376,3 +1376,31 @@ def test_memory_writes_keep_read_only_and_confirm_items(qtbot, win, monkeypatch)
     monkeypatch.setattr(QMessageBox, "question", lambda *a, **k: QMessageBox.Yes)
     mem.table.item(row, col).setText(f"{(old + 1) & 0xFF:02X}")
     qtbot.waitUntil(lambda: len(writes) == 1, timeout=3000)
+
+
+def test_profile_test_read_is_checked_like_any_read(qtbot, win, monkeypatch):
+    """L9: the Test read is refused outside the sections and ranges, and on an ELF mismatch."""
+    from rdt.target import Identity
+    connect(qtbot, win)
+    dlg = ProfileDialog(win.ws.config.profile, win.device, win)
+    qtbot.addWidget(dlg)
+    sent = []
+    target = win.device.target
+    real = target.command
+    monkeypatch.setattr(target, "command", lambda text, *a, **k: (sent.append(text), real(text, *a, **k))[1])
+    dlg.test_addr.setText("0x30000000")           # in no section and no listed range
+    dlg.test_len.setValue(4)
+    dlg.test()
+    qtbot.waitUntil(lambda: "⚠" in dlg.test_result.text(), timeout=3000)
+    assert "MCU main" in dlg.test_result.text() and sent == []
+    dlg.test_mcu.setValue(7)
+    dlg.test_addr.setText("0x20000010")
+    dlg.test()
+    qtbot.waitUntil(lambda: "no MCU with id 7" in dlg.test_result.text(), timeout=3000)
+    dlg.test_mcu.setValue(0)
+    m = target.mcus["main"]
+    monkeypatch.setattr(m, "identity", Identity("main", "mismatch", "flash differs"))
+    monkeypatch.setattr(m, "identity_stale", False)
+    dlg.test()
+    qtbot.waitUntil(lambda: "does not match" in dlg.test_result.text(), timeout=3000)
+    assert sent == []
