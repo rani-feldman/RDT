@@ -10,7 +10,7 @@ import pytest
 from rdt import ConfigError, Profile, Range, WriteRefused
 from rdt.cli import main
 from rdt.scaling import Display
-from rdt.target import ConnectionConfig, McuConfig, TargetConfig
+from rdt.target import ConnectionConfig, Identity, McuConfig, Target, TargetConfig
 from rdt.tomlw import Hex, dumps
 from rdt.workspace import Tab, Watch, Workspace, canonical
 from sim import Simulator, TransportConfig, load_config
@@ -394,6 +394,18 @@ def test_cli_bad_numbers_and_a_blank_send_are_errors(sim, tmp_path, capsys):
         assert rdt(sim, path, *argv)[0] == 1, argv
         assert "rdt: " in (err := capsys.readouterr().err) and message in err, (argv, err)
     assert Workspace.load(path).watch("main:tick_count") is None
+
+
+def test_cli_watch_keeps_allow_mismatch_after_an_elf_rebuild(sim, tmp_path, monkeypatch):
+    """rdt watch --allow-mismatch: the identity check after an ELF rebuild clears the allow flag,
+    so it is set again there, as at startup; otherwise every read after the rebuild is refused."""
+    path = Workspace.load(EXAMPLE_TARGET).save(tmp_path / "bench.rdtw")
+    rebuilt = iter([["main"]])
+    monkeypatch.setattr(Target, "refresh_elfs", lambda self: next(rebuilt, []))
+    monkeypatch.setattr(Target, "_identity", lambda self, m: Identity(m.name, "mismatch", "flash differs"))
+    code, out = rdt(sim, path, "--allow-mismatch", "watch", "main:tick_count", "-i", "100", "-n", "16")
+    assert code == 0 and "# MCU main: flash differs" in out    # the check after the rebuild ran
+    assert "ImageMismatch" not in out and out.count("0x12345678") + out.count("305419896") == 16
 
 
 def test_cli_reads_and_writes_the_watch_list(sim, tmp_path, capsys):

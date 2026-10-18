@@ -567,6 +567,10 @@ def cmd_watch(t: Target, args, out) -> int:
                     event.append(f"ELF rebuilt for {name}")
                     for ident in t.check_identity(name):
                         if ident.status == "mismatch":
+                            # The check clears the allow flag; --allow-mismatch holds for the whole
+                            # run, so set it again as at startup (M1, rani, 2026-10-18, code review).
+                            if args.allow_mismatch:
+                                t.allow_mismatch(name)
                             event.append(f"ELF does not match the firmware on {name}")
                             print(f"# {ident}", file=out, flush=True)
                     for i, loc in enumerate(locs):
