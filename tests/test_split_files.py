@@ -244,6 +244,17 @@ def test_ui_settings_file(tmp_path):
     assert UiSettings.load().values == {}           # a broken file: the defaults
 
 
+def test_ui_setting_set_back_after_another_window_changed_it(tmp_path):
+    """L15: setting a key back to the value this window last saw is still saved when another
+    window changed it in between."""
+    ui = UiSettings.load()
+    ui.set_value("console/font_size", 12)
+    other = UiSettings.load()                       # a second window
+    other.set_value("console/font_size", 14)
+    ui.set_value("console/font_size", 12)           # this window still holds 12
+    assert UiSettings.load().value("console/font_size") == 12
+
+
 # --- CLI ------------------------------------------------------------------------------------
 
 def run(*argv):
