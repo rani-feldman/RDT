@@ -13,7 +13,7 @@ from PySide6.QtGui import QColor, QFont, QKeySequence, QShortcut, QTextCharForma
 from PySide6.QtWidgets import (
     QAbstractItemView, QApplication, QCheckBox, QColorDialog, QComboBox, QCompleter, QDialog, QDialogButtonBox, QFileDialog, QFormLayout, QHBoxLayout,
     QHeaderView, QLabel, QLineEdit, QListWidget, QMenu, QMessageBox, QPlainTextEdit, QPushButton, QSpinBox, QTableWidget,
-    QSplitter, QTableWidgetItem, QTextEdit, QToolButton, QTreeWidget, QTreeWidgetItem, QVBoxLayout, QWidget,
+    QSplitter, QStyledItemDelegate, QTableWidgetItem, QTextEdit, QToolButton, QTreeWidget, QTreeWidgetItem, QVBoxLayout, QWidget,
 )
 
 from ..console import CommandHistory, SessionLog, completions, hex_to_text, text_to_hex
@@ -764,6 +764,25 @@ class Console(QWidget):
 # --- memory view -----------------------------------------------------------------------------
 
 
+class _CellDelegate(QStyledItemDelegate):
+    """The memory cells' editor. Qt reloads an open editor whenever its cell changes, so with
+    Refresh on a new read would replace what is being typed (M4): the editor is filled once, when
+    it opens, and the view knows which cell is being edited so a read leaves that cell alone."""
+
+    def __init__(self, view: "MemoryView"):
+        super().__init__(view.table)
+        self.view = view
+
+    def createEditor(self, parent, opt, idx):
+        self.view._editing = (idx.row(), idx.column())
+        return super().createEditor(parent, opt, idx)
+
+    def setEditorData(self, editor, idx) -> None:
+        if not editor.property("rdt_filled"):
+            super().setEditorData(editor, idx)
+            editor.setProperty("rdt_filled", True)
+
+
 class MemoryView(QWidget):
     """Dump of raw memory, 16 bytes per row with their ASCII. Right-click picks how the cells show the
     bytes (GUI-7): hex bytes by default, unsigned or signed C integers in hex or decimal, characters,
@@ -800,6 +819,10 @@ class MemoryView(QWidget):
         self.table.verticalHeader().setFont(mono())
         self.table.setEditTriggers(QAbstractItemView.DoubleClicked | QAbstractItemView.EditKeyPressed)
         self.table.itemChanged.connect(self._edited)
+        self._editing: tuple[int, int] | None = None   # (row, column) of the cell being edited
+        cells = _CellDelegate(self)
+        cells.closeEditor.connect(self._editor_closed)
+        self.table.setItemDelegate(cells)
         self.table.setContextMenuPolicy(Qt.CustomContextMenu)
         self.table.customContextMenuRequested.connect(self._menu)
         layout.addWidget(self.table, 1)
@@ -926,6 +949,10 @@ class MemoryView(QWidget):
                     item = QTableWidgetItem()
                     self.table.setItem(r, c, item)
                 item.setTextAlignment(Qt.AlignRight | Qt.AlignVCenter)
+                if (r, c) == self._editing:
+                    text.append(fmt.to_ascii(data[i:i + size], order) if 0 <= i and i + size <= len(data)
+                                else " " * size)
+                    continue   # shown once the editor closes
                 if 0 <= i and i + size <= len(data):     # a cell only partly read stays blank
                     item.setText(fmt.to_text(data[i:i + size], order))
                     item.setFlags(Qt.ItemIsSelectable | Qt.ItemIsEnabled | Qt.ItemIsEditable)
@@ -939,6 +966,12 @@ class MemoryView(QWidget):
             self.table.setItem(r, cells, ascii_item)
         self.table.blockSignals(False)
         self.message.setText(f"{mcu}: {len(data)} bytes at 0x{base:08X} as {fmt.label}")
+
+    def _editor_closed(self, *_) -> None:
+        """A cell's editor closed, committed or not: show what was read last in it again."""
+        self._editing = None
+        if self.base is not None:
+            self._show((self._shown_mcu, self.base, self.data, self.order))
 
     # --- writing -------------------------------------------------------------------------------
 
@@ -961,6 +994,23 @@ class MemoryView(QWidget):
             self.read()
             return
         shown = fmt.to_text(data, self.order)
+        ws = self.main.ws
+        end = addr + len(data)
+        # Memory-view writes are raw (D-WS-4): no scaling and no min/max, which are in an item's
+        # shown units. But bytes of a watched item marked read-only are not written, and an item
+        # that asks before writing is asked for here too (M12; rani, 2026-10-18, code review).
+        guarded = [w for w in ws.watches if w.confirm or ws.read_only_reason(w.expr)]
+
+        def overlapping(t: Target) -> list[str]:
+            hits = []
+            for w in guarded:
+                try:
+                    loc = t.resolve(w.expr)
+                except RdtError:
+                    continue   # not on this device now: it has no bytes to protect
+                if loc.mcu == mcu and loc.addr < end and addr < loc.addr + max(loc.size, 1):
+                    hits.append(w.expr)
+            return hits
 
         def done(_):
             self.main.status(f"{mcu}:0x{addr:08X} = {shown} ({fmt.label})")
@@ -970,7 +1020,26 @@ class MemoryView(QWidget):
             self.main.status(f"write {mcu}:0x{addr:08X}: {describe_error(e)}", error=True)
             self.read()
 
-        self.main.device.submit(lambda t: t.write(mcu, addr, data), done, failed)
+        def checked(hits: list[str]) -> None:
+            locked = [e for e in hits if ws.read_only_reason(e)]
+            if locked:
+                self.main.status(f"{mcu}:0x{addr:08X}: not written, it is part of {', '.join(locked)}, which is "
+                                 f"{ws.read_only_reason(locked[0])}", error=True)
+                self.read()
+                return
+            ask = [e for e in hits if (w := ws.watch(e)) is not None and w.confirm]
+            if ask and QMessageBox.question(
+                    self, "Write memory", f"Write {shown} to {mcu}:0x{addr:08X}? It is part of {', '.join(ask)}."
+            ) != QMessageBox.Yes:
+                self.main.status(f"{mcu}:0x{addr:08X}: write cancelled")
+                self.read()
+                return
+            self.main.device.submit(lambda t: t.write(mcu, addr, data), done, failed)
+
+        if not guarded:
+            checked([])
+            return
+        self.main.device.submit(overlapping, checked, failed)
 
 
 # --- SCPI profile editor ---------------------------------------------------------------------

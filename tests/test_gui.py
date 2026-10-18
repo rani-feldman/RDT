@@ -1316,3 +1316,63 @@ def test_watch_dialog_keeps_exact_numbers_and_refuses_nan_limits(qtbot, win):
     dlg.max.setText("NaN")
     with pytest.raises(ValueError, match="maximum"):
         dlg.result_watch()
+
+
+def test_memory_refresh_leaves_the_cell_being_edited(qtbot, win):
+    """M4: a refresh while a memory cell is being edited changes neither the editor nor the cell."""
+    from PySide6.QtTest import QTest
+    from PySide6.QtWidgets import QLineEdit
+    connect(qtbot, win)
+    mem = win.memory
+    mem.mcu.setCurrentText("main")
+    mem.address.setText("gains")
+    mem.length.setValue(16)
+    mem.read()
+    qtbot.waitUntil(lambda: mem.base == 0x20000014, timeout=3000)
+    item = mem.table.item(0, 4)
+    before = item.text()
+    mem.table.editItem(item)
+    editor = mem.table.viewport().findChildren(QLineEdit)[-1]
+    editor.setText("7F")
+    other = bytes([(mem.data[0] + 1) & 0xFF]) + mem.data[1:]
+    mem._show(("main", mem.base, other, mem.order))   # Refresh read something new
+    assert editor.text() == "7F" and item.text() == before
+    QTest.keyClick(editor, Qt.Key_Escape)
+    assert mem.table.item(0, 4).text() == f"{other[0]:02X}"
+
+
+def test_memory_writes_keep_read_only_and_confirm_items(qtbot, win, monkeypatch):
+    """M12: a memory-view write over a read-only watched item is refused, and one over an item that
+    asks before writing asks too."""
+    connect(qtbot, win)
+    mem = win.memory
+    mem.mcu.setCurrentText("main")
+    writes = []
+    target = win.device.target
+    real = target.write
+    monkeypatch.setattr(target, "write", lambda *a: (writes.append(a), real(*a))[1])
+    mem.address.setText("motor.mode")             # read-only in the workspace
+    mem.length.setValue(4)
+    mem.read()
+    qtbot.waitUntil(lambda: mem.message.text().startswith("main: 4 bytes"), timeout=3000)
+    first = mem.base
+    cell = mem.table.item(0, first % 16)
+    cell.setText(f"{(int(cell.text(), 16) + 1) & 0xFF:02X}")   # a new value, so the cell changes
+    qtbot.waitUntil(lambda: "not written" in win.banner.error, timeout=3000)
+    assert "main:motor.mode" in win.banner.error and writes == []
+    mem.address.setText("motor.target")           # asks before writing
+    mem.read()
+    qtbot.waitUntil(lambda: mem.base != first, timeout=3000)
+    col = mem.base % 16
+    row = (mem.base - mem._row_start()) // 16
+    asked = []
+    monkeypatch.setattr(QMessageBox, "question", lambda *a, **k: asked.append(a[2]) or QMessageBox.No)
+    cell = mem.table.item(row, col)
+    old = int(cell.text(), 16)
+    cell.setText(f"{(old + 1) & 0xFF:02X}")
+    qtbot.waitUntil(lambda: "cancelled" in win.message.text(), timeout=3000)
+    assert writes == [] and "main:motor.target" in asked[0]
+    qtbot.waitUntil(lambda: mem.table.item(row, col).text() == f"{old:02X}", timeout=3000)   # read again
+    monkeypatch.setattr(QMessageBox, "question", lambda *a, **k: QMessageBox.Yes)
+    mem.table.item(row, col).setText(f"{(old + 1) & 0xFF:02X}")
+    qtbot.waitUntil(lambda: len(writes) == 1, timeout=3000)
