@@ -7,18 +7,21 @@ parser would handle them one at a time. The SCPI error queue is shared by all cl
 from __future__ import annotations
 
 import logging
+import re
 import threading
 import time
 from collections import deque
 
 from .mcu import Mcu
 from .memory import MemoryFault
-from .profile import CommandPattern, Profile, parse_hex, parse_int
+from .profile import CommandPattern, Profile, parse_hex
 
 log = logging.getLogger("sim")
 
 ERROR_QUEUE_SIZE = 16
 WRITE_SIZES = (1, 2, 4, 8)
+_DECIMAL = re.compile(r"[0-9]+")
+_ADDRESS = re.compile(r"[0-9A-Fa-f]{8}")
 
 
 class ScpiError(Exception):
@@ -135,11 +138,22 @@ class Device:
 
     # --- parameters --------------------------------------------------------------------------
 
-    def _int(self, args: dict, name: str, base: int = 0) -> int:
-        try:
-            return parse_int(args[name], base)
-        except (ValueError, KeyError):
-            raise _data_type(f"{name}={args.get(name)!r}") from None
+    def _int(self, args: dict, name: str) -> int:
+        """An MCU, length or size: plain decimal, as the firmware takes it. ``0x10``, ``#H10``,
+        ``+4`` and ``1_6`` fail like any other bad parameter (rani, 2026-10-18, code review)."""
+        text = args.get(name)
+        if text is None or not _DECIMAL.fullmatch(text.strip()):
+            raise _data_type(f"{name}={text!r} is not decimal")
+        return int(text)
+
+    def _addr(self, args: dict) -> int:
+        """An address: exactly 8 bare hex digits, zero-padded, as the firmware takes it. A shorter
+        or longer one gets no reply, so the simulator catches a host that stops padding
+        (rani, 2026-10-18, code review)."""
+        text = args.get("addr")
+        if text is None or not _ADDRESS.fullmatch(text.strip()):
+            raise _data_type(f"addr={text!r} is not 8 bare hex digits")
+        return int(text, 16)
 
     def _hex(self, args: dict, name: str) -> int:
         """An address or value: bare hex with no prefix, as the firmware takes it."""
@@ -170,7 +184,7 @@ class Device:
 
     def _read(self, args: dict) -> bytes:
         mcu = self._mcu(args)
-        addr = self._hex(args, "addr")
+        addr = self._addr(args)
         size = self._int(args, "len")
         if size < 1:
             raise _illegal_value(f"len={size}")
@@ -186,7 +200,7 @@ class Device:
 
     def _write(self, args: dict) -> None:
         mcu = self._mcu(args)
-        addr = self._hex(args, "addr")
+        addr = self._addr(args)
         value = self._hex(args, "value")
         size = self._int(args, "size") if "size" in args else self.profile.max_write
         if size not in WRITE_SIZES or size > self.profile.max_write:

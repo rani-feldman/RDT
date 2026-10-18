@@ -43,6 +43,14 @@ def test_write_takes_the_raw_value_in_bare_hex(device):
     "MEM:READ? 0,0x20000000,4",       # prefixed address
     "MEM:WRITE 0,20000000,0x1,1",     # prefixed value
     "MEM:WRITE 0,20000000,-1,1",      # signed value
+    "MEM:READ? 0,8000000,4",          # address not padded to 8 digits
+    "MEM:READ? 0,008000000,4",        # address longer than 8 digits
+    "MEM:WRITE 0,2000000,1,4",
+    "MEM:READ? 0,20000000,0x10",      # length, MCU and size are plain decimal
+    "MEM:READ? 0,20000000,1_6",
+    "MEM:READ? #H0,20000000,4",
+    "MEM:READ? +0,20000000,4",
+    "MEM:WRITE 0,20000000,1,0x4",
 ])
 def test_prefixed_or_signed_numbers_are_refused(device, line):
     assert q(device, line) is None
