@@ -902,7 +902,7 @@ def test_commands_import_and_export_buttons(qtbot, win, tmp_path, monkeypatch):
     assert out.read_text(encoding="utf-8-sig").splitlines()[1:] == ["*IDN?,,,", "MOTor:SPEed?,,,"]
 
 
-def test_polling_can_be_turned_off_and_polled_by_hand(qtbot, win):
+def test_polling_can_be_turned_off_and_polled_by_hand(qtbot, win, monkeypatch):
     connect(qtbot, win)
     tree = win.watch_tree
     far = time.monotonic() + 3600
@@ -913,9 +913,12 @@ def test_polling_can_be_turned_off_and_polled_by_hand(qtbot, win):
     assert tree.due(far, win.watch_tabs.polling) == []     # nothing is read while polling is off
     st = tree.states["main:motor.speed"]
     qtbot.waitUntil(lambda: not win.device.busy("poll"), timeout=3000)
-    last = st.last_done
+    # Count the reads rather than compare last_done: on Python 3.11 under Windows time.monotonic()
+    # ticks every ~16 ms, so a fast read can finish on the same tick as the one before it.
+    done = []
+    monkeypatch.setattr(tree, "_done", lambda s, result, f=tree._done: (done.append(s), f(s, result)))
     win.bar.poll_now.click()                               # Poll now still reads every item once
-    qtbot.waitUntil(lambda: st.last_done != last, timeout=3000)
+    qtbot.waitUntil(lambda: st in done, timeout=3000)
     win.polling_action.trigger()                           # Watch > Poll automatically (F7) turns it back on
     assert win.watch_tabs.polling and win.bar.polling.isChecked() and win.bar.poll.isEnabled()
 
