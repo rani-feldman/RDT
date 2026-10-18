@@ -139,17 +139,85 @@ def test_write_inline_with_limits_and_confirm(qtbot, win, monkeypatch):
     wait_value(qtbot, win, "main:motor.current_ma", lambda v: v == "1.25 A")
 
 
+def open_editor(tree, node):
+    """Double-click a value: the tree opens its line editor on it."""
+    from PySide6.QtWidgets import QLineEdit
+    tree._double_clicked(node, COL_VALUE)
+    assert node.flags() & Qt.ItemIsEditable and tree._editing is not None
+    return tree.viewport().findChildren(QLineEdit)[-1]
+
+
 def test_inline_edit_writes(qtbot, win):
+    from PySide6.QtTest import QTest
     connect(qtbot, win)
     tree = win.watch_tree
     tree.add_watch("main:gains")
     wait_value(qtbot, win, "main:gains[1]", lambda v: True)
     tree.states["main:gains"].item.setExpanded(True)
-    node = tree.states["main:gains"].nodes["main:gains[1]"]
-    tree._double_clicked(node, COL_VALUE)
-    assert node.flags() & Qt.ItemIsEditable
-    node.setText(COL_VALUE, "-42")
-    wait_value(qtbot, win, "main:gains[1]", lambda v: v.startswith("-42"))
+    st = tree.states["main:gains"]
+    node = st.nodes["main:gains[1]"]
+    editor = open_editor(tree, node)
+    editor.setText("-42")
+    QTest.keyClick(editor, Qt.Key_Return)
+    qtbot.waitUntil(lambda: st.shown["main:gains[1]"].text.startswith("-42"), timeout=3000)
+    assert tree._editing is None and not node.flags() & Qt.ItemIsEditable
+
+
+def test_display_updates_while_editing_never_write(qtbot, win, monkeypatch):
+    """H2, M3: the highlight fading, a poll or an ELF remap changing the cell under an open editor
+    neither writes nor replaces what is being typed; only a commit writes, and Esc writes nothing."""
+    from PySide6.QtTest import QTest
+    connect(qtbot, win)
+    tree = win.watch_tree
+    path = "main:motor.speed"
+    wait_value(qtbot, win, path, lambda v: v.endswith("rpm"))
+    win.poll_timer.stop()
+    qtbot.waitUntil(lambda: not win.device.busy("poll"), timeout=3000)
+    st = tree.states[path]
+    writes = []
+    monkeypatch.setattr(tree, "write", lambda p, text, owner=None: writes.append((p, text)))
+    row = st.shown[path]
+    tree._fill(st, [dataclasses.replace(row, text="1.5 rpm")])
+    tree._fill(st, [dataclasses.replace(row, text="2.5 rpm")])   # changed: highlighted
+    assert path in tree.flashing
+    editor = open_editor(tree, st.item)
+    assert editor.text() == "2.5"   # the unit is not part of the value typed
+    editor.setText("777")
+    tree._fill(st, [dataclasses.replace(row, text="3.25 rpm")])   # a poll arrives
+    tree.fade(time.monotonic() + 5)                               # the highlight goes
+    tree.remapped(path, object(), "moved")
+    assert editor.text() == "777" and st.item.text(COL_VALUE) == "2.5"
+    assert writes == []
+    QTest.keyClick(editor, Qt.Key_Escape)
+    assert tree._editing is None and writes == []
+    assert st.item.text(COL_VALUE) == "3.25 rpm"   # the latest value, once the editor is gone
+    tree.remapped(path, None, "gone")
+    assert writes == []
+    st.gone = False
+    editor = open_editor(tree, st.item)
+    editor.setText("777")
+    QTest.keyClick(editor, Qt.Key_Return)   # Qt commits on the next turn of the event loop
+    qtbot.waitUntil(lambda: tree._editing is None, timeout=1000)
+    assert writes == [(path, "777")]
+    editor = open_editor(tree, st.item)   # opened and left unchanged: nothing written
+    QTest.keyClick(editor, Qt.Key_Return)
+    qtbot.waitUntil(lambda: tree._editing is None, timeout=1000)
+    assert writes == [(path, "777")] and "unchanged" in win.message.text()
+
+
+def test_struct_field_edit_drops_the_unit(qtbot, win):
+    """L8: a field of a struct shows the struct's unit; editing it starts from the bare number."""
+    from rdt.workspace import Watch
+    connect(qtbot, win)
+    tree = win.watch_tree
+    tree.add_watch("main:motor")
+    st = tree.states["main:motor"]
+    tree.replace_watch(st.watch, Watch.from_dict({"expr": "main:motor", "unit": "u"}))
+    tree.read_now("main:motor")
+    qtbot.waitUntil(lambda: (r := st.shown.get("main:motor.speed")) is not None and r.text.endswith(" u"),
+                    timeout=5000)
+    row = st.shown["main:motor.speed"]
+    assert tree._edit_text(st, "main:motor.speed", row) == row.text[:-2]
 
 
 def test_symbol_browser_adds_and_save_round_trips(qtbot, win, tmp_path):
