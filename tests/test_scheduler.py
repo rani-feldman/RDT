@@ -151,3 +151,4 @@ def test_csv_log(tmp_path):
     assert rows[3][1:] == ["1.000", "", "", "", "link down"]
     assert rows[1][0].startswith("2027-01-15T") and rows[1][0][19:23] == ".000"
     assert (cell(2.0), cell(-3), cell(b"rdt\0\0"), cell(float("nan"))) == ("2", "-3", "rdt", "nan")
+    assert (cell(2**64 - 1), cell(-(2**63) + 1), cell(True)) == ("18446744073709551615", "-9223372036854775807", "1")

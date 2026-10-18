@@ -30,6 +30,8 @@ def iso_time(when: float) -> str:
 
 def cell(value) -> str:
     """One value as CSV text: numbers as numbers, anything else as its text."""
+    if isinstance(value, int):   # exactly: a float would round a 64-bit counter above 2^53 (review L12)
+        return str(int(value))
     v = numeric(value)
     if v is not None:
         if isinstance(value, float) or not v.is_integer():
