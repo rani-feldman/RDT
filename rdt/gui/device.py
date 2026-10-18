@@ -7,6 +7,7 @@ the same key is still waiting, so a poll that can't keep up falls behind instead
 
 from __future__ import annotations
 
+import atexit
 import itertools
 import logging
 from typing import Any, Callable
@@ -26,9 +27,12 @@ class _Worker(QObject):
     def __init__(self):
         super().__init__()
         self.target: Target | None = None
+        self.stopping = False   # set by Device.shutdown: jobs still queued are skipped
 
     @Slot(int, object)
     def run(self, job_id: int, fn) -> None:
+        if self.stopping and job_id != 0:   # job 0 is shutdown's own close (M7)
+            return
         try:
             result = fn(self)
         except Exception as e:   # handed to the job's on_error on the GUI thread
@@ -54,6 +58,10 @@ class Device(QObject):
         self._keys: set[str] = set()
         self._ids = itertools.count(1)
         self.target: Target | None = None   # for reading state on the GUI thread only
+        # Bumped by every open() and close(): a connect whose number is no longer current was
+        # cancelled (F5 again, or another workspace opened), so it closes its own Target and
+        # doesn't attach it (H4, M5; rani, 2026-10-18, code review).
+        self._link_gen = 0
         self._thread.start()
 
     # --- jobs --------------------------------------------------------------------------------
@@ -107,29 +115,46 @@ class Device(QObject):
     # --- link --------------------------------------------------------------------------------
 
     def open(self, config: TargetConfig, on_error: Callable[[Exception], None] | None = None) -> None:
-        """Connect to the target described by ``config`` (closing any open link first)."""
+        """Connect to the target described by ``config`` (closing any open link first). A later
+        open() or close() cancels it: the Target it made is closed, and neither ``opened`` nor
+        ``on_error`` comes."""
+        self._link_gen += 1
+        gen = self._link_gen
 
         def connect(worker: _Worker):
             if worker.target is not None:
                 worker.target.close()
                 worker.target = None
+            if gen != self._link_gen:
+                return None             # cancelled while it waited its turn
             t = Target(config, auto_reconnect=True)
             try:
                 t.connect()
             except Exception:
                 t.close()
                 raise
+            if gen != self._link_gen:   # cancelled while connecting
+                t.close()
+                return None
             worker.target = t
             return t
 
-        def done(t: Target) -> None:
+        def done(t: Target | None) -> None:
+            if t is None or gen != self._link_gen:
+                return   # the close() that cancelled it closes this Target too (it runs next)
             self.target = t
             self.opened.emit(t)
 
+        def failed(e: Exception) -> None:
+            if gen == self._link_gen and on_error:
+                on_error(e)
+
         self.target = None
-        self.submit(connect, done, on_error, needs_target=False)
+        self.submit(connect, done, failed, needs_target=False)
 
     def close(self, on_done: Callable[[Any], None] | None = None) -> None:
+        self._link_gen += 1
+
         def disconnect(worker: _Worker):
             if worker.target is not None:
                 worker.target.close()
@@ -147,13 +172,48 @@ class Device(QObject):
     def state(self) -> LinkState:
         return self.target.link_state if self.target is not None else LinkState.CLOSED
 
-    def shutdown(self) -> None:
-        """Close the link and stop the worker; waits for the job in progress."""
+    def shutdown(self, wait_ms: int = 5000) -> None:
+        """Close the link and stop the worker. Jobs still queued are skipped; the one in progress
+        is waited for, up to ``wait_ms``, and then the close runs, so RDT closes the port itself
+        (M7). The close job stops the thread's loop only after it ran: quit() from here would
+        stop it before the queued close."""
+        self._link_gen += 1
         if self._thread.isRunning():
-            self._run.emit(0, lambda w: w.target.close() if w.target else None)
-            self._thread.quit()
-            self._thread.wait(5000)
+            def close_and_stop(worker: _Worker):
+                try:
+                    if worker.target is not None:
+                        worker.target.close()
+                        worker.target = None
+                finally:
+                    QThread.currentThread().quit()
+
+            self._worker.stopping = True
+            self._run.emit(0, close_and_stop)
+            if not self._thread.wait(wait_ms):
+                # A job that still hasn't ended (each access has its own timeout, so this is a
+                # long job, not a hang). Qt aborts the whole process if a running QThread is
+                # destroyed, so the thread and worker are kept until RDT exits and waited for
+                # then; the close queued above still runs once the job ends.
+                log.warning("device job still running after %d ms; finishing it as RDT exits", wait_ms)
+                _keep_until_exit(self._thread, self._worker)
         self.target = None
+
+
+_left_running: list[tuple[QThread, _Worker]] = []
+
+
+def _keep_until_exit(thread: QThread, worker: _Worker) -> None:
+    if not _left_running and not getattr(_keep_until_exit, "registered", False):
+        atexit.register(_wait_left_running)
+        _keep_until_exit.registered = True
+    _left_running.append((thread, worker))
+
+
+def _wait_left_running() -> None:
+    """Runs at exit, before Python tears down the modules (which would destroy the threads)."""
+    while _left_running:
+        thread, _ = _left_running.pop()
+        thread.wait()
 
 
 def describe_error(e: Exception) -> str:

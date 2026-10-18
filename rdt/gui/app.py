@@ -946,7 +946,10 @@ class MainWindow(QMainWindow):
 
     def load(self, ws: Workspace) -> None:
         self.stop_log()
-        if self.device.target is not None:
+        if self.device.target is not None or self._connecting:
+            # Also cancels a connect still in progress, so the old link never attaches to the
+            # new workspace (H4).
+            self._connecting = False
             self.device.close()
         self.ws = ws
         self.remember(ws.path)
@@ -1114,6 +1117,7 @@ class MainWindow(QMainWindow):
             t.stop()
         self.stop_log()
         self.console.stop_log()
+        self.hide()              # gone at once, even while shutdown waits for a long job (M7)
         self.device.shutdown()
         event.accept()
 

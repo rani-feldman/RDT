@@ -1225,3 +1225,30 @@ def test_row_hover_buttons_and_mono_values(qtbot, win):
     vopt = QStyleOptionViewItem()
     value.initStyleOption(vopt, tree.model().index(0, 1))
     assert QFontInfo(vopt.font).fixedPitch()
+
+
+def test_f5_twice_cancels_the_connect(qtbot, win):
+    """M5: the connect's result arrives after the cancel; it must not leave a closed target."""
+    opened = []
+    win.device.opened.connect(opened.append)
+    win.toggle_connection()
+    win.toggle_connection()        # F5 again while connecting
+    qtbot.waitUntil(lambda: win.device.pending == 0, timeout=5000)
+    qtbot.wait(100)
+    assert win.device.target is None and opened == [] and not win._connecting
+    assert win.bar.connect_button.text().startswith("Disconnected")
+    assert win.bar.host.isEnabled()
+    connect(qtbot, win)            # and the next F5 connects
+    assert win.device.target is not None
+
+
+def test_opening_a_workspace_while_connecting_cancels_it(qtbot, win, bench):
+    """H4: the old link must not attach to the newly opened workspace."""
+    opened = []
+    win.device.opened.connect(opened.append)
+    win.connect()
+    win.load(Workspace.load(bench))
+    qtbot.waitUntil(lambda: win.device.pending == 0, timeout=5000)
+    qtbot.wait(100)
+    assert win.device.target is None and opened == [] and not win._connecting
+    assert win.bar.connect_button.text().startswith("Disconnected")
