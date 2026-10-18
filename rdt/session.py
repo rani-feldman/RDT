@@ -58,12 +58,20 @@ class McuStatus:
     last_probe: float = 0.0
     reply_ms: float | None = None     # how long the MCU takes to answer a read, smoothed (GUI-14)
     timeouts: list[float] = field(default_factory=list)   # when reads timed out, the last minute
+    # The session's thread adds timeouts while the GUI thread counts and prunes them (L13).
+    _lock: threading.Lock = field(default_factory=threading.Lock, repr=False, compare=False)
+
+    def add_timeout(self, when: float | None = None) -> None:
+        with self._lock:
+            self.timeouts.append(time.monotonic() if when is None else when)
+            del self.timeouts[:-100]
 
     def recent_timeouts(self, now: float | None = None) -> int:
         """Reads that got no reply in the last minute."""
         now = time.monotonic() if now is None else now
-        self.timeouts[:] = [t for t in self.timeouts if now - t < 60.0]
-        return len(self.timeouts)
+        with self._lock:
+            self.timeouts[:] = [t for t in self.timeouts if now - t < 60.0]
+            return len(self.timeouts)
 
 
 Listener = Callable[[str, dict], None]
@@ -319,8 +327,7 @@ class Session:
                     self._device_answered()
                     self._mcu_answered(mcu)
                     return data
-                st.timeouts.append(time.monotonic())
-                del st.timeouts[:-100]
+                st.add_timeout()
                 if mcu != 0:
                     st.timeouts_in_row += 1
                     if st.timeouts_in_row >= self.SILENT_AFTER:
@@ -408,6 +415,8 @@ class Session:
             raise WriteNotConfirmed(f"write to 0x{addr:08X} on {self._name(mcu)} not sent: reading the "
                                     f"{self.profile.align}-byte words around it failed: {e}",
                                     data, None) from None
+        raise WriteNotConfirmed(f"write to 0x{addr:08X} on {self._name(mcu)} not sent: two reads in a row of the "
+                                f"{self.profile.align}-byte words around it never agreed", data, None)
 
     def _send_pieces(self, mcu: int, pieces: list[tuple[int, bytes]], byte_order: str) -> None:
         for a, chunk in pieces:
@@ -419,8 +428,6 @@ class Session:
         except (CommandTimeout, BadReply, McuSilent, CommandRejected) as e:
             raise WriteNotConfirmed(f"write to 0x{addr:08X} on {self._name(mcu)} sent, but the read-back failed: {e}",
                                     data, None) from None
-        raise WriteNotConfirmed(f"write to 0x{addr:08X} on {self._name(mcu)} not sent: two reads in a row of the "
-                                f"{self.profile.align}-byte words around it never agreed", data, None)
 
     # --- console -----------------------------------------------------------------------------
 

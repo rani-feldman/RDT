@@ -539,3 +539,29 @@ def test_idle_serial_link_goes_down_when_the_port_disappears():
             t.check()
     finally:
         t.close()
+
+
+def test_timeouts_counted_by_the_gui_while_the_worker_adds_them():
+    """L13: the GUI thread prunes the list of timeouts while the session's thread adds to it;
+    no timeout may be lost, or the MCU card can stay green."""
+    from rdt.session import McuStatus
+
+    st = McuStatus()
+    stop = threading.Event()
+
+    def gui():
+        while not stop.is_set():
+            st.recent_timeouts()
+
+    reader = threading.Thread(target=gui)
+    old = sys.getswitchinterval()
+    sys.setswitchinterval(1e-6)
+    try:
+        reader.start()
+        for _ in range(100):
+            st.add_timeout()
+    finally:
+        stop.set()
+        reader.join()
+        sys.setswitchinterval(old)
+    assert st.recent_timeouts() == 100
