@@ -197,13 +197,13 @@ Do this once per bench, then save the workspace.
    - `serial`: pick the COM port (the list shows each port's description, such as `COM3 - GAC serial port (COM3)`, and is rescanned each time you open it) and the baud rate.
    - `tcp` or `udp`: type the device's IP address and port.
    The fields can only be changed while disconnected.
-3. **Set the SCPI profile.** Click the gear icon (or **Target > SCPI profile...**). Fill in the read and write templates and the other fields, or press **Load from file...** to fill them from a profile file. The editor shows the commands as they will be sent and refuses a template that can't work. While connected, **Test read** sends one read with the edited profile and shows the reply and the bytes it decodes to, before you apply it. Press **OK** to apply.
+3. **Set the SCPI profile.** Click the gear icon (or **Target > SCPI profile...**). Fill in the read and write templates and the other fields, or press **Load from file...** to fill them from a profile file. The editor shows the commands as they will be sent and refuses a template that can't work. While connected, **Test read** sends one read with the edited profile and shows the reply and the bytes it decodes to, before you apply it; like any read, it is refused outside known memory and on an ELF mismatch. Press **OK** to apply.
 4. **Add the MCUs and their ELF files.** **Target > MCUs and ELF files...** has one row per MCU:
    - **Id** and **Name**. MCU 0 is the main MCU and is required.
    - **Short name** (1 to 6 letters, digits or underscores, such as `CM7`) and **Colour**: the MCU's tag in the watch tree and its colour on the chart. Double-click the colour to choose one. Left empty, they are picked for you.
    - **ELF file**: the `.elf` or `.axf` the linker wrote for that MCU.
    - **Timeout ms**: overrides the profile's timeout for this MCU.
-5. **Load the memory map.** **File > Import > Memory map...** reads the memory ranges from a memory file, or from a profile, target file or another workspace. Choose whether to add them to yours or replace them. The GUI has no editor for single ranges; write them in a memory file (see [Memory ranges](CLI.md#scpi-profile)) and import it. Each MCU card's **Memory ranges ▸** lists what RDT may access on that MCU.
+5. **Load the memory map.** **File > Import > Memory map...** reads the memory ranges from a memory file, or from a profile, target file or another workspace. Choose whether to add them to yours or replace them. A peripheral range that overlaps the ELF is refused and nothing changes. The GUI has no editor for single ranges; write them in a memory file (see [Memory ranges](CLI.md#scpi-profile)) and import it. Each MCU card's **Memory ranges ▸** lists what RDT may access on that MCU.
 6. **Import the known commands** (optional). **File > Import > Commands...** reads a commands file (`.toml`), a CSV file or a text file with one command per line. They appear in the console's **Commands** list.
 7. **Save.** **File > Save as...** writes the `.rdtw` and its files, by default in `%LOCALAPPDATA%\rdt`.
 
@@ -267,9 +267,9 @@ Right-click a card for **Check ELF again**, **MCUs and ELF files...** and **Open
 
 1. Double-click the value (or right-click > **Write...**).
 2. Type the new value in the item's units: with scale 0.001 and unit `A`, typing `1.25` writes 1250. Enums take their names (`MODE_RUN`); `char` arrays take a string; integers take `42`, `-7`, `0x1F` or `0b101`.
-3. Press Enter. RDT writes the value and reads it back to confirm it.
+3. Press Enter (or click elsewhere). RDT writes the value and reads it back to confirm it. Esc cancels, and an unchanged value is not written.
 
-The write is refused, with the reason in the error bar, when the item is read-only, the value is outside its minimum and maximum, or the MCU's ELF does not match. Items set to ask first show a confirmation. **Watch > All items read-only** makes every item read-only unless its settings say Writable, and also blocks writes from the memory view.
+The write is refused, with the reason in the error bar, when the item is read-only, the value is outside its minimum and maximum, or the MCU's ELF does not match. Items set to ask first show a confirmation. **Watch > All items read-only** makes every item read-only unless its settings say Writable, and also blocks writes from the memory view. The memory view also refuses a write over a watched read-only item and asks first over one that asks before writing.
 
 Writes are always whole 4-byte words (the profile's `align`). A smaller value is written by reading its word, changing the bytes and writing the word back; if the firmware changes a neighbouring value in that moment, its change is lost.
 
