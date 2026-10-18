@@ -983,6 +983,10 @@ COMMANDS = {
 
 
 OFFLINE = ("symbols", "ptype", "init", "list", "add", "remove", "tab", "commands", "watchlist", "memory", "read-only")   # never open the link
+# These only change the workspace's files and never use the target, so they work on a workspace
+# whose target won't load, such as one whose memory map overlaps an ELF section: memory import
+# --replace has to be able to mend it (H5, rani, 2026-10-18, code review).
+NO_TARGET = ("list", "remove", "tab", "commands", "watchlist", "memory", "read-only")
 
 
 def main(argv: list[str] | None = None, out=None) -> int:
@@ -998,6 +1002,8 @@ def main(argv: list[str] | None = None, out=None) -> int:
         args.ws = load_workspace(args)
         for warning in args.ws.warnings:
             print(f"rdt: {warning}", file=sys.stderr)
+        if args.cmd in NO_TARGET:
+            return COMMANDS[args.cmd](None, args, out)
         cfg = args.ws.config
         # One-shot commands fail at once on a broken link; watch and console keep reconnecting.
         target = Target(cfg, auto_reconnect=args.cmd in ("watch", "console"))

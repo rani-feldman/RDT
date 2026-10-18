@@ -48,7 +48,7 @@ from typing import Callable
 from . import scheduler, tomlw
 from .console import SavedCommand, merge_commands, read_commands, write_commands
 from .errors import ConfigError, RdtError, SymbolError, WriteRefused
-from .memmap import MemoryMap
+from .memmap import MemoryMap, load_elf_sections
 from .profile import Profile, Range, load_memory_file
 from .scaling import Display
 from .symbols import Location, parse
@@ -366,8 +366,12 @@ class Workspace:
                 added += 1
         for m in cfg.mcus:
             shared = [r for r in merged if r.mcu in (None, "", m.name, m.id)]
+            # Check against the ELF's sections as loading the target does, so a peripheral range
+            # over .data is refused here and not saved into a workspace that then won't load (H5).
+            # An ELF that isn't built yet is checked when the target loads it.
+            sections = load_elf_sections(m.elf).sections if m.elf is not None and Path(m.elf).is_file() else []
             try:
-                MemoryMap([], shared)
+                MemoryMap(sections, shared)
             except RdtError as e:
                 raise ConfigError(f"{Path(path).name}: {e}") from None
         cfg.profile.ranges = merged

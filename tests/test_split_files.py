@@ -12,7 +12,7 @@ from rdt.cli import main
 from rdt.console import SavedCommand
 from rdt.profile import Range
 from rdt.scaling import Display
-from rdt.target import McuConfig, TargetConfig
+from rdt.target import McuConfig, Target, TargetConfig
 from rdt.ui_settings import UiSettings, ui_path
 from rdt.workspace import Tab, Watch, Workspace
 
@@ -352,6 +352,52 @@ def test_load_memory_map_refuses_overlap(tmp_path):
     with pytest.raises(ConfigError):
         ws.import_memory(tmp_path / "bad.toml")
     assert ws.memory_ranges() == []
+
+
+FIRMWARE = ROOT / "sim" / "examples" / "firmware"
+OVER_DATA = '[[ranges]]\nname = "BAD"\nstart = 0x20000000\nsize = 0x100\n'   # a peripheral on .data
+GPIOA = '[[ranges]]\nname = "GPIOA"\nstart = 0x40020000\nsize = 0x400\n'
+
+
+def test_load_memory_map_refuses_a_peripheral_over_an_elf_section(tmp_path):
+    """H5: the ranges are checked against each MCU's ELF sections, as loading checks them."""
+    (tmp_path / "bad.toml").write_text(OVER_DATA.replace('"BAD"', '"BAD"\nmcu = "main"'))
+    ws = Workspace(TargetConfig(mcus=[McuConfig(0, "main", FIRMWARE / "main.elf"),
+                                      McuConfig(1, "motorctl", FIRMWARE / "motorctl.elf")]))
+    with pytest.raises(ConfigError, match="bad.toml: peripheral range BAD overlaps .data"):
+        ws.import_memory(tmp_path / "bad.toml")
+    assert ws.memory_ranges() == []
+    # 0x20000090 is in main's .bss but past motorctl's .data: refused only for main
+    gap = '[[ranges]]\nname = "GAP"\nstart = 0x20000090\nsize = 0x10\nmcu = "{}"\n'
+    (tmp_path / "gap.toml").write_text(gap.format("main"))
+    with pytest.raises(ConfigError, match="GAP overlaps .bss"):
+        ws.import_memory(tmp_path / "gap.toml")
+    (tmp_path / "gap.toml").write_text(gap.format("motorctl"))
+    assert ws.import_memory(tmp_path / "gap.toml") == (1, 0)
+    (tmp_path / "ok.toml").write_text(GPIOA)
+    assert ws.import_memory(tmp_path / "ok.toml") == (1, 0)
+    Target(ws.config)   # loads
+
+
+def test_cli_memory_import_refuses_before_saving_and_fixes_a_broken_workspace(tmp_path, capsys):
+    """H5: rdt memory import refuses a bad map without saving it, and --replace mends a workspace
+    already broken that way, which no longer loads as a target."""
+    ws = Workspace(TargetConfig(mcus=[McuConfig(0, "main", FIRMWARE / "main.elf")]))
+    path = ws.save(tmp_path / "w.rdtw")
+    (tmp_path / "bad.toml").write_text(OVER_DATA)
+    (tmp_path / "ok.toml").write_text(GPIOA)
+    assert run("-w", str(path), "memory", "import", str(tmp_path / "bad.toml"))[0] == 1
+    assert "overlaps .data" in capsys.readouterr().err
+    assert not (tmp_path / "w.memory.toml").exists()
+
+    (tmp_path / "w.memory.toml").write_text(OVER_DATA)   # broken by hand, or by an older RDT
+    path.write_text('memory_file = "w.memory.toml"\n' + path.read_text())
+    with pytest.raises(ConfigError, match="overlaps .data"):
+        Target(Workspace.load(path).config)
+    assert run("-w", str(path), "list")[0] == 0           # offline commands still open it
+    assert run("-w", str(path), "memory", "import", "--replace", str(tmp_path / "ok.toml"))[0] == 0
+    assert [r.name for r in Workspace.load(path).memory_ranges()] == ["GPIOA"]
+    Target(Workspace.load(path).config)
 
 
 def test_memory_map_from_a_workspace_and_the_cli(tmp_path):
