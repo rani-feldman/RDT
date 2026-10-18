@@ -61,7 +61,7 @@ The installation has three programs:
 | `rdt` | The command line |
 | `rdt-sim` | The simulated device (Start menu: **RDT simulator**) |
 
-**Upgrade:** run the newer setup. It closes RDT, removes the old version and installs the new one; your settings and workspaces are kept. RDT checks GitHub once a day and says in the status bar when a newer version is out (turn this off in **Help > Check for updates at start**; **Help > Check for updates** checks now). Installing an older version over a newer one asks first. What changed in each version is in **Help > Release notes**.
+**Upgrade:** run the newer setup. It closes RDT, removes the old version and installs the new one; your settings and workspaces are kept. RDT checks GitHub once a day and says in the status bar when a newer version is out; the first time it finds one, a window lists what changed since your version, with a **Download** button (clicking the status bar link shows it again). The check reads GitHub's public releases page, not its API, so many PCs behind one office network don't run into GitHub's request limit. Turn the check off in **Help > Check for updates at start**; **Help > Check for updates** checks now. Installing an older version over a newer one asks first. What changed in each version is in **Help > Release notes**.
 
 **Uninstall:** Windows **Settings > Apps > Installed apps > RDT > Uninstall**. It asks whether to delete your settings and workspaces too (`%LOCALAPPDATA%\rdt`); the answer is No unless you choose Yes.
 

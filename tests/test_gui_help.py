@@ -60,10 +60,30 @@ def test_status_bar_shows_a_newer_release_only(win):
 
 
 def test_update_check_saves_what_it_found(win, monkeypatch):
+    shown = []
+    monkeypatch.setattr(win, "show_update_dialog", lambda: shown.append(1))
     win._update_checked(updates.Release("999.0.0", "https://example/r"))
     assert win.ui.value("updates/latest") == "999.0.0"
     assert not updates.due(win.ui.value("updates/last_check"))
     assert not win.update_label.isHidden()
+    assert shown == [1]                          # what changed shows once on its own...
+    win._update_checked(updates.Release("999.0.0", "https://example/r"))
+    assert shown == [1]                          # ...not again the next day for the same version
+    win._manual_check = True
+    win._update_checked(updates.Release("999.0.0", "https://example/r"))
+    assert shown == [1, 1]                       # Help > Check for updates always shows it
+
+
+def test_update_dialog_shows_what_changed(win):
+    win._latest_release = updates.Release("999.0.0", "https://example/r", "## 999.0.0\n\n- Faster reads.")
+    dlg = win.show_update_dialog()
+    text = dlg.browser.toPlainText()
+    assert "RDT 999.0.0 is available" in text and "Faster reads." in text
+    dlg.close()
+    win._latest_release = updates.Release("999.0.0", "https://example/r")      # changes unknown
+    dlg = win.show_update_dialog()
+    assert "release page" in dlg.browser.toPlainText()
+    dlg.close()
 
 
 def test_update_check_on_start_respects_the_setting(win, monkeypatch):

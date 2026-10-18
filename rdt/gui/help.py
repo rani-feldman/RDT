@@ -1,7 +1,7 @@
 """The Help menu's windows and the update check (INS-7, INS-9, INS-12, INS-13).
 
 ``DocDialog`` shows a shipped Markdown file (user manual, release notes, licence); ``about`` shows
-the version; ``UpdateCheck`` asks GitHub for the latest release off the GUI thread and hands the
+the version; ``UpdateDialog`` says a newer RDT is out and what changed in it; ``UpdateCheck`` asks GitHub for the latest release off the GUI thread and hands the
 answer back as a signal.
 """
 
@@ -12,7 +12,8 @@ import sys
 import threading
 
 from PySide6 import __version__ as pyside_version
-from PySide6.QtCore import QObject, Qt, Signal
+from PySide6.QtCore import QObject, Qt, QUrl, Signal
+from PySide6.QtGui import QDesktopServices
 from PySide6.QtWidgets import QDialog, QDialogButtonBox, QMessageBox, QTextBrowser, QVBoxLayout
 
 from .. import appfiles, updates
@@ -62,6 +63,31 @@ def about(parent) -> QMessageBox:
     box.setAttribute(Qt.WA_DeleteOnClose)
     box.show()
     return box
+
+
+class UpdateDialog(QDialog):
+    """"RDT X.Y.Z is available": what changed since the running version, and a Download button that
+    opens the release page."""
+
+    def __init__(self, parent, release: updates.Release):
+        super().__init__(parent)
+        self.release = release
+        self.setWindowTitle("Update available")
+        self.resize(640, 480)
+        layout = QVBoxLayout(self)
+        self.browser = QTextBrowser()
+        self.browser.setOpenExternalLinks(True)
+        notes = release.notes or f"The changes are listed on the [release page]({release.url})."
+        self.browser.setMarkdown(f"**RDT {release.version} is available** (you have {__version__}).\n\n"
+                                 f"What changed:\n\n{notes}")
+        layout.addWidget(self.browser)
+        buttons = QDialogButtonBox(QDialogButtonBox.Close)
+        download = buttons.addButton("Download", QDialogButtonBox.AcceptRole)
+        download.clicked.connect(lambda: QDesktopServices.openUrl(QUrl(release.url)))
+        buttons.accepted.connect(self.accept)
+        buttons.rejected.connect(self.reject)
+        layout.addWidget(buttons)
+        self.setAttribute(Qt.WA_DeleteOnClose)
 
 
 class UpdateCheck(QObject):
