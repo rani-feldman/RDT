@@ -1433,3 +1433,78 @@ def test_chart_draws_only_the_window_and_keeps_the_last_value(qtbot):
     chart.redraw()
     assert len(s.curve.xData) < 120 and s.curve.xData[-1] >= now - 1   # the 10 s window, not all 600
     assert s.item.text(2) == "599"
+
+
+def test_f5_twice_cancels_the_connect(qtbot, win):
+    """M5: the connect's result arrives after the cancel; it must not leave a closed target."""
+    opened = []
+    win.device.opened.connect(opened.append)
+    win.toggle_connection()
+    win.toggle_connection()        # F5 again while connecting
+    qtbot.waitUntil(lambda: win.device.pending == 0, timeout=5000)
+    qtbot.wait(100)
+    assert win.device.target is None and opened == [] and not win._connecting
+    assert win.bar.connect_button.text().startswith("Disconnected")
+    assert win.bar.host.isEnabled()
+    connect(qtbot, win)            # and the next F5 connects
+    assert win.device.target is not None
+
+
+def test_opening_a_workspace_while_connecting_cancels_it(qtbot, win, bench):
+    """H4: the old link must not attach to the newly opened workspace."""
+    opened = []
+    win.device.opened.connect(opened.append)
+    win.connect()
+    win.load(Workspace.load(bench))
+    qtbot.waitUntil(lambda: win.device.pending == 0, timeout=5000)
+    qtbot.wait(100)
+    assert win.device.target is None and opened == [] and not win._connecting
+    assert win.bar.connect_button.text().startswith("Disconnected")
+
+
+def test_unknown_theme_or_density_falls_back(qtbot, tmp_path, monkeypatch):
+    """M6: a bad value in ui.toml must not stop RDT from starting, and an import refuses it."""
+    ui = tmp_path / "ui.toml"
+    monkeypatch.setenv("RDT_UI_FILE", str(ui))
+    ui.write_text('[ui]\ntheme = "neon"\ndensity = "dense"\n')
+    w = MainWindow()
+    qtbot.addWidget(w, before_close_func=lambda w: setattr(w, "dirty", False))
+    assert w.density_actions["compact"].isChecked() and w.theme_actions["system"].isChecked()
+    bad = tmp_path / "bad.toml"
+    bad.write_text('[ui]\ndensity = "dense"\n')
+    warnings = []
+    monkeypatch.setattr(QMessageBox, "warning", lambda *a, **k: warnings.append(a[2]))
+    assert not w.import_ui(bad)
+    assert "ui/density must be one of compact, comfortable" in warnings[0]
+    bad.write_text('[ui]\ntheme = "neon"\n')
+    assert not w.import_ui(bad) and "ui/theme" in warnings[1]
+    assert w.ui.value("ui/density") == "dense"     # left as it was, not replaced by the bad import
+
+
+def test_csv_log_write_error_stops_logging(qtbot, win, tmp_path, monkeypatch):
+    """L11: disk full or the USB stick pulled: logging stops, the button goes off, the bar says why."""
+    connect(qtbot, win)
+    wait_value(qtbot, win, "main:motor.speed", lambda v: True)
+    assert win.start_log(tmp_path / "log.csv")
+    log = win.log
+
+    def full(*a, **k):
+        raise OSError(28, "No space left on device")
+    monkeypatch.setattr(log, "write", full)
+    qtbot.waitUntil(lambda: win.log is None, timeout=5000)
+    assert not win.bar.log_button.isChecked() and not win.log_action.isChecked()
+    assert "No space left on device" in win.banner.error and "CSV" in win.banner.error
+
+
+def test_opening_the_com_list_keeps_the_workspace_unchanged(qtbot, win, monkeypatch):
+    """L18: the list rescan shows "COM3 - USB Serial" for a typed COM3: that is no edit."""
+    import rdt.gui.app as appmod
+    monkeypatch.setattr(appmod, "serial_ports", lambda: [("COM3", "USB Serial"), ("COM4", "")])
+    win.bar.transport.setCurrentText("serial")
+    win.bar.com.setEditText("COM3")
+    win.set_dirty(False)
+    win.bar.com.refresh()
+    assert win.bar.com.currentText() == "COM3 - USB Serial" and not win.dirty
+    monkeypatch.setattr(appmod, "serial_ports", lambda: [("COM4", "")])
+    win.bar.com.refresh()                     # COM3 unplugged: still shown, still no edit
+    assert appmod.port_name(win.bar.com.currentText()) == "COM3" and not win.dirty
