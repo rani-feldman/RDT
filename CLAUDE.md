@@ -16,8 +16,8 @@ rdt-gui examples/sim_bench.rdtw          # GUI against the simulator
 ```
 
 On Linux the Qt tests need `libegl1 libgl1 libxkbcommon0 libfontconfig1 libdbus-1-3`; the
-SessionStart hook in `.claude/` installs them and the package in cloud sessions. The full suite is
-slow (GUI tests), so run the files you touched first and the whole suite once before pushing.
+SessionStart hook in `.claude/` installs them and the package in cloud sessions. The whole suite
+takes about a minute and a half; run it before pushing.
 
 ## Firmware rules the code must keep
 
