@@ -84,10 +84,9 @@ def align_span(addr: int, size: int, align: int) -> tuple[int, int]:
 
 def fill_template(template: str, **values) -> str:
     """Fill a command template. ``{addr}`` and ``{value}`` are written as bare upper-case hex with
-    no prefix. ``{addr}`` is at least 8 digits, with leading zeros (08000000), since the firmware
-    checks that every address has 8 characters; a template may pad either differently, as in
-    ``{value:08X}``, but not change the base. A width always pads with zeros, and ``{addr}`` is
-    never narrower than 8 digits."""
+    no prefix. ``{addr}`` is exactly 8 digits, with leading zeros (08000000), since the firmware
+    checks that every address has 8 characters, and ``{value}`` is unpadded. The only specs
+    allowed are ``{addr:08X}`` and ``{value:X}``, which say the same thing."""
     out = []
     for literal, name, spec, _ in string.Formatter().parse(template):
         out.append(literal)
@@ -100,9 +99,14 @@ def fill_template(template: str, **values) -> str:
             if spec and not _HEX_SPEC.match(spec):
                 raise ConfigError(f"{{{name}:{spec}}} in {template!r}: addresses and values are always "
                                   f"bare hex; only a zero-padded width such as {{{name}:08X}} is allowed")
-            if name == "addr" and spec and (spec == "X" or int(spec[:-1]) < 8):
+            # The firmware takes an address as exactly 8 zero-padded digits and a value unpadded
+            # (rani, 2026-10-14, SCPI-4), so no other width is allowed for either.
+            if name == "addr" and spec not in ("", "08X"):
                 raise ConfigError(f"{{addr:{spec}}} in {template!r}: the firmware needs every address "
-                                  f"as at least 8 zero-padded digits, such as {{addr:08X}} or plain {{addr}}")
+                                  f"as exactly 8 zero-padded digits; use plain {{addr}} or {{addr:08X}}")
+            if name == "value" and spec not in ("", "X"):
+                raise ConfigError(f"{{value:{spec}}} in {template!r}: the firmware takes values unpadded; "
+                                  f"use plain {{value}}")
             out.append(format(value, spec or ("08X" if name == "addr" else "X")))
         elif spec:
             out.append(format(value, spec))

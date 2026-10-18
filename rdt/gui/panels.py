@@ -1204,6 +1204,10 @@ class ProfileDialog(QDialog):
             self.test_result.setText(str(e))
             return
         start, end = align_span(addr, length, p.align)   # the firmware takes only whole aligned words
+        if end - start > p.max_response:
+            self.test_result.setText(f"a test read is one command, so it can ask for at most max_response "
+                                     f"({p.max_response}) bytes")
+            return
         cmd = p.format_read(mcu, start, end - start)
         asked, length = length, end - start
 

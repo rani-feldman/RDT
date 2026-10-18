@@ -82,7 +82,7 @@ Each requirement links to its design section.
 | SCPI-9 | The profile can be edited in the GUI, with a preview of the commands and a test read | Done | [D-SCPI-9](#d-scpi-9-profile-editor) |
 | SCPI-10 | Every SCPI read and write covers whole 4-byte aligned words: a 2-byte variable is read as its 4-byte word and the result is trimmed, and a smaller or unaligned write is done as read-modify-write (2026-10-12) | Done | [D-SCPI-10](#d-scpi-10-aligned-words) |
 | SCPI-11 | A read reply is one bare hex value per 4-byte word, comma-separated, lowest address first, the way the firmware prints a `uint32_t`: `30303030,2F30302F,43B40000`. This is the only reply format (2026-10-13); the reply holds nothing else, so there is no reply regex (2026-10-14) | Done | [D-SCPI-11](#d-scpi-11-word-replies) |
-| SCPI-12 | A profile whose `{addr}` field would not give at least 8 zero-padded hex digits (`{addr:8X}`, `{addr:04X}`) is refused when it loads, and a value of the wrong type in a profile is a config error, not a crash (rani asked for every finding of the code review to be fixed, 2026-10-18) | In review | [D-SCPI-12](#d-scpi-12-profile-checks) |
+| SCPI-12 | A profile whose `{addr}` field would not give exactly 8 zero-padded hex digits (`{addr:8X}`, `{addr:04X}`, `{addr:010X}`) or whose `{value}` field pads the value is refused when it loads, and a value of the wrong type in a profile is a config error, not a crash (rani asked for every finding of the code review to be fixed, 2026-10-18) | In review | [D-SCPI-12](#d-scpi-12-profile-checks) |
 
 ### 2.4 Multiple MCUs
 
@@ -557,7 +557,7 @@ rani set this on 2026-10-13, after connecting RDT to the real target on COM3: th
 
 #### D-SCPI-12 Profile checks
 
-`Profile` in `rdt/profile.py` refuses a width without a leading zero in any field (`{addr:8X}` pads with spaces) and an `{addr}` width under 8, so every address sent stays 8 zero-padded digits (SCPI-4). `Profile.from_dict` checks each value's type (a bool is never a number) and raises `ConfigError`.
+`Profile` in `rdt/profile.py` allows only `{addr}`/`{addr:08X}` and `{value}`/`{value:X}`, so every address sent is exactly 8 zero-padded digits and every value unpadded (SCPI-4). The profile dialog's Test read is one command, so it is refused above `max_response`. `Profile.from_dict` checks each value's type (a bool is never a number) and raises `ConfigError`.
 
 
 ### 4.4 Multiple MCUs

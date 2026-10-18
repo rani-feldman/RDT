@@ -1403,6 +1403,9 @@ def test_profile_test_read_is_checked_like_any_read(qtbot, win, monkeypatch):
     monkeypatch.setattr(m, "identity_stale", False)
     dlg.test()
     qtbot.waitUntil(lambda: "does not match" in dlg.test_result.text(), timeout=3000)
+    dlg.test_len.setValue(dlg.result_profile().max_response + 4)   # one command can't ask for more
+    dlg.test()
+    assert "max_response" in dlg.test_result.text()
     assert sent == []
 
 

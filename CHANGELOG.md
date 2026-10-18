@@ -26,7 +26,7 @@ section. RDT shows this file in **Help > Release notes**.
 - Command-line options such as `--profile`, `--timeout` and `--mcu` apply to that run only and are no longer saved into the workspace; `--mcu` no longer removes the other MCUs and `--profile` keeps the workspace's memory ranges.
 - A memory map import that overlaps the ELF is refused, and a workspace already broken this way can be mended with `rdt memory import --replace`.
 - The profile dialog's **Test read** is refused outside known memory and on an ELF mismatch, like any other read.
-- A profile whose address field would not give 8 zero-padded digits, or a profile value of the wrong type, gives a clear error.
+- A profile whose address field would not give exactly 8 zero-padded digits, whose value field pads values, or that has a value of the wrong type, gives a clear error.
 - A CSV log that can't be written (disk full, drive removed) stops with an error instead of silently, and 64-bit values are logged exactly.
 - ELF files with mutually referencing structs, long chains of linked structs, or DWARF 3 packed bit fields (armcc) are read correctly.
 - A bad theme or density in the settings no longer stops RDT from starting, and only one Update available window opens.
