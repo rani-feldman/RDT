@@ -77,3 +77,9 @@ def test_signal_integer_wraps_like_c():
     s = Signal(addr=0, type="u8")
     assert s.encode(257, "little") == b"\x01"
     assert Signal(addr=0, type="i16").encode(-2, "big") == b"\xff\xfe"
+
+
+def test_a_signal_outside_memory_is_a_config_error():
+    # Every read refreshes every signal, so one at an unmapped address would break all reads.
+    with pytest.raises(ValueError, match=r"MCU 1: signal tick at 0x200000FE \(4 bytes\) is not in its memory"):
+        ram_mcu(1, size=256, signals=[Signal(addr=0x200000FE, type="u32", name="tick")])
