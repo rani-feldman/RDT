@@ -226,10 +226,19 @@ def test_symbols_and_ptype_need_no_device(capsys):
     assert main(["-t", str(EXAMPLE_TARGET), "--tcp", "127.0.0.1:1", "symbols", "main"], out=out) == 0
     assert out.getvalue().splitlines() == [
         "0x08000050      16  const char[16]     firmware_name",
+        "0x08000094      24  const limit_t[4]   limits",
         "0x20000000      16  motor_t            motor",
         "0x20000010       4  volatile uint32_t  tick_count",
         "0x20000014      16  int32_t[4]         gains",
         "0x20000024     200  uint8_t[200]       rx_buffer",
+        "0x20000400      28  imu_t              imu",
+        "0x2000041C      12  float[3]           pid_gains",
+        "0x20000428      32  uint16_t[4][4]     lookup",
+        "0x20000448      16  char[16]           device_name",
+        "0x20000458     144  channel_t[4]       channels",
+        "0x200004E8      36  vec3_t[3]          waypoints",
+        "0x2000050C     176  board_t[2]         boards",
+        "0x200005BC      32  int16_t[16]        adc_samples",
     ]
     out = io.StringIO()
     assert main(["-t", str(EXAMPLE_TARGET), "--tcp", "127.0.0.1:1", "ptype", "main:motor"], out=out) == 0
@@ -239,6 +248,21 @@ def test_symbols_and_ptype_need_no_device(capsys):
     out = io.StringIO()
     assert main(["-t", str(EXAMPLE_TARGET), "--tcp", "127.0.0.1:1", "ptype", "main:mode_t"], out=out) == 0
     assert out.getvalue().startswith("mode_t  enum {...}, 4 bytes")
+
+
+def test_structures_and_arrays(sim):
+    """main.elf has structures, arrays and arrays of structures (main_data.c), read by name."""
+    code, out = rdt(sim, "read", "main:channels[2]", "main:lookup[3][1]", "main:boards[0]", "main:limits[1].max")
+    assert code == 0
+    assert "main:channels[2].kind        = CH_TEMP (3)" in out
+    assert "main:channels[2].history[7]  = 405 (0x0195)" in out
+    assert "main:lookup[3][1] = 31 (0x001F)" in out
+    assert 'main:boards[0].name ' in out and '"left"' in out
+    assert "main:boards[0].flags.mode             = 2 (0x2)" in out
+    assert "main:boards[0].channel[1].setpoint    = 1 " in out
+    assert "main:limits[1].max = 3000 (0x0BB8)" in out
+    assert rdt(sim, "write", "main:channels[3].setpoint", "7.5")[0] == 0
+    assert "= 7.5" in rdt(sim, "read", "main:channels[3].setpoint")[1]
 
 
 def test_watch_by_name(sim):

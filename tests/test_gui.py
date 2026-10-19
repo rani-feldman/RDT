@@ -543,8 +543,8 @@ def test_console_transcript(qtbot, win, tmp_path, monkeypatch):
 
 def test_watch_tabs(qtbot, win, monkeypatch, tmp_path):
     tabs = win.watch_tabs
-    assert [tabs.tabText(i) for i in range(tabs.count())] == ["Motor", "System"]
-    motor, system = tabs.trees
+    assert [tabs.tabText(i) for i in range(tabs.count())] == ["Motor", "System", "Structures"]
+    motor, system, _structures = tabs.trees
     assert win.watch_tree is motor
     # main:motor.mode is in both tabs: one item, read once per poll, shown in each.
     assert motor.states["main:motor.mode"].watch is system.states["main:motor.mode"].watch
@@ -564,21 +564,22 @@ def test_watch_tabs(qtbot, win, monkeypatch, tmp_path):
 
     monkeypatch.setattr(QInputDialog, "getText", lambda *a, **k: ("Scratch", True))
     tree = tabs.new_tab()
-    assert win.watch_tree is tree and tabs.tabText(2) == "Scratch"
+    assert win.watch_tree is tree and tabs.tabText(3) == "Scratch"
     assert tree.add_watch("main:gains") is not None
     tabs.new_tab("scratch")   # a name in use is refused
-    assert tabs.count() == 3
-    tabs.rename_tab(2, "Gains")
-    tabs.tabBar().moveTab(2, 0)
-    assert [t.name for t in win.ws.tabs] == ["Gains", "Motor", "System"]
+    assert tabs.count() == 4
+    tabs.rename_tab(3, "Gains")
+    tabs.tabBar().moveTab(3, 0)
+    assert [t.name for t in win.ws.tabs] == ["Gains", "Motor", "System", "Structures"]
     path = tmp_path / "tabs.rdtw"
     assert win._save_to(path)
     back = Workspace.load(path)
-    assert [(t.name, len(t.watches)) for t in back.tabs] == [("Gains", 1), ("Motor", 4), ("System", 3)]
+    assert [(t.name, len(t.watches)) for t in back.tabs] == [("Gains", 1), ("Motor", 4), ("System", 3), ("Structures", 6)]
 
     monkeypatch.setattr(QMessageBox, "question", lambda *a, **k: QMessageBox.Yes)
     tabs.close_tab(0)
     tabs.close_tab(0)
+    tabs.close_tab(1)
     assert [t.name for t in win.ws.tabs] == ["System"]
     tabs.close_tab(0)   # the last tab stays
     assert tabs.count() == 1
@@ -910,7 +911,7 @@ def test_reopen_last_workspace(qtbot, win, bench, tmp_path):
 
 def test_elf_identity(qtbot, win, tmp_path, monkeypatch):
     connect(qtbot, win)
-    qtbot.waitUntil(lambda: "3 flash blocks (112 bytes) match main.elf" in win.console.output.toPlainText(), timeout=3000)
+    qtbot.waitUntil(lambda: "4 flash blocks (136 bytes) match main.elf" in win.console.output.toPlainText(), timeout=3000)
     assert not any("mismatch" in a.text() for a in win.findChildren(QAction))   # no way around it in the GUI
     assert "main: ELF matches the firmware; motorctl: ELF matches the firmware" in win.message.text()
     assert "MCU motorctl: 2 flash blocks (88 bytes) match motorctl.elf" in win.console.output.toPlainText()
@@ -929,7 +930,7 @@ def test_elf_identity(qtbot, win, tmp_path, monkeypatch):
     qtbot.waitUntil(lambda: "does not match the firmware on main" in win.banner.text.text(), timeout=3000)
     qtbot.waitUntil(lambda: "\u2717 main.elf does not match" in card(win, "main").elf.text(), timeout=3000)
     assert not win.banner.isHidden() and not win.banner.load_button.isHidden()
-    assert "1 of 3 flash blocks" in win.banner.toolTip() and not win.banner.toggleViewAction().isVisible()
+    assert "1 of 4 flash blocks" in win.banner.toolTip() and not win.banner.toggleViewAction().isVisible()
     assert "does not match" not in win.message.text()   # one error bar, nothing red at the bottom
     monkeypatch.setattr(QMessageBox, "question", lambda *a, **k: QMessageBox.Yes)
     win.watch_tree.write("main:motor.target", "1500")

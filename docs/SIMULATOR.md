@@ -134,3 +134,18 @@ How the memory behaves:
 ## Example firmware
 
 [`sim/examples/firmware`](../sim/examples/firmware) holds the two small C programs behind the example ELFs, built for a Cortex-M4 with clang. `build.sh` rebuilds them; the ELFs are committed, so the simulator and the tests need no compiler.
+
+`main.elf` is built from `main.c` and [`main_data.c`](../sim/examples/firmware/main_data.c), which has structures, arrays and arrays of structures to try the variable tree on:
+
+| Variable | Kind | What changes |
+| --- | --- | --- |
+| `imu` (`imu_t`) | a structure with two `vec3_t` structures inside | `accel.x` (sine), `gyro.z` (sawtooth) |
+| `pid_gains[3]`, `device_name[16]` | arrays (`float`, a string) | |
+| `adc_samples[16]` | an `int16_t` array in `.bss` | `[0]` (sine), `[1]` (sawtooth) |
+| `lookup[4][4]` | a two-dimensional `uint16_t` array | |
+| `channels[4]` (`channel_t`) | an array of structures, each with an enum and a `history[8]` array | `measured` of channels 0 to 2, `[1].error_count` (counter) |
+| `waypoints[3]` (`vec3_t`) | an array of structures | |
+| `boards[2]` (`board_t`) | an array of structures, each with a name, a bit-field structure and a `channel_t[2]` | `[0].channel[1].measured` (sine) |
+| `limits[4]` (`const limit_t`) | a constant array of structures in flash, read-only | |
+
+They sit in their own sections, RAM from `0x20000400`, so `main.c`'s variables (`motor`, `tick_count`, `gains`, `rx_buffer`, `firmware_name`) keep their addresses. The changing members are the signals in [`two_mcus.toml`](../sim/examples/two_mcus.toml), and the **Structures** tab of [`examples/sim_bench.rdtw`](../examples/sim_bench.rdtw) watches one of each kind.

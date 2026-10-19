@@ -10,6 +10,7 @@ section. RDT shows this file in **Help > Release notes**.
 ### New features
 
 - When a newer RDT is out, a window shows what changed in it, with a Download button.
+- The simulator's example firmware has structures, arrays and arrays of structures, some of them changing, and the example workspace has a Structures tab to try them in.
 
 ### Bug fixes
 

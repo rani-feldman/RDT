@@ -89,7 +89,7 @@ Until the firmware has its memory commands, a simulated device on the same PC st
    rdt-gui examples/sim_bench.rdtw
    ```
 
-3. Press **Disconnected · 127.0.0.1:5025** in the toolbar (or F5). It turns green, `Connected`, and the values in the **Motor** tab start to move.
+3. Press **Disconnected · 127.0.0.1:5025** in the toolbar (or F5). It turns green, `Connected`, and the values in the **Motor** tab start to move. The **Structures** tab has structures, arrays and arrays of structures; click the arrow beside a row to open it.
 
 The same from the command line:
 
