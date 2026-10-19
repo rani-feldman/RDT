@@ -66,7 +66,7 @@ Each requirement links to its design section.
 | LNK-8 | The GUI lists each COM port with its description, such as `COM3 - GAC serial port (COM3)` (2026-10-13) | Done | [D-LNK-1](#d-lnk-1-com-port) |
 | LNK-9 | The link shows as down (red `Link down · COM3`) when the port or socket breaks, noticed within a second even with polling off, or when the device answers none of 3 reads in a row from any MCU while the port stays open ("no reply"). While the link is down the MCU cards show `link down` (GUI-14) and writes are refused, and the ELFs are checked again when it comes back (2026-10-14; the default chosen in the thread "Status box on lost connection", not yet confirmed by rani) | Done | [D-LNK-9](#d-lnk-9-noticing-a-lost-link) |
 | LNK-10 | The COM port list in the toolbar is rescanned each time it opens, so unplugged ports disappear and newly plugged ports appear; the port already picked or typed stays shown (rani, 2026-10-18) | Done | [D-LNK-10](#d-lnk-10-com-port-list-rescanned-on-open) |
-| LNK-11 | A late reply to a read that timed out is dropped, never taken as the reply to the next command; a read-modify-write uses the words around the value only when two reads in a row agree, except in a peripheral range, which is read once (rani asked for every finding of the code review to be fixed, 2026-10-18) | In review | [D-LNK-11](#d-lnk-11-late-replies) |
+| LNK-11 | A late reply to a read that timed out is dropped, never taken as the reply to the next command; a read-modify-write uses the words around the value only when two reads in a row agree, except in a peripheral range, which is read once (rani asked for every finding of the code review to be fixed, 2026-10-18) | Done | [D-LNK-11](#d-lnk-11-late-replies) |
 
 ### 2.3 SCPI commands
 
@@ -82,7 +82,7 @@ Each requirement links to its design section.
 | SCPI-9 | The profile can be edited in the GUI, with a preview of the commands and a test read | Done | [D-SCPI-9](#d-scpi-9-profile-editor) |
 | SCPI-10 | Every SCPI read and write covers whole 4-byte aligned words: a 2-byte variable is read as its 4-byte word and the result is trimmed, and a smaller or unaligned write is done as read-modify-write (2026-10-12) | Done | [D-SCPI-10](#d-scpi-10-aligned-words) |
 | SCPI-11 | A read reply is one bare hex value per 4-byte word, comma-separated, lowest address first, the way the firmware prints a `uint32_t`: `30303030,2F30302F,43B40000`. This is the only reply format (2026-10-13); the reply holds nothing else, so there is no reply regex (2026-10-14) | Done | [D-SCPI-11](#d-scpi-11-word-replies) |
-| SCPI-12 | A profile whose `{addr}` field would not give exactly 8 zero-padded hex digits (`{addr:8X}`, `{addr:04X}`, `{addr:010X}`) or whose `{value}` field pads the value is refused when it loads, and a value of the wrong type in a profile is a config error, not a crash (rani asked for every finding of the code review to be fixed, 2026-10-18) | In review | [D-SCPI-12](#d-scpi-12-profile-checks) |
+| SCPI-12 | A profile whose `{addr}` field would not give exactly 8 zero-padded hex digits (`{addr:8X}`, `{addr:04X}`, `{addr:010X}`) or whose `{value}` field pads the value is refused when it loads, and a value of the wrong type in a profile is a config error, not a crash (rani asked for every finding of the code review to be fixed, 2026-10-18) | Done | [D-SCPI-12](#d-scpi-12-profile-checks) |
 
 ### 2.4 Multiple MCUs
 
@@ -139,7 +139,7 @@ Each requirement links to its design section.
 | WS-2 | Per-item minimum and maximum, checked before every write (2026-10-05) | Done | [D-WS-2](#d-ws-2-limits) |
 | WS-3 | An optional confirm before writing (2026-10-05) | Done | [D-WS-3](#d-ws-3-confirm-before-writing) |
 | WS-4 | A global setting that makes every item read-only by default (2026-10-12) | Done | [D-WS-4](#d-ws-4-global-read-only-default) |
-| WS-5 | A value is written only when the user commits an edit (Enter or leaving the cell); a poll, the change highlight or an ELF remap never writes, Esc cancels and an unchanged edit writes nothing. NaN and infinity are refused for an item with a minimum or maximum. A memory-view write over a read-only watched item is refused, and over an item with confirm on it is asked about first (rani asked for every finding of the code review to be fixed, 2026-10-18) | In review | [D-WS-5](#d-ws-5-edits-limits-and-raw-writes) |
+| WS-5 | A value is written only when the user commits an edit (Enter or leaving the cell); a poll, the change highlight or an ELF remap never writes, Esc cancels and an unchanged edit writes nothing. NaN and infinity are refused for an item with a minimum or maximum. A memory-view write over a read-only watched item is refused, and over an item with confirm on it is asked about first (rani asked for every finding of the code review to be fixed, 2026-10-18) | Done | [D-WS-5](#d-ws-5-edits-limits-and-raw-writes) |
 
 ### 2.9 Polling
 
@@ -151,7 +151,7 @@ Each requirement links to its design section.
 | POLL-4 | A slow link makes items fall behind instead of queueing, and each item shows the rate it actually gets | Done | [D-POLL-4](#d-poll-4-falling-behind) |
 | POLL-5 | A **Poll now** button next to Poll in the GUI reads every watched item once (2026-10-13) | Done | [D-POLL-5](#d-poll-5-poll-now-and-polling-switch) |
 | POLL-6 | Polling can be turned off in the GUI, including items with their own interval (2026-10-13) | Done | [D-POLL-5](#d-poll-5-poll-now-and-polling-switch) |
-| POLL-7 | A hung MCU costs a poll a few timeouts: when a merged block gets no reply its items are read one at a time without retries, and after two in a row get no reply the rest keep the block's error; while the link shows "no reply" reads are not retried (rani asked for every finding of the code review to be fixed, 2026-10-18) | In review | [D-POLL-7](#d-poll-7-a-hung-mcu) |
+| POLL-7 | A hung MCU costs a poll a few timeouts: when a merged block gets no reply its items are read one at a time without retries, and after two in a row get no reply the rest keep the block's error; while the link shows "no reply" reads are not retried (rani asked for every finding of the code review to be fixed, 2026-10-18) | Done | [D-POLL-7](#d-poll-7-a-hung-mcu) |
 
 ### 2.10 Watch tabs
 
@@ -230,7 +230,7 @@ Each requirement links to its design section.
 | CLI-1 | A command line, `rdt`, for every device operation and for editing the workspace | Done | [D-CLI-1](#d-cli-1-rdt-command-line) |
 | CLI-2 | A Python API for scripts | Done | [D-CLI-2](#d-cli-2-python-api) |
 | CLI-3 | Every failure is reported with a clear, specific error | Done | [D-CLI-3](#d-cli-3-errors) |
-| CLI-4 | `--profile`, `--timeout`, `--mcu` and `--tcp/--udp/--serial/--baud` apply to that run only and are never saved into the workspace, except by `rdt init`; `--profile` keeps the workspace's memory ranges. Commands that only edit the workspace files work without loading the target, so a workspace whose memory map does not load can still be mended (rani asked for every finding of the code review to be fixed, 2026-10-18) | In review | [D-CLI-4](#d-cli-4-one-run-overrides) |
+| CLI-4 | `--profile`, `--timeout`, `--mcu` and `--tcp/--udp/--serial/--baud` apply to that run only and are never saved into the workspace, except by `rdt init`; `--profile` keeps the workspace's memory ranges. Commands that only edit the workspace files work without loading the target, so a workspace whose memory map does not load can still be mended (rani asked for every finding of the code review to be fixed, 2026-10-18) | Done | [D-CLI-4](#d-cli-4-one-run-overrides) |
 
 ### 2.16 Simulator
 
