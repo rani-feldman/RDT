@@ -21,7 +21,8 @@ from .errors import BadReply, ConfigError, DeviceError
 # since the largest read reply is the profile's max_response; and addresses, values and reply data
 # are always bare hex, so their format keys are gone.
 RETIRED_KEYS = {"size_query", "addr_format", "value_format", "data_format", "error_query", "probe", "reply_regex"}
-_HEX_SPEC = re.compile(r"^0?\d*X$")
+# A width must have its leading 0: {addr:8X} would pad with spaces, which the firmware rejects (L5).
+_HEX_SPEC = re.compile(r"^(0\d+)?X$")
 TEMPLATE_FIELDS = {"read": {"mcu", "addr", "len"}, "write": {"mcu", "addr", "value", "size"}}
 
 
@@ -83,9 +84,9 @@ def align_span(addr: int, size: int, align: int) -> tuple[int, int]:
 
 def fill_template(template: str, **values) -> str:
     """Fill a command template. ``{addr}`` and ``{value}`` are written as bare upper-case hex with
-    no prefix. ``{addr}`` is at least 8 digits, with leading zeros (08000000), since the firmware
-    checks that every address has 8 characters; a template may pad either differently, as in
-    ``{value:08X}``, but not change the base."""
+    no prefix. ``{addr}`` is exactly 8 digits, with leading zeros (08000000), since the firmware
+    checks that every address has 8 characters, and ``{value}`` is unpadded. The only specs
+    allowed are ``{addr:08X}`` and ``{value:X}``, which say the same thing."""
     out = []
     for literal, name, spec, _ in string.Formatter().parse(template):
         out.append(literal)
@@ -97,7 +98,15 @@ def fill_template(template: str, **values) -> str:
         if name in ("addr", "value"):
             if spec and not _HEX_SPEC.match(spec):
                 raise ConfigError(f"{{{name}:{spec}}} in {template!r}: addresses and values are always "
-                                  f"bare hex; only a width such as {{{name}:08X}} is allowed")
+                                  f"bare hex; only a zero-padded width such as {{{name}:08X}} is allowed")
+            # The firmware takes an address as exactly 8 zero-padded digits and a value unpadded
+            # (rani, 2026-10-14, SCPI-4), so no other width is allowed for either.
+            if name == "addr" and spec not in ("", "08X"):
+                raise ConfigError(f"{{addr:{spec}}} in {template!r}: the firmware needs every address "
+                                  f"as exactly 8 zero-padded digits; use plain {{addr}} or {{addr:08X}}")
+            if name == "value" and spec not in ("", "X"):
+                raise ConfigError(f"{{value:{spec}}} in {template!r}: the firmware takes values unpadded; "
+                                  f"use plain {{value}}")
             out.append(format(value, spec or ("08X" if name == "addr" else "X")))
         elif spec:
             out.append(format(value, spec))
@@ -171,6 +180,13 @@ class Profile:
         unknown = set(table) - known
         if unknown:
             raise ConfigError(f"unknown [scpi] keys: {', '.join(sorted(unknown))}")
+        for f in fields(cls):   # a config error rather than a TypeError later (L6)
+            if f.name in table and f.name != "ranges":
+                ok = _TYPES[f.type]
+                v = table[f.name]
+                if isinstance(v, bool) or not isinstance(v, ok):
+                    want = "a number" if f.type == "float" else "an integer" if f.type == "int" else "a string"
+                    raise ConfigError(f"[scpi] {f.name} must be {want}, not {v!r}")
         return cls(**table, ranges=[Range.from_dict(r) for r in ranges or []])
 
     # --- commands ----------------------------------------------------------------------------
@@ -202,6 +218,8 @@ class Profile:
             raise BadReply(f"expected {length} bytes, got {len(data)}")
         return data
 
+
+_TYPES = {"int": int, "float": (int, float), "str": str}
 
 _WORD = re.compile(r"^[0-9A-Fa-f]+$")
 

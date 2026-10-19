@@ -25,13 +25,28 @@ def test_templates_are_user_defined():
     assert p.format_write(2, 4096, 255, 1) == "write 2,00001000,FF,1"
 
 
-def test_a_template_may_pad_but_not_change_the_base():
-    p = Profile(read="MEM:RD? {mcu},{addr:08X},{len}", write="MEM:WR {mcu},{addr},{value:04X},{size}")
+def test_a_template_may_not_change_the_base_or_the_padding():
+    p = Profile(read="MEM:RD? {mcu},{addr:08X},{len}", write="MEM:WR {mcu},{addr},{value:X},{size}")
     assert p.format_read(0, 0x100, 8) == "MEM:RD? 0,00000100,8"
-    assert p.format_write(0, 0x100, 0xA, 2) == "MEM:WR 0,00000100,000A,2"
+    assert p.format_write(0, 0x100, 0xA, 2) == "MEM:WR 0,00000100,A,2"
+    with pytest.raises(ConfigError, match="unpadded"):          # values are never padded (SCPI-4)
+        Profile(write="MEM:WR {mcu},{addr},{value:04X},{size}")
     for template in ("MEM:RD? {mcu},{addr:d},{len}", "MEM:RD? {mcu},{addr:#X},{len}", "MEM:RD? {mcu},{addr:x},{len}"):
         with pytest.raises(ConfigError, match="bare hex"):
             Profile(read=template)
+
+
+
+@pytest.mark.parametrize("template", ["MEM:RD? {mcu},{addr:8X},{len}", "MEM:RD? {mcu},{addr:X},{len}",
+                                      "MEM:RD? {mcu},{addr:04X},{len}", "MEM:RD? {mcu},{addr:010X},{len}"])
+def test_an_address_is_always_8_zero_padded_digits(template):
+    """L5: {addr:8X} pads with spaces, {addr:X} or {addr:04X} gives fewer than 8 digits and
+    {addr:010X} gives 10; the firmware rejects all of them, so the profile is refused."""
+    with pytest.raises(ConfigError):
+        Profile(read=template)
+    with pytest.raises(ConfigError, match="zero-padded"):
+        Profile(write="MEM:WR {mcu},{addr},{value:4X},{size}")
+    assert Profile(read="R? {mcu},{addr:08X},{len}").format_read(0, 0x100, 4) == "R? 0,00000100,4"
 
 
 @pytest.mark.parametrize("table", [
@@ -43,6 +58,10 @@ def test_a_template_may_pad_but_not_change_the_base():
     {"max_write": 2},                            # narrower than the 4-byte align
     {"max_response": 2},
     {"timeout": 500},                            # typo for timeout_ms
+    {"timeout_ms": "500"},                       # L6: wrong value types are config errors too
+    {"retries": 1.5},
+    {"max_response": True},
+    {"read": 5},
 ])
 def test_bad_profiles_are_refused(table):
     with pytest.raises(ConfigError):

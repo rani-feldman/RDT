@@ -298,6 +298,42 @@ def test_elf_without_debug_info():
         load_symbols(CORPUS / "corpus-nodebug.elf", use_cache=False)
 
 
+@pytest.fixture(scope="module")
+def edge():
+    """edge.c, built with DWARF 3 as armcc emits it: the reader's awkward cases."""
+    return Image("edge-dwarf3.elf")
+
+
+def test_a_typedef_still_being_read_gets_its_size(edge):
+    # pair_t's struct points back to struct holder, which holds pair_t[3] and const pair_t (M9).
+    holder = edge.symbols.lookup("held").type.strip()
+    got = [(m.name, m.offset, m.type.name, m.type.size) for m in holder.members]
+    assert got == [("arr", 0, "pair_t[3]", 24), ("c", 24, "const pair_t", 8), ("tail", 32, "unsigned int", 4)]
+    assert edge.value("c:held")["arr"][2] == {"owner": 0, "a": 5, "b": 6}
+    assert edge.value("c:held")["c"]["b"] == 8 and edge.value("c:held.tail") == 0xCAFEF00D
+    owner = edge.symbols.find_type("pair_t").strip().member("owner")[1].type
+    assert owner.name == "struct holder *" and owner.strip().target is holder
+
+
+def test_a_dwarf3_bit_field_that_crosses_its_storage_unit(edge):
+    # A packed bit field across its 4-byte unit has a negative DW_AT_bit_offset in DWARF 3 (L2).
+    b = edge.symbols.lookup("crossing").type.strip().member("b")[1]
+    assert (b.offset, b.storage, b.bit_shift, b.bit_size) == (0, 5, 7, 30)
+    assert edge.value("c:crossing") == {"a": 0x55, "b": 0x2AAAAAAA, "c": 0x77}
+
+
+def test_a_long_pointer_chain_loads(edge, tmp_path, monkeypatch):
+    # 300 structs, each pointing to the next, loaded without a RecursionError (L3).
+    t = edge.symbols.lookup("chain0").type
+    for _ in range(301):
+        t = t.strip().member("next")[1].type.strip().target
+    assert t.name == "struct n0" and edge.value("c:chain0.v") == 7
+    assert edge.symbols.lookup("chain0").type.strip().member("next")[1].type.name == "struct n1 *"
+    monkeypatch.setenv("RDT_CACHE_DIR", str(tmp_path))
+    load_symbols(edge.path)   # the cache may not take it, but the load must work
+    assert load_symbols(edge.path).lookup("chain0").size == 8
+
+
 def test_reload_remaps_by_name(tmp_path):
     elf = tmp_path / "fw.elf"
     shutil.copy(CORPUS / "corpus-clang.elf", elf)

@@ -87,9 +87,9 @@ Polling: each item is read at the global interval, at its own interval, or only 
 
 ### Writing
 
-Double-click a value (or right-click > **Write...**), type the new value, and press Enter. Type it in the item's units: with `scale = 0.001` and unit `A`, typing `1.25` writes 1250. Enums take their names (`MODE_RUN`), and `char` arrays take a string. Every write is confirmed by reading the value back.
+Double-click a value (or right-click > **Write...**), type the new value, and press Enter or click elsewhere. Esc cancels, and leaving the value unchanged writes nothing. Polls leave the value you are editing alone until you finish. Type it in the item's units: with `scale = 0.001` and unit `A`, typing `1.25` writes 1250. Enums take their names (`MODE_RUN`), and `char` arrays take a string. Every write is confirmed by reading the value back.
 
-The workspace's write safety applies: read-only items can't be edited, values outside `min`..`max` are refused with a message in the error bar, and items with `confirm` ask first. A struct marked read-only or confirm makes its fields read-only or confirm-first too. **Watch > All items read-only** makes every item read-only unless its settings say Writable, and also refuses edits in the memory view.
+The workspace's write safety applies: read-only items can't be edited, values outside `min`..`max` (and `nan` or infinity for an item with limits) are refused with a message in the error bar, and items with `confirm` ask first. A struct marked read-only or confirm makes its fields read-only or confirm-first too. **Watch > All items read-only** makes every item read-only unless its settings say Writable, and also refuses edits in the memory view.
 
 ### Item settings
 
@@ -134,7 +134,7 @@ The format is the same as `rdt watch --csv`; see [CSV log](CLI.md#csv-log). A lo
 
 ## Memory view
 
-Choose the MCU, type an address (`0x20000000`) or a variable name (`motor`), a length, and press **Read**. The dump shows 16 bytes per row with their ASCII. Right-click the dump to choose how the cells show memory: **Unsigned** or **Signed** with a C type (**Char** 8 bits, **Short** 16, **Int** and **Long** 32, as on ARM), in hex, or in decimal when **Decimal** is ticked; **Ascii** (one character per byte); **Float** (32-bit); or **Double** (64-bit). The ASCII column is shown only beside the plain hex bytes; with any other choice it is hidden (pick **Ascii** to see memory as text). The current choice has a check mark, values use the MCU's byte order, and the choice is remembered for the next start. The default is unsigned Char in hex, the plain hex bytes. Double-click a cell, type a new value in the shown format (a hex `0x` prefix is accepted in decimal too), and press Enter to write it; a value too big for the type is refused. **Refresh** reads again at the global polling interval. Access outside the ELF's memory and the target's ranges is refused, as in the CLI.
+Choose the MCU, type an address (`0x20000000`) or a variable name (`motor`), a length, and press **Read**. The dump shows 16 bytes per row with their ASCII. Right-click the dump to choose how the cells show memory: **Unsigned** or **Signed** with a C type (**Char** 8 bits, **Short** 16, **Int** and **Long** 32, as on ARM), in hex, or in decimal when **Decimal** is ticked; **Ascii** (one character per byte); **Float** (32-bit); or **Double** (64-bit). The ASCII column is shown only beside the plain hex bytes; with any other choice it is hidden (pick **Ascii** to see memory as text). The current choice has a check mark, values use the MCU's byte order, and the choice is remembered for the next start. The default is unsigned Char in hex, the plain hex bytes. Double-click a cell, type a new value in the shown format (a hex `0x` prefix is accepted in decimal too), and press Enter to write it; a value too big for the type is refused. **Refresh** reads again at the global polling interval, leaving a cell you are editing alone. Writes here are raw (no scaling or limits), but a write over a watched read-only item is refused and one over an item that asks before writing asks first. Access outside the ELF's memory and the target's ranges is refused, as in the CLI.
 
 ## SCPI console
 
@@ -177,7 +177,7 @@ The rest of the **Help** menu: **User manual** and **Release notes** (what each 
 
 ## SCPI profile editor
 
-The profile says how the firmware spells a memory read and write and how it encodes the reply. The editor has every field of the `[scpi]` table (see [CLI.md](CLI.md#scpi-profile)), shows the read and write commands as they will be sent, and refuses a template that would not work (for example a read without `{len}`). While connected, **Test read** sends one read with the edited profile and shows the reply and the decoded bytes, before you apply it.
+The profile says how the firmware spells a memory read and write and how it encodes the reply. The editor has every field of the `[scpi]` table (see [CLI.md](CLI.md#scpi-profile)), shows the read and write commands as they will be sent, and refuses a template that would not work (for example a read without `{len}`). While connected, **Test read** sends one read with the edited profile and shows the reply and the decoded bytes, before you apply it. Like any read, it is refused outside the ELF's memory and the listed ranges and on an ELF mismatch.
 
 **Load from file...** at the top of the editor fills the fields from a profile file; the line beside it names the workspace's profile file, or the file just loaded. Pressing OK applies the profile and reconnects. Saving the workspace writes the profile to its own file beside the `.rdtw` (`bench.profile.toml`), and the `.rdtw` points to it.
 

@@ -25,7 +25,7 @@ from .types import (
 
 log = logging.getLogger(__name__)
 
-CACHE_VERSION = 1   # bump when the model or the reader changes, so old cache entries are ignored
+CACHE_VERSION = 2   # bump when the model or the reader changes, so old cache entries are ignored
 
 
 @dataclass(eq=False)
@@ -187,6 +187,8 @@ def read_dwarf(path: Path) -> SymbolTable:
         raise ConfigError(f"cannot read ELF {path}: {e.strerror}") from None
     except (ELFError, DWARFError) as e:
         raise ConfigError(f"cannot read the debug info in {path.name}: {e}") from None
+    except RecursionError:   # types nested too deeply even without following pointers
+        raise ConfigError(f"cannot read the debug info in {path.name}: its types are nested too deeply") from None
     return SymbolTable(path, order, ptr, reader.variables, reader.named_types)
 
 
@@ -218,6 +220,10 @@ class _DwarfReader:
         self.types: dict[int, Type] = {}
         self.named_types: dict[str, Type] = {}
         self.variables: list[Variable] = []
+        # Pointers whose pointee is still to be read, and types whose name or size comes from
+        # parts that may not be finished when they are made (see _finish).
+        self._pointees: list[tuple[PointerType, object]] = []
+        self._derived: list[tuple] = []
 
     def read(self) -> None:
         for cu in self.dwarf.iter_CUs():
@@ -231,6 +237,39 @@ class _DwarfReader:
                 elif die.tag in ("DW_TAG_typedef", "DW_TAG_structure_type", "DW_TAG_union_type",
                                  "DW_TAG_enumeration_type", "DW_TAG_base_type"):
                     self._type(die)
+        self._finish()
+
+    def _finish(self) -> None:
+        """Read the pointees, then fill in names and sizes made from unfinished parts.
+
+        A pointer doesn't read its pointee straight away: a long chain of structs linked by
+        pointers would otherwise recurse once per link and overflow the stack (review L3). And a
+        typedef that is still being read, because its struct points back to the struct that uses
+        it, has size 0 until it is finished, so an array of it or a ``const`` of it made in the
+        meantime would keep size 0 (review M9). So these are patched here, once everything is read.
+        """
+        while self._pointees:
+            t, die = self._pointees.pop()
+            t.target = self._type(die)
+        # A derived type's parts can be derived types themselves; repeat until nothing changes.
+        # This ends: C types only loop through a struct, union or enum tag, whose names are fixed.
+        changed = True
+        while changed:
+            changed = False
+            for kind, t, *extra in self._derived:
+                if kind == "pointer":
+                    name, size = _pointer_name(t.target), t.size
+                elif kind == "typedef":
+                    name, size = t.name, t.strip().size
+                elif kind == "qualifier":
+                    q = extra[0]
+                    name = t.target.name if t.target.name.split()[0] == q else f"{q} {t.target.name}"
+                    size = t.strip().size
+                else:   # array: its own element, and the [n] suffix it adds to the element's name
+                    base, suffix = extra
+                    name, size = base.name + suffix, (t.count or 0) * t.element.size
+                if (name, size) != (t.name, t.size):
+                    t.name, t.size, changed = name, size, True
 
     # --- variables ---------------------------------------------------------------------------
 
@@ -316,13 +355,17 @@ class _DwarfReader:
         elif tag == "DW_TAG_pointer_type" or tag == "DW_TAG_reference_type":
             t = PointerType("?", size or self.ptr)
             self.types[die.offset] = t
-            t.target = self._ref(die) if "DW_AT_type" in die.attributes else None
-            t.name = _pointer_name(t.target)
+            if "DW_AT_type" in die.attributes:   # the pointee and the name come in _finish
+                self._pointees.append((t, die.get_DIE_from_attribute("DW_AT_type")))
+                self._derived.append(("pointer", t))
+            else:
+                t.name = _pointer_name(None)
         elif tag == "DW_TAG_typedef":
             t = TypedefType(name or "?", 0)
             self._keep(die, t, name)
             t.target = self._ref(die)
             t.size = t.strip().size
+            self._derived.append(("typedef", t))
         elif tag in _QUALIFIERS:
             t = TypedefType("?", 0)
             self.types[die.offset] = t
@@ -330,6 +373,7 @@ class _DwarfReader:
             q = _QUALIFIERS[tag]
             t.name = t.target.name if t.target.name.split()[0] == q else f"{q} {t.target.name}"
             t.size = t.strip().size
+            self._derived.append(("qualifier", t, q))
         elif tag == "DW_TAG_array_type":
             t = self._array(die)
         elif tag in ("DW_TAG_subroutine_type", "DW_TAG_subprogram"):
@@ -367,6 +411,7 @@ class _DwarfReader:
         for n in reversed(dims):
             suffix = f"[{'' if n is None else n}]" + suffix
             t = ArrayType(element.name + suffix, (n or 0) * t.size, t, n)
+            self._derived.append(("array", t, element, suffix))
         self.types[die.offset] = t
         return t
 
@@ -392,7 +437,7 @@ class _DwarfReader:
             # DWARF 2 and 3: DW_AT_bit_offset counts from the most significant bit of a storage
             # unit of DW_AT_byte_size bytes at the member's location.
             unit = _attr(die, "DW_AT_byte_size") or unit
-            from_msb = _attr(die, "DW_AT_bit_offset") or 0
+            from_msb = _bit_offset(die.attributes.get("DW_AT_bit_offset"), unit)
             bit_offset = 8 * offset + (from_msb if self.big else 8 * unit - from_msb - bits)
         start, count, shift = bit_window(bit_offset, bits, unit, self.big)
         return Member(name, start, mtype, bits, shift, count)
@@ -401,6 +446,20 @@ class _DwarfReader:
 def _attr(die, name):
     a = die.attributes.get(name)
     return a.value if a is not None else None
+
+
+def _bit_offset(attr, unit: int) -> int:
+    """DWARF 2/3 ``DW_AT_bit_offset``, which is negative for a bit field that crosses its storage
+    unit (packed structs). Compilers emit it in an unsigned ``DW_FORM_data<n>`` form, as the
+    two's complement of the negative value, so a value too big to be a bit position in the
+    unit is converted back (review L2)."""
+    if attr is None:
+        return 0
+    v = attr.value
+    width = {"DW_FORM_data1": 1, "DW_FORM_data2": 2, "DW_FORM_data4": 4, "DW_FORM_data8": 8}.get(attr.form)
+    if width and v >= 8 * unit:
+        v = _signed(v, width)
+    return v
 
 
 def _const(die, name) -> int | None:

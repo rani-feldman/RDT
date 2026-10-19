@@ -8,7 +8,7 @@ import time
 from dataclasses import dataclass
 from typing import Callable
 
-from .memory import Memory
+from .memory import Memory, MemoryFault
 
 SIGNAL_TYPES = {
     "u8": "B", "i8": "b", "u16": "H", "i16": "h", "u32": "I", "i32": "i",
@@ -97,6 +97,14 @@ class Mcu:
         self.memory = memory
         self.byte_order = byte_order
         self.signals = list(signals or [])
+        for sig in self.signals:
+            # Every read refreshes every signal, so one outside memory would break all reads of
+            # this MCU; refuse it here, as a config error (rani, 2026-10-18, code review).
+            try:
+                memory.read(sig.addr, sig.size)
+            except MemoryFault:
+                label = f"signal {sig.name}" if sig.name else "a signal"
+                raise ValueError(f"MCU {id}: {label} at 0x{sig.addr:X} ({sig.size} bytes) is not in its memory") from None
         self.frame_size = frame_size
         self.frame_latency_ms = frame_latency_ms
         self.silent = silent

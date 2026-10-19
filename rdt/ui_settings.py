@@ -20,6 +20,7 @@ from __future__ import annotations
 import logging
 import os
 import tomllib
+from collections.abc import Iterable
 from pathlib import Path
 
 from . import tomlw
@@ -92,10 +93,12 @@ class UiSettings:
         if key not in KNOWN:
             raise KeyError(f"no interface setting {key!r}")
         value = KNOWN[key](value)
-        if self.values.get(key) == value:
-            return
+        # Read the file before comparing: another window may have changed this key since this
+        # one last saw it, and setting it back must still be saved (L15, rani, 2026-10-18, code review).
         if self.path.is_file():
             self.values = UiSettings.load(self.path).values
+        if self.values.get(key) == value:
+            return
         self.values[key] = value
         self.save()
 
@@ -116,9 +119,11 @@ class UiSettings:
             raise ConfigError(f"cannot write {path}: {e.strerror}") from None
         return path
 
-    def import_file(self, path: str | Path) -> list[str]:
+    def import_file(self, path: str | Path, choices: dict[str, Iterable[str]] | None = None) -> list[str]:
         """Take the settings in an exported file: each one in it replaces the one here, and one
-        it leaves out goes back to its default. Returns the keys taken."""
+        it leaves out goes back to its default. Returns the keys taken. ``choices`` lists the
+        values a text setting may have, such as the GUI's theme names; anything else is refused
+        rather than saved (M6)."""
         path = Path(path)
         new = _read(path)
         bad = [k for k in new if k not in SETTINGS]
@@ -127,6 +132,9 @@ class UiSettings:
         for k, v in new.items():
             if not _fits(k, v):
                 raise ConfigError(f"{path}: {k} must be {_type_name(SETTINGS[k])}, not {v!r}")
+            allowed = (choices or {}).get(k)
+            if allowed is not None and v not in allowed:
+                raise ConfigError(f"{path}: {k} must be one of {', '.join(allowed)}, not {v!r}")
         self.values = {**{k: v for k, v in self.values.items() if k in STATE}, **new}
         self.save()
         return sorted(new)

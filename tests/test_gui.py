@@ -139,17 +139,85 @@ def test_write_inline_with_limits_and_confirm(qtbot, win, monkeypatch):
     wait_value(qtbot, win, "main:motor.current_ma", lambda v: v == "1.25 A")
 
 
+def open_editor(tree, node):
+    """Double-click a value: the tree opens its line editor on it."""
+    from PySide6.QtWidgets import QLineEdit
+    tree._double_clicked(node, COL_VALUE)
+    assert node.flags() & Qt.ItemIsEditable and tree._editing is not None
+    return tree.viewport().findChildren(QLineEdit)[-1]
+
+
 def test_inline_edit_writes(qtbot, win):
+    from PySide6.QtTest import QTest
     connect(qtbot, win)
     tree = win.watch_tree
     tree.add_watch("main:gains")
     wait_value(qtbot, win, "main:gains[1]", lambda v: True)
     tree.states["main:gains"].item.setExpanded(True)
-    node = tree.states["main:gains"].nodes["main:gains[1]"]
-    tree._double_clicked(node, COL_VALUE)
-    assert node.flags() & Qt.ItemIsEditable
-    node.setText(COL_VALUE, "-42")
-    wait_value(qtbot, win, "main:gains[1]", lambda v: v.startswith("-42"))
+    st = tree.states["main:gains"]
+    node = st.nodes["main:gains[1]"]
+    editor = open_editor(tree, node)
+    editor.setText("-42")
+    QTest.keyClick(editor, Qt.Key_Return)
+    qtbot.waitUntil(lambda: st.shown["main:gains[1]"].text.startswith("-42"), timeout=3000)
+    assert tree._editing is None and not node.flags() & Qt.ItemIsEditable
+
+
+def test_display_updates_while_editing_never_write(qtbot, win, monkeypatch):
+    """H2, M3: the highlight fading, a poll or an ELF remap changing the cell under an open editor
+    neither writes nor replaces what is being typed; only a commit writes, and Esc writes nothing."""
+    from PySide6.QtTest import QTest
+    connect(qtbot, win)
+    tree = win.watch_tree
+    path = "main:motor.speed"
+    wait_value(qtbot, win, path, lambda v: v.endswith("rpm"))
+    win.poll_timer.stop()
+    qtbot.waitUntil(lambda: not win.device.busy("poll"), timeout=3000)
+    st = tree.states[path]
+    writes = []
+    monkeypatch.setattr(tree, "write", lambda p, text, owner=None: writes.append((p, text)))
+    row = st.shown[path]
+    tree._fill(st, [dataclasses.replace(row, text="1.5 rpm")])
+    tree._fill(st, [dataclasses.replace(row, text="2.5 rpm")])   # changed: highlighted
+    assert path in tree.flashing
+    editor = open_editor(tree, st.item)
+    assert editor.text() == "2.5"   # the unit is not part of the value typed
+    editor.setText("777")
+    tree._fill(st, [dataclasses.replace(row, text="3.25 rpm")])   # a poll arrives
+    tree.fade(time.monotonic() + 5)                               # the highlight goes
+    tree.remapped(path, object(), "moved")
+    assert editor.text() == "777" and st.item.text(COL_VALUE) == "2.5"
+    assert writes == []
+    QTest.keyClick(editor, Qt.Key_Escape)
+    assert tree._editing is None and writes == []
+    assert st.item.text(COL_VALUE) == "3.25 rpm"   # the latest value, once the editor is gone
+    tree.remapped(path, None, "gone")
+    assert writes == []
+    st.gone = False
+    editor = open_editor(tree, st.item)
+    editor.setText("777")
+    QTest.keyClick(editor, Qt.Key_Return)   # Qt commits on the next turn of the event loop
+    qtbot.waitUntil(lambda: tree._editing is None, timeout=1000)
+    assert writes == [(path, "777")]
+    editor = open_editor(tree, st.item)   # opened and left unchanged: nothing written
+    QTest.keyClick(editor, Qt.Key_Return)
+    qtbot.waitUntil(lambda: tree._editing is None, timeout=1000)
+    assert writes == [(path, "777")] and "unchanged" in win.message.text()
+
+
+def test_struct_field_edit_drops_the_unit(qtbot, win):
+    """L8: a field of a struct shows the struct's unit; editing it starts from the bare number."""
+    from rdt.workspace import Watch
+    connect(qtbot, win)
+    tree = win.watch_tree
+    tree.add_watch("main:motor")
+    st = tree.states["main:motor"]
+    tree.replace_watch(st.watch, Watch.from_dict({"expr": "main:motor", "unit": "u"}))
+    tree.read_now("main:motor")
+    qtbot.waitUntil(lambda: (r := st.shown.get("main:motor.speed")) is not None and r.text.endswith(" u"),
+                    timeout=5000)
+    row = st.shown["main:motor.speed"]
+    assert tree._edit_text(st, "main:motor.speed", row) == row.text[:-2]
 
 
 def test_symbol_browser_adds_and_save_round_trips(qtbot, win, tmp_path):
@@ -1225,3 +1293,221 @@ def test_row_hover_buttons_and_mono_values(qtbot, win):
     vopt = QStyleOptionViewItem()
     value.initStyleOption(vopt, tree.model().index(0, 1))
     assert QFontInfo(vopt.font).fixedPitch()
+
+
+def test_watch_dialog_keeps_exact_numbers_and_refuses_nan_limits(qtbot, win):
+    """L7: OK without a change keeps scale, offset and limits exactly; H3: nan or inf is no limit."""
+    from rdt.scaling import Display
+    from rdt.workspace import Watch
+    w = Watch("main:motor.speed", Display(k=0.1234567891, offset=1e-7), min=-0.000123456789, max=3000.0001)
+    dlg = WatchDialog(w, win)
+    qtbot.addWidget(dlg)
+    out = dlg.result_watch()
+    assert (out.display.k, out.display.offset, out.min, out.max) == (0.1234567891, 1e-7, -0.000123456789, 3000.0001)
+    assert dlg.max.text() == "3000.0001"
+    other = WatchDialog(Watch("main:x", max=3000.0), win)
+    qtbot.addWidget(other)
+    assert other.max.text() == "3000"
+    for bad in ("nan", "inf", "-inf"):
+        dlg.min.setText(bad)
+        with pytest.raises(ValueError, match="finite"):
+            dlg.result_watch()
+    dlg.min.setText("")
+    dlg.max.setText("NaN")
+    with pytest.raises(ValueError, match="maximum"):
+        dlg.result_watch()
+
+
+def test_memory_refresh_leaves_the_cell_being_edited(qtbot, win):
+    """M4: a refresh while a memory cell is being edited changes neither the editor nor the cell."""
+    from PySide6.QtTest import QTest
+    from PySide6.QtWidgets import QLineEdit
+    connect(qtbot, win)
+    mem = win.memory
+    mem.mcu.setCurrentText("main")
+    mem.address.setText("gains")
+    mem.length.setValue(16)
+    mem.read()
+    qtbot.waitUntil(lambda: mem.base == 0x20000014, timeout=3000)
+    item = mem.table.item(0, 4)
+    before = item.text()
+    mem.table.editItem(item)
+    editor = mem.table.viewport().findChildren(QLineEdit)[-1]
+    editor.setText("7F")
+    other = bytes([(mem.data[0] + 1) & 0xFF]) + mem.data[1:]
+    mem._show(("main", mem.base, other, mem.order))   # Refresh read something new
+    assert editor.text() == "7F" and item.text() == before
+    QTest.keyClick(editor, Qt.Key_Escape)
+    assert mem.table.item(0, 4).text() == f"{other[0]:02X}"
+
+
+def test_memory_writes_keep_read_only_and_confirm_items(qtbot, win, monkeypatch):
+    """M12: a memory-view write over a read-only watched item is refused, and one over an item that
+    asks before writing asks too."""
+    connect(qtbot, win)
+    mem = win.memory
+    mem.mcu.setCurrentText("main")
+    writes = []
+    target = win.device.target
+    real = target.write
+    monkeypatch.setattr(target, "write", lambda *a: (writes.append(a), real(*a))[1])
+    mem.address.setText("motor.mode")             # read-only in the workspace
+    mem.length.setValue(4)
+    mem.read()
+    qtbot.waitUntil(lambda: mem.message.text().startswith("main: 4 bytes"), timeout=3000)
+    first = mem.base
+    cell = mem.table.item(0, first % 16)
+    cell.setText(f"{(int(cell.text(), 16) + 1) & 0xFF:02X}")   # a new value, so the cell changes
+    qtbot.waitUntil(lambda: "not written" in win.banner.error, timeout=3000)
+    assert "main:motor.mode" in win.banner.error and writes == []
+    mem.address.setText("motor.target")           # asks before writing
+    mem.read()
+    qtbot.waitUntil(lambda: mem.base != first, timeout=3000)
+    col = mem.base % 16
+    row = (mem.base - mem._row_start()) // 16
+    asked = []
+    monkeypatch.setattr(QMessageBox, "question", lambda *a, **k: asked.append(a[2]) or QMessageBox.No)
+    cell = mem.table.item(row, col)
+    old = int(cell.text(), 16)
+    cell.setText(f"{(old + 1) & 0xFF:02X}")
+    qtbot.waitUntil(lambda: "cancelled" in win.message.text(), timeout=3000)
+    assert writes == [] and "main:motor.target" in asked[0]
+    qtbot.waitUntil(lambda: mem.table.item(row, col).text() == f"{old:02X}", timeout=3000)   # read again
+    monkeypatch.setattr(QMessageBox, "question", lambda *a, **k: QMessageBox.Yes)
+    mem.table.item(row, col).setText(f"{(old + 1) & 0xFF:02X}")
+    qtbot.waitUntil(lambda: len(writes) == 1, timeout=3000)
+
+
+def test_profile_test_read_is_checked_like_any_read(qtbot, win, monkeypatch):
+    """L9: the Test read is refused outside the sections and ranges, and on an ELF mismatch."""
+    from rdt.target import Identity
+    connect(qtbot, win)
+    dlg = ProfileDialog(win.ws.config.profile, win.device, win)
+    qtbot.addWidget(dlg)
+    sent = []
+    target = win.device.target
+    real = target.command
+    monkeypatch.setattr(target, "command", lambda text, *a, **k: (sent.append(text), real(text, *a, **k))[1])
+    dlg.test_addr.setText("0x30000000")           # in no section and no listed range
+    dlg.test_len.setValue(4)
+    dlg.test()
+    qtbot.waitUntil(lambda: "⚠" in dlg.test_result.text(), timeout=3000)
+    assert "MCU main" in dlg.test_result.text() and sent == []
+    dlg.test_mcu.setValue(7)
+    dlg.test_addr.setText("0x20000010")
+    dlg.test()
+    qtbot.waitUntil(lambda: "no MCU with id 7" in dlg.test_result.text(), timeout=3000)
+    dlg.test_mcu.setValue(0)
+    m = target.mcus["main"]
+    monkeypatch.setattr(m, "identity", Identity("main", "mismatch", "flash differs"))
+    monkeypatch.setattr(m, "identity_stale", False)
+    dlg.test()
+    qtbot.waitUntil(lambda: "does not match" in dlg.test_result.text(), timeout=3000)
+    dlg.test_len.setValue(dlg.result_profile().max_response + 4)   # one command can't ask for more
+    dlg.test()
+    assert "max_response" in dlg.test_result.text()
+    assert sent == []
+
+
+def test_chart_draws_only_the_window_and_keeps_the_last_value(qtbot):
+    """L10: a redraw gives the plot only the samples in view, and the last value needs no scan."""
+    from rdt.gui.chart import ChartPanel, Trace
+    tr = Trace(4)
+    assert tr.last() is None
+    for i in range(10):
+        tr.add(float(i), float(i * 10))
+    tr.add(10.0, float("nan"))
+    assert tr.last() == 90.0
+    t, v = tr.window(3.5, 6.0)
+    assert list(t) == [3.0, 4.0, 5.0, 6.0, 7.0]
+    tr.trim(10.0)
+    assert tr.last() is None
+    tr.clear()
+    assert tr.last() is None and len(tr) == 0
+    chart = ChartPanel()
+    qtbot.addWidget(chart)
+    chart.timer.stop()
+    chart.add("main:x", "")
+    s = chart.series["main:x"]
+    now = time.time()
+    for i in range(600):                      # a minute of history at 10 a second
+        s.trace.add(now - 60 + i * 0.1, float(i))
+    chart._dirty = True
+    chart.redraw()
+    assert len(s.curve.xData) < 120 and s.curve.xData[-1] >= now - 1   # the 10 s window, not all 600
+    assert s.item.text(2) == "599"
+
+
+def test_f5_twice_cancels_the_connect(qtbot, win):
+    """M5: the connect's result arrives after the cancel; it must not leave a closed target."""
+    opened = []
+    win.device.opened.connect(opened.append)
+    win.toggle_connection()
+    win.toggle_connection()        # F5 again while connecting
+    qtbot.waitUntil(lambda: win.device.pending == 0, timeout=5000)
+    qtbot.wait(100)
+    assert win.device.target is None and opened == [] and not win._connecting
+    assert win.bar.connect_button.text().startswith("Disconnected")
+    assert win.bar.host.isEnabled()
+    connect(qtbot, win)            # and the next F5 connects
+    assert win.device.target is not None
+
+
+def test_opening_a_workspace_while_connecting_cancels_it(qtbot, win, bench):
+    """H4: the old link must not attach to the newly opened workspace."""
+    opened = []
+    win.device.opened.connect(opened.append)
+    win.connect()
+    win.load(Workspace.load(bench))
+    qtbot.waitUntil(lambda: win.device.pending == 0, timeout=5000)
+    qtbot.wait(100)
+    assert win.device.target is None and opened == [] and not win._connecting
+    assert win.bar.connect_button.text().startswith("Disconnected")
+
+
+def test_unknown_theme_or_density_falls_back(qtbot, tmp_path, monkeypatch):
+    """M6: a bad value in ui.toml must not stop RDT from starting, and an import refuses it."""
+    ui = tmp_path / "ui.toml"
+    monkeypatch.setenv("RDT_UI_FILE", str(ui))
+    ui.write_text('[ui]\ntheme = "neon"\ndensity = "dense"\n')
+    w = MainWindow()
+    qtbot.addWidget(w, before_close_func=lambda w: setattr(w, "dirty", False))
+    assert w.density_actions["compact"].isChecked() and w.theme_actions["system"].isChecked()
+    bad = tmp_path / "bad.toml"
+    bad.write_text('[ui]\ndensity = "dense"\n')
+    warnings = []
+    monkeypatch.setattr(QMessageBox, "warning", lambda *a, **k: warnings.append(a[2]))
+    assert not w.import_ui(bad)
+    assert "ui/density must be one of compact, comfortable" in warnings[0]
+    bad.write_text('[ui]\ntheme = "neon"\n')
+    assert not w.import_ui(bad) and "ui/theme" in warnings[1]
+    assert w.ui.value("ui/density") == "dense"     # left as it was, not replaced by the bad import
+
+
+def test_csv_log_write_error_stops_logging(qtbot, win, tmp_path, monkeypatch):
+    """L11: disk full or the USB stick pulled: logging stops, the button goes off, the bar says why."""
+    connect(qtbot, win)
+    wait_value(qtbot, win, "main:motor.speed", lambda v: True)
+    assert win.start_log(tmp_path / "log.csv")
+    log = win.log
+
+    def full(*a, **k):
+        raise OSError(28, "No space left on device")
+    monkeypatch.setattr(log, "write", full)
+    qtbot.waitUntil(lambda: win.log is None, timeout=5000)
+    assert not win.bar.log_button.isChecked() and not win.log_action.isChecked()
+    assert "No space left on device" in win.banner.error and "CSV" in win.banner.error
+
+
+def test_opening_the_com_list_keeps_the_workspace_unchanged(qtbot, win, monkeypatch):
+    """L18: the list rescan shows "COM3 - USB Serial" for a typed COM3: that is no edit."""
+    import rdt.gui.app as appmod
+    monkeypatch.setattr(appmod, "serial_ports", lambda: [("COM3", "USB Serial"), ("COM4", "")])
+    win.bar.transport.setCurrentText("serial")
+    win.bar.com.setEditText("COM3")
+    win.set_dirty(False)
+    win.bar.com.refresh()
+    assert win.bar.com.currentText() == "COM3 - USB Serial" and not win.dirty
+    monkeypatch.setattr(appmod, "serial_ports", lambda: [("COM4", "")])
+    win.bar.com.refresh()                     # COM3 unplugged: still shown, still no edit
+    assert appmod.port_name(win.bar.com.currentText()) == "COM3" and not win.dirty

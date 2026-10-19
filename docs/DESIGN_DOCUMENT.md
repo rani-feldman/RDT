@@ -66,6 +66,7 @@ Each requirement links to its design section.
 | LNK-8 | The GUI lists each COM port with its description, such as `COM3 - GAC serial port (COM3)` (2026-10-13) | Done | [D-LNK-1](#d-lnk-1-com-port) |
 | LNK-9 | The link shows as down (red `Link down · COM3`) when the port or socket breaks, noticed within a second even with polling off, or when the device answers none of 3 reads in a row from any MCU while the port stays open ("no reply"). While the link is down the MCU cards show `link down` (GUI-14) and writes are refused, and the ELFs are checked again when it comes back (2026-10-14; the default chosen in the thread "Status box on lost connection", not yet confirmed by rani) | Done | [D-LNK-9](#d-lnk-9-noticing-a-lost-link) |
 | LNK-10 | The COM port list in the toolbar is rescanned each time it opens, so unplugged ports disappear and newly plugged ports appear; the port already picked or typed stays shown (rani, 2026-10-18) | Done | [D-LNK-10](#d-lnk-10-com-port-list-rescanned-on-open) |
+| LNK-11 | A late reply to a read that timed out is dropped, never taken as the reply to the next command; a read-modify-write uses the words around the value only when two reads in a row agree, except in a peripheral range, which is read once (rani asked for every finding of the code review to be fixed, 2026-10-18) | In review | [D-LNK-11](#d-lnk-11-late-replies) |
 
 ### 2.3 SCPI commands
 
@@ -81,6 +82,7 @@ Each requirement links to its design section.
 | SCPI-9 | The profile can be edited in the GUI, with a preview of the commands and a test read | Done | [D-SCPI-9](#d-scpi-9-profile-editor) |
 | SCPI-10 | Every SCPI read and write covers whole 4-byte aligned words: a 2-byte variable is read as its 4-byte word and the result is trimmed, and a smaller or unaligned write is done as read-modify-write (2026-10-12) | Done | [D-SCPI-10](#d-scpi-10-aligned-words) |
 | SCPI-11 | A read reply is one bare hex value per 4-byte word, comma-separated, lowest address first, the way the firmware prints a `uint32_t`: `30303030,2F30302F,43B40000`. This is the only reply format (2026-10-13); the reply holds nothing else, so there is no reply regex (2026-10-14) | Done | [D-SCPI-11](#d-scpi-11-word-replies) |
+| SCPI-12 | A profile whose `{addr}` field would not give exactly 8 zero-padded hex digits (`{addr:8X}`, `{addr:04X}`, `{addr:010X}`) or whose `{value}` field pads the value is refused when it loads, and a value of the wrong type in a profile is a config error, not a crash (rani asked for every finding of the code review to be fixed, 2026-10-18) | In review | [D-SCPI-12](#d-scpi-12-profile-checks) |
 
 ### 2.4 Multiple MCUs
 
@@ -137,6 +139,7 @@ Each requirement links to its design section.
 | WS-2 | Per-item minimum and maximum, checked before every write (2026-10-05) | Done | [D-WS-2](#d-ws-2-limits) |
 | WS-3 | An optional confirm before writing (2026-10-05) | Done | [D-WS-3](#d-ws-3-confirm-before-writing) |
 | WS-4 | A global setting that makes every item read-only by default (2026-10-12) | Done | [D-WS-4](#d-ws-4-global-read-only-default) |
+| WS-5 | A value is written only when the user commits an edit (Enter or leaving the cell); a poll, the change highlight or an ELF remap never writes, Esc cancels and an unchanged edit writes nothing. NaN and infinity are refused for an item with a minimum or maximum. A memory-view write over a read-only watched item is refused, and over an item with confirm on it is asked about first (rani asked for every finding of the code review to be fixed, 2026-10-18) | In review | [D-WS-5](#d-ws-5-edits-limits-and-raw-writes) |
 
 ### 2.9 Polling
 
@@ -148,6 +151,7 @@ Each requirement links to its design section.
 | POLL-4 | A slow link makes items fall behind instead of queueing, and each item shows the rate it actually gets | Done | [D-POLL-4](#d-poll-4-falling-behind) |
 | POLL-5 | A **Poll now** button next to Poll in the GUI reads every watched item once (2026-10-13) | Done | [D-POLL-5](#d-poll-5-poll-now-and-polling-switch) |
 | POLL-6 | Polling can be turned off in the GUI, including items with their own interval (2026-10-13) | Done | [D-POLL-5](#d-poll-5-poll-now-and-polling-switch) |
+| POLL-7 | A hung MCU costs a poll a few timeouts: when a merged block gets no reply its items are read one at a time without retries, and after two in a row get no reply the rest keep the block's error; while the link shows "no reply" reads are not retried (rani asked for every finding of the code review to be fixed, 2026-10-18) | In review | [D-POLL-7](#d-poll-7-a-hung-mcu) |
 
 ### 2.10 Watch tabs
 
@@ -226,6 +230,7 @@ Each requirement links to its design section.
 | CLI-1 | A command line, `rdt`, for every device operation and for editing the workspace | Done | [D-CLI-1](#d-cli-1-rdt-command-line) |
 | CLI-2 | A Python API for scripts | Done | [D-CLI-2](#d-cli-2-python-api) |
 | CLI-3 | Every failure is reported with a clear, specific error | Done | [D-CLI-3](#d-cli-3-errors) |
+| CLI-4 | `--profile`, `--timeout`, `--mcu` and `--tcp/--udp/--serial/--baud` apply to that run only and are never saved into the workspace, except by `rdt init`; `--profile` keeps the workspace's memory ranges. Commands that only edit the workspace files work without loading the target, so a workspace whose memory map does not load can still be mended (rani asked for every finding of the code review to be fixed, 2026-10-18) | In review | [D-CLI-4](#d-cli-4-one-run-overrides) |
 
 ### 2.16 Simulator
 
@@ -445,6 +450,13 @@ rani reported on 2026-10-14 that the status box stayed green `Connected · COM3`
 
 The COM box in the connection bar is `PortBox` in `rdt/gui/app.py`, a `QComboBox` that calls `refresh()` in `showPopup()`: each time the list opens it asks `serial_ports()` for the ports present now and refills the list, so a port that was unplugged disappears and a newly plugged one appears without restarting RDT (rani, 2026-10-18). The port already shown, picked from the list or typed by hand, stays shown even when it is not listed any more. The same `refresh()` fills the list the first time the transport is set to COM port.
 
+#### D-LNK-11 Late replies
+
+Replies carry no tag, so a reply that arrives just after its read timed out would pass for the reply to the next read. `ScpiProtocol` in `rdt/protocol/scpi.py` remembers that a reply may still be owed after a timeout or a reply that did not decode, and before the next command waits for it and drops it. The wait is the MCU's timeout capped at 0.25 s (`LATE_REPLY_S`): the firmware sends no reply at all to a failed command, so every timeout pays this once and it has to stay short. No extra command is sent.
+
+A reply later than that wait can still fool one read, so `Session._read_words` in `rdt/session.py` reads the words around a sub-word value twice and uses them only when both reads agree on the bytes it keeps; otherwise the write is refused unsent. A word whose other bytes change on every read (a fast counter beside the value) is refused rather than overwritten. In a peripheral range the register is read once, since a read can clear a flag or pop a FIFO (`Target.write` passes `read_twice=False`).
+
+
 ### 4.3 SCPI commands
 
 #### D-SCPI-1 SCPI profile
@@ -542,6 +554,11 @@ rani set this on 2026-10-13, after connecting RDT to the real target on COM3: th
 - **Refused replies:** a `0x` prefix, a token wider than `align`, or the wrong number of words is a `BadReply`.
 - **Nothing else in the reply:** the whole reply is the words. The `reply_regex` key that picked them out of a longer reply was removed on 2026-10-14 at rani's request (RM-9), and an old profile that still has it loads with it ignored.
 - **Simulator:** it replies in the same words, in each simulated MCU's byte order.
+
+#### D-SCPI-12 Profile checks
+
+`Profile` in `rdt/profile.py` allows only `{addr}`/`{addr:08X}` and `{value}`/`{value:X}`, so every address sent is exactly 8 zero-padded digits and every value unpadded (SCPI-4). The profile dialog's Test read is one command, so it is refused above `max_response`. `Profile.from_dict` checks each value's type (a bool is never a number) and raises `ConfigError`.
+
 
 ### 4.4 Multiple MCUs
 
@@ -808,6 +825,13 @@ The write guard lives in `Workspace.write` (`rdt/workspace.py`). It is used by t
 - **GUI:** Watch > All items read-only turns it on and off, and greys the values on the next read. The item settings dialog offers Workspace default, Read-only or Writable.
 - **CLI:** `rdt read-only on|off` sets it and `rdt read-only` shows it; `rdt add EXPR --no-read-only` lets one item be written; `rdt list` mentions the default when it is on.
 
+#### D-WS-5 Edits, limits and raw writes
+
+- **Edits:** `ValueDelegate` in `rdt/gui/variables.py` writes in `setModelData`, so only a committed editor writes; the tree's itemChanged path is gone. While an editor is open, polls leave that cell alone and it is updated when the editor closes; the memory view does the same with Refresh on. Editing a field of an item with a unit starts from the bare number.
+- **Limits:** `Workspace.write` refuses a value that is not finite when the item has a minimum or maximum, and the item settings dialog refuses nan and inf as limits and shows numbers at full precision.
+- **Memory view:** writes stay raw (no scaling or limits, D-WS-4), but before writing the GUI finds the watched items the bytes overlap: a read-only one refuses the write, and one with confirm on asks first.
+
+
 ### 4.9 Polling
 
 #### D-POLL-1 Global interval
@@ -844,6 +868,11 @@ rani asked for both on 2026-10-13. The toolbar reads **[✓] Poll [interval] [Po
 - **Poll now:** a **Poll now** button next to the interval box, also **Watch > Poll now** (F6, formerly "Read all now"). It reads every watched item once, in every tab, including manual items, whether polling is on or off.
 - **Code:** `MainWindow.set_polling` in `rdt/gui/app.py` keeps the checkbox and the menu entry in step and sets `WatchTabs.polling`. That flag is passed to `WatchTree.due()` in `rdt/gui/variables.py`, which returns only items marked to be read by hand (Poll now, or connect) while polling is off.
 - **CLI:** `rdt watch` is unchanged; it polls until stopped.
+
+#### D-POLL-7 A hung MCU
+
+`read_many` in `rdt/scheduler.py` reads a failed block's items one at a time with `retries=0` (`Target.read` and `Session.read` take a `retries` override), and after two items in a row get no reply the rest take the block's error. Other MCUs are still read. While the link is in the "no reply" state (LNK-9) `Session.read` makes one attempt only.
+
 
 ### 4.10 Watch tabs
 
@@ -1277,6 +1306,11 @@ Every failure is an `rdt.RdtError` subclass (`rdt/errors.py`) with a message tha
 
 The CLI prints the message and exits with code 1. The GUI shows it on the red error bar under the toolbar (D-GUI-10), or in red on the item it belongs to.
 
+#### D-CLI-4 One-run overrides
+
+`load_workspace()` in `rdt/cli.py` returns the workspace as its files have it; `run_config(args, ws)` applies the command-line overrides to a deep copy that only the Target uses, so a command that saves writes back the files' own settings. `--profile` replaces the SCPI settings only; ranges listed in that profile file are added for the run. `list`, `remove`, `tab`, `commands`, `watchlist`, `memory` and `read-only` do not build a Target. A memory import is checked against each MCU's ELF sections before it is saved.
+
+
 ### 4.16 Simulator
 
 #### D-SIM-1 Simulated device
@@ -1603,6 +1637,7 @@ The application is built against the simulator. With the firmware's read and wri
 | 2026-10-18 | The COM port list is rescanned each time it opens (LNK-10, PR #134); rani reported that unplugging one port and plugging another left the list stale |
 | 2026-10-18 | The update check reads the latest version from the redirect of the releases web page instead of GitHub's API, to stay clear of its hourly limit, and a newer version opens an Update available window with what changed (INS-9, INS-15, PR #136). rani asked for both |
 
+| 2026-10-18 | Every finding of the whole-code review fixed (LNK-11, SCPI-12, WS-5, POLL-7, CLI-4 and bug fixes elsewhere), at rani's request. A late reply is dropped and a read-modify-write reads twice, except in peripheral ranges. Python's garbage collection runs on a GUI-thread timer, since collecting on the device worker freed widgets off the GUI thread |
 ## 9. Appendix: binary protocol (planned)
 
 A compact binary protocol was designed as a faster alternative to SCPI for when the firmware part is written. It is not built, and the firmware does not have it. It would plug in as a second protocol under the session, with nothing above it changing.

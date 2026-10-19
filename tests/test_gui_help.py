@@ -62,16 +62,41 @@ def test_status_bar_shows_a_newer_release_only(win):
 def test_update_check_saves_what_it_found(win, monkeypatch):
     shown = []
     monkeypatch.setattr(win, "show_update_dialog", lambda: shown.append(1))
-    win._update_checked(updates.Release("999.0.0", "https://example/r"))
+    release = updates.Release("999.0.0", "https://example/r", "## 999.0.0\n\n- Faster reads.")
+    win._update_checked(release)
     assert win.ui.value("updates/latest") == "999.0.0"
     assert not updates.due(win.ui.value("updates/last_check"))
     assert not win.update_label.isHidden()
     assert shown == [1]                          # what changed shows once on its own...
-    win._update_checked(updates.Release("999.0.0", "https://example/r"))
+    win._update_checked(release)
     assert shown == [1]                          # ...not again the next day for the same version
     win._manual_check = True
-    win._update_checked(updates.Release("999.0.0", "https://example/r"))
+    win._update_checked(release)
     assert shown == [1, 1]                       # Help > Check for updates always shows it
+
+
+def test_update_without_its_notes_shows_again_next_time(win, monkeypatch):
+    """L18: when the release notes couldn't be read, the version isn't marked as shown, so the
+    next check (with the notes, normally) still pops it up."""
+    shown = []
+    monkeypatch.setattr(win, "show_update_dialog", lambda: shown.append(1))
+    win._update_checked(updates.Release("999.0.0", "https://example/r"))
+    assert shown == [1] and win.ui.value("updates/notified") is None
+    win._update_checked(updates.Release("999.0.0", "https://example/r", "## 999.0.0\n\n- Faster reads."))
+    assert shown == [1, 1] and win.ui.value("updates/notified") == "999.0.0"
+
+
+def test_update_window_is_reused(win):
+    """L1: each status bar click or Help > Check for updates raises the one window."""
+    win._latest_release = updates.Release("999.0.0", "https://example/r", "## 999.0.0\n\n- Faster reads.")
+    first = win.show_update_dialog()
+    assert win.show_update_dialog() is first
+    assert len([w for w in win.findChildren(helpmenu.UpdateDialog) if w.isVisible()]) == 1
+    win._latest_release = updates.Release("999.1.0", "https://example/r2", "## 999.1.0\n\n- More.")
+    second = win.show_update_dialog()            # a newer release: its own notes
+    assert "999.1.0" in second.browser.toPlainText()
+    assert len([w for w in win.findChildren(helpmenu.UpdateDialog) if w.isVisible()]) == 1
+    second.close()
 
 
 def test_update_dialog_shows_what_changed(win):

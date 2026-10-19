@@ -9,6 +9,7 @@ from __future__ import annotations
 import logging
 import os
 import random
+import socket
 import socketserver
 import sys
 import threading
@@ -36,6 +37,14 @@ def _make_tcp_handler(device: Device):
     term = device.profile.terminator.encode()
 
     class Handler(socketserver.BaseRequestHandler):
+        def setup(self):
+            with self.server.clients_lock:
+                self.server.clients.add(self.request)
+
+        def finish(self):
+            with self.server.clients_lock:
+                self.server.clients.discard(self.request)
+
         def handle(self):
             client = "tcp %s:%d" % self.client_address[:2]
             log.info("%s connected", client)
@@ -73,6 +82,8 @@ def _make_udp_handler(device: Device, drop: float, rng: random.Random):
 
 
 # On Windows SO_REUSEADDR would let a second simulator silently share the port, so it stays off.
+# On Linux it only lets a restarted simulator reuse a TCP port still in TIME_WAIT; on a UDP
+# socket it would let two simulators share the port, so UDP never sets it.
 _REUSE = sys.platform != "win32"
 
 
@@ -80,9 +91,24 @@ class _TcpServer(socketserver.ThreadingTCPServer):
     allow_reuse_address = _REUSE
     daemon_threads = True
 
+    def __init__(self, *args, **kw):
+        self.clients: set[socket.socket] = set()   # open connections, closed by close_clients
+        self.clients_lock = threading.Lock()
+        super().__init__(*args, **kw)
+
+    def close_clients(self) -> None:
+        """Drop every connected client, so a stopped simulator looks like a lost link."""
+        with self.clients_lock:
+            clients = list(self.clients)
+        for sock in clients:
+            try:
+                sock.shutdown(socket.SHUT_RDWR)   # wakes the handler blocked in recv
+            except OSError:
+                pass
+
 
 class _UdpServer(socketserver.ThreadingUDPServer):
-    allow_reuse_address = _REUSE
+    allow_reuse_address = False
     daemon_threads = True
 
 
@@ -164,6 +190,14 @@ class Simulator:
         self._serial: SerialServer | None = None
 
     def start(self) -> Simulator:
+        try:
+            self._start()
+        except BaseException:   # a later bind failed: don't leave the earlier servers running
+            self.stop()
+            raise
+        return self
+
+    def _start(self) -> None:
         t = self.transport
         if t.tcp:
             srv = _TcpServer(parse_endpoint(t.tcp), _make_tcp_handler(self.device))
@@ -177,7 +211,6 @@ class Simulator:
             self._serial = SerialServer(self.device, t.serial, t.baud)
             self._serial.start()
             self.serial_port = self._serial.port
-        return self
 
     def _serve(self, srv: socketserver.BaseServer) -> None:
         self._servers.append(srv)
@@ -186,6 +219,8 @@ class Simulator:
     def stop(self) -> None:
         for srv in self._servers:
             srv.shutdown()
+            if isinstance(srv, _TcpServer):
+                srv.close_clients()
             srv.server_close()
         self._servers.clear()
         if self._serial is not None:

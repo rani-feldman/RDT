@@ -16,6 +16,16 @@ spec = importlib.util.spec_from_file_location("release", ROOT / "tools" / "relea
 release = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(release)
 
+
+@pytest.fixture(autouse=True)
+def _no_network(monkeypatch):
+    """The update tests stand in for GitHub: a real request would make them depend on the
+    network and on what is released (L18)."""
+    def refuse(*a, **k):
+        pytest.fail("a test asked the network")   # not an Exception, so fetch_* can't swallow it
+    monkeypatch.setattr(updates.urllib.request, "urlopen", refuse)
+    monkeypatch.setattr(updates._no_redirect, "open", refuse)
+
 LOG = """# Release notes
 
 Intro.
@@ -98,13 +108,46 @@ def test_check_once_a_day():
 
 
 def test_release_from_the_latest_redirect():
-    r = updates.release_from_location("https://github.com/x/releases/tag/v1.2.0")
-    assert r == updates.Release("1.2.0", "https://github.com/x/releases/tag/v1.2.0")
+    r = updates.release_from_location("https://github.com/rani-feldman/rdt/releases/tag/v1.2.0")
+    assert r == updates.Release("1.2.0", "https://github.com/rani-feldman/rdt/releases/tag/v1.2.0")
+    assert updates.release_from_location("https://GitHub.com/Rani-Feldman/RDT/releases/tag/v1.2.0") == \
+        updates.Release("1.2.0", "https://github.com/Rani-Feldman/RDT/releases/tag/v1.2.0")
     assert updates.release_from_location("/rani-feldman/rdt/releases/tag/v1.3.0") == \
         updates.Release("1.3.0", f"{updates.RELEASES_URL}/tag/v1.3.0")
-    assert updates.release_from_location("https://github.com/x/releases") is None     # no release yet
-    assert updates.release_from_location("https://github.com/x/releases/tag/nightly") is None
+    assert updates.release_from_location("https://github.com/rani-feldman/rdt/releases") is None  # no release yet
+    assert updates.release_from_location("https://github.com/rani-feldman/rdt/releases/tag/nightly") is None
     assert updates.release_from_location("") is None
+
+
+@pytest.mark.parametrize("location", [
+    "https://github.com/x/releases/tag/v1.2.0",                     # another repository
+    "https://github.com/someone/rdt/releases/tag/v1.2.0",
+    "https://evil.example/rani-feldman/rdt/releases/tag/v1.2.0",    # another host
+    "https://github.com.evil.example/rani-feldman/rdt/releases/tag/v1.2.0",
+    "https://github.com@evil.example/rani-feldman/rdt/releases/tag/v1.2.0",
+    "https://github.com:8443/rani-feldman/rdt/releases/tag/v1.2.0",
+    "http://github.com/rani-feldman/rdt/releases/tag/v1.2.0",       # not https
+    "https://github.com/rani-feldman/rdt/releases/tag/v1.2.0?x=1",
+    "https://github.com/a/rani-feldman/rdt/releases/tag/v1.2.0",
+])
+def test_only_this_repositorys_release_pages_count(location):
+    """L18: the redirect's URL becomes the Download link, so only github.com/rani-feldman/rdt."""
+    assert updates.release_from_location(location) is None
+
+
+def test_the_redirect_response_is_closed(monkeypatch):
+    closed = []
+
+    class Redirect(updates.urllib.error.HTTPError):
+        def close(self):
+            closed.append(1)
+            super().close()
+
+    def open_(req, timeout):
+        raise Redirect(req.full_url, 302, "", {"Location": "/rani-feldman/rdt/releases/tag/v0.0.1"}, None)
+    monkeypatch.setattr(updates._no_redirect, "open", open_)
+    assert updates.fetch_latest().version == "0.0.1"
+    assert closed == [1]
 
 
 def test_fetch_latest_gives_none_when_github_cannot_be_read(monkeypatch):
@@ -126,6 +169,7 @@ def _answer(monkeypatch, status, location=""):
 
 def test_fetch_latest_reads_the_redirect_not_the_api(monkeypatch):
     sent = _answer(monkeypatch, 302, "https://github.com/rani-feldman/RDT/releases/tag/v9.0.0")
+    monkeypatch.setattr(updates, "fetch_changelog", lambda v, t=None: "")   # no real network (L18)
     assert updates.fetch_latest() == updates.Release("9.0.0", "https://github.com/rani-feldman/RDT/releases/tag/v9.0.0")
     assert sent[0].full_url == "https://github.com/rani-feldman/rdt/releases/latest"
     assert "api.github.com" not in sent[0].full_url

@@ -8,7 +8,9 @@ no larger than the device's ``max_response``, so one read brings them all from t
   size, because reading a register can clear a flag or pop a FIFO.
 - A block must lie in memory RDT may read; a gap that leaves the ELF's sections splits it.
 - If a merged block fails for a reason other than a lost link or a silent MCU, its items are read
-  again one by one, so one bad item can't take its neighbours down with it.
+  again one by one, so one bad item can't take its neighbours down with it. Each of those reads
+  is tried once, and after two of them in a row get no reply the MCU is taken as hung and the
+  rest keep the block's error, so a hung MCU costs a poll a few timeouts, not one per item.
 
     samples = read_many(target, ["main:motor.speed", "main:tick_count", "motorctl:temperature"])
 
@@ -21,7 +23,7 @@ import time
 from dataclasses import dataclass, field
 from typing import Sequence
 
-from .errors import LinkDown, McuSilent, RdtError
+from .errors import CommandTimeout, LinkDown, McuSilent, RdtError
 from .profile import align_span
 from .symbols import Location
 from .target import Target
@@ -113,9 +115,13 @@ def read_many(t: Target, items: Sequence[str | Location], gap: int = MERGE_GAP) 
     return samples
 
 
-def _read_block(t: Target, block: Block, locs: list[Location | None], samples: list[Sample]) -> None:
+SPLIT_GIVE_UP = 2   # items in a row with no reply, after a block failed, before the rest are not tried
+
+
+def _read_block(t: Target, block: Block, locs: list[Location | None], samples: list[Sample],
+                retries: int | None = None) -> None:
     try:
-        data = t.read(block.mcu, block.addr, block.size)
+        data = t.read(block.mcu, block.addr, block.size, retries=retries)
     except (LinkDown, McuSilent) as e:
         for i in block.items:
             samples[i].error, samples[i].time = e, time.time()
@@ -124,8 +130,16 @@ def _read_block(t: Target, block: Block, locs: list[Location | None], samples: l
         if len(block.items) == 1:
             samples[block.items[0]].error, samples[block.items[0]].time = e, time.time()
             return
-        for i in block.items:   # one at a time, so a bad item fails alone
-            _read_block(t, Block(block.mcu, locs[i].addr, locs[i].size, [i]), locs, samples)
+        # One at a time, so a bad item fails alone. A failed command gets no reply, so each item
+        # gets one try: the block already spent its retries, and with full retries per item a
+        # hung MCU made one poll take seconds (M2, rani, 2026-10-18, code review).
+        missed = 0
+        for i in block.items:
+            if missed >= SPLIT_GIVE_UP:
+                samples[i].error, samples[i].time = e, time.time()
+                continue
+            _read_block(t, Block(block.mcu, locs[i].addr, locs[i].size, [i]), locs, samples, retries=0)
+            missed = missed + 1 if isinstance(samples[i].error, CommandTimeout) else 0
         return
     now = time.time()
     for i in block.items:

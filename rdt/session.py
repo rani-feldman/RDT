@@ -8,6 +8,8 @@ The session is where the firmware's habits are handled:
   of 2 bytes reads the 4-byte word and keeps the 2 bytes asked for. A write smaller than a word,
   or not on a word boundary, reads the word, replaces the bytes and writes the whole word back
   (read-modify-write). A neighbouring value the firmware changes in between is overwritten.
+  The words are read twice and used only when both reads agree, since replies carry no tag and
+  a late reply to an earlier read could otherwise be patched and written back.
 - A secondary MCU that stops answering is marked silent: on a -240 error reply, or after three
   timeouts in a row. Only that MCU's accesses fail, and it is tried again every few seconds.
 - When the port or socket breaks, the session goes down, refuses accesses, and reconnects in the
@@ -56,12 +58,20 @@ class McuStatus:
     last_probe: float = 0.0
     reply_ms: float | None = None     # how long the MCU takes to answer a read, smoothed (GUI-14)
     timeouts: list[float] = field(default_factory=list)   # when reads timed out, the last minute
+    # The session's thread adds timeouts while the GUI thread counts and prunes them (L13).
+    _lock: threading.Lock = field(default_factory=threading.Lock, repr=False, compare=False)
+
+    def add_timeout(self, when: float | None = None) -> None:
+        with self._lock:
+            self.timeouts.append(time.monotonic() if when is None else when)
+            del self.timeouts[:-100]
 
     def recent_timeouts(self, now: float | None = None) -> int:
         """Reads that got no reply in the last minute."""
         now = time.monotonic() if now is None else now
-        self.timeouts[:] = [t for t in self.timeouts if now - t < 60.0]
-        return len(self.timeouts)
+        with self._lock:
+            self.timeouts[:] = [t for t in self.timeouts if now - t < 60.0]
+            return len(self.timeouts)
 
 
 Listener = Callable[[str, dict], None]
@@ -259,9 +269,10 @@ class Session:
 
     # --- reads -------------------------------------------------------------------------------
 
-    def read(self, mcu: int, addr: int, size: int) -> bytes:
+    def read(self, mcu: int, addr: int, size: int, retries: int | None = None) -> bytes:
         """Read ``size`` bytes. The device is asked for whole aligned words, in pieces of at most
-        ``max_response`` bytes, and the bytes asked for are cut out of the result."""
+        ``max_response`` bytes, and the bytes asked for are cut out of the result. ``retries``
+        overrides the profile's for this read (the poll scheduler uses 0 when it splits a block)."""
         if size < 1:
             raise ValueError("size must be at least 1")
         align = self.profile.align
@@ -270,10 +281,10 @@ class Session:
         out = bytearray()
         with self._lock:
             for piece in range(start, end, chunk):
-                out += self._read_piece(mcu, piece, min(chunk, end - piece))
+                out += self._read_piece(mcu, piece, min(chunk, end - piece), retries)
         return bytes(out[addr - start:addr - start + size])
 
-    def _read_piece(self, mcu: int, addr: int, size: int) -> bytes:
+    def _read_piece(self, mcu: int, addr: int, size: int, retries: int | None = None) -> bytes:
         self._require_up()
         st = self.mcu_status(mcu)
         if st.silent:
@@ -281,8 +292,12 @@ class Session:
                 raise McuSilent(f"{self._name(mcu)} is not responding; retried every {self.SILENT_PROBE_S:g} s")
             st.last_probe = time.monotonic()
             attempts = 1
+        elif self.state is LinkState.NO_REPLY:
+            # The device answered none of the last reads: retrying each read would only multiply
+            # the wait; the first reply brings the link back up anyway (M2).
+            attempts = 1
         else:
-            attempts = 1 + self.profile.retries
+            attempts = 1 + (self.profile.retries if retries is None else retries)
         what = f"read of {size} bytes at 0x{addr:08X} on {self._name(mcu)}"
         bad: BadReply | None = None
         delay = self.RETRY_DELAY_S
@@ -312,8 +327,7 @@ class Session:
                     self._device_answered()
                     self._mcu_answered(mcu)
                     return data
-                st.timeouts.append(time.monotonic())
-                del st.timeouts[:-100]
+                st.add_timeout()
                 if mcu != 0:
                     st.timeouts_in_row += 1
                     if st.timeouts_in_row >= self.SILENT_AFTER:
@@ -329,12 +343,13 @@ class Session:
 
     # --- writes ------------------------------------------------------------------------------
 
-    def write(self, mcu: int, addr: int, data: bytes, byte_order: str = "little") -> None:
+    def write(self, mcu: int, addr: int, data: bytes, byte_order: str = "little", read_twice: bool = True) -> None:
         """Write ``data`` one value at a time and confirm it by reading it back.
 
         Every write covers whole aligned words. When ``data`` does not, the words are read first
         and ``data`` is put into them (read-modify-write). Values wider than ``max_write`` are
-        split. A multi-piece write is not atomic.
+        split. A multi-piece write is not atomic. ``read_twice`` False reads the words once (for
+        peripheral registers, where a read can have side effects).
         """
         if not data:
             raise ValueError("nothing to write")
@@ -349,7 +364,7 @@ class Session:
             if (start, end) == (addr, addr + len(data)):
                 words = data
             else:
-                words = self._patch(self._read_words(mcu, addr, data, start, end), off, data)
+                words = self._patch(self._read_words(mcu, addr, data, start, end, read_twice), off, data)
             pieces = split_write(start, words, self.profile.max_write)
             try:
                 self._send_pieces(mcu, pieces, byte_order)
@@ -382,14 +397,29 @@ class Session:
     def _patch(words: bytes, off: int, data: bytes) -> bytes:
         return words[:off] + data + words[off + len(data):]
 
-    def _read_words(self, mcu: int, addr: int, data: bytes, start: int, end: int) -> bytes:
-        """Read the words a read-modify-write puts ``data`` into."""
+    def _read_words(self, mcu: int, addr: int, data: bytes, start: int, end: int, twice: bool = True) -> bytes:
+        """Read the words a read-modify-write puts ``data`` into.
+
+        Replies carry no tag, so a late reply to an earlier read can pass for this one, and its
+        bytes would be written back around ``data`` and pass the read-back, which compares only
+        ``data`` (H1). The words are used only when two reads in a row agree on the bytes kept;
+        one stray reply can fool only one of them (rani, 2026-10-18, code review)."""
+        off = addr - start
         try:
-            return self.read(mcu, start, end - start)
+            words = self.read(mcu, start, end - start)
+            if not twice:
+                return words
+            for _ in range(1 + self.profile.retries):
+                again = self.read(mcu, start, end - start)
+                if self._patch(again, off, data) == self._patch(words, off, data):
+                    return again
+                words = again
         except (CommandTimeout, BadReply, McuSilent, CommandRejected) as e:
             raise WriteNotConfirmed(f"write to 0x{addr:08X} on {self._name(mcu)} not sent: reading the "
                                     f"{self.profile.align}-byte words around it failed: {e}",
                                     data, None) from None
+        raise WriteNotConfirmed(f"write to 0x{addr:08X} on {self._name(mcu)} not sent: two reads in a row of the "
+                                f"{self.profile.align}-byte words around it never agreed", data, None)
 
     def _send_pieces(self, mcu: int, pieces: list[tuple[int, bytes]], byte_order: str) -> None:
         for a, chunk in pieces:

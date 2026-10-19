@@ -46,7 +46,7 @@ def elf_health(t: Target | None, cfg: McuConfig, up: bool) -> tuple[str, str]:
     name = cfg.elf.name if cfg.elf else ""
     if not cfg.elf:
         return GREY, "no ELF"
-    if t is None or not up:
+    if t is None or not up or cfg.name not in t.mcus:   # a link from another workspace (H4)
         return GREY, name
     ident = t.mcu(cfg.name).identity
     if ident is None:

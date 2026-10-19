@@ -118,3 +118,23 @@ def test_example_config_runs():
             second = int.from_bytes(bytes.fromhex(ask(f, "MEM:READ? 0,20000010,4")), "little")
             assert second > first  # tick_count is a live counter
             assert ask(f, "MEM:READ? 0,48000000,4") == "00000000"  # GPIOA range
+
+
+def test_stop_drops_connected_tcp_clients(device):
+    s = Simulator(device, TransportConfig(tcp="127.0.0.1:0", udp=None)).start()
+    sock, f = tcp_client(s)
+    with sock:
+        assert ask(f, "*OPC?") == "1"
+        s.stop()
+        assert f.readline() == b""   # the link is lost, as when the real device goes away
+
+
+def test_two_simulators_cannot_share_a_udp_port(device):
+    with Simulator(device, TransportConfig(tcp=None, udp="127.0.0.1:0")) as first:
+        port = first.udp_address[1]
+        second = Simulator(device, TransportConfig(tcp="127.0.0.1:0", udp=f"127.0.0.1:{port}"))
+        with pytest.raises(OSError):
+            second.start()
+        # The TCP server it had already started is closed again, not left running.
+        with pytest.raises(OSError):
+            socket.create_connection(second.tcp_address, timeout=1).close()

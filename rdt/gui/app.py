@@ -20,6 +20,7 @@ from PySide6.QtWidgets import (
     QLineEdit, QMainWindow, QMessageBox, QPushButton, QSpinBox, QTableWidget, QTableWidgetItem, QToolBar,
     QButtonGroup, QHBoxLayout, QSizePolicy, QToolButton, QVBoxLayout, QWidget,
 )
+from shiboken6 import Shiboken
 
 from ..console import history_path
 from ..csvlog import CsvLog
@@ -135,7 +136,9 @@ class PortBox(QComboBox):
         else:
             self.setEditText(shown)
         self.blockSignals(False)
-        if self.currentText() != shown:
+        # Only a different port is an edit: "COM3" becoming its list entry "COM3 - USB Serial"
+        # must not mark the workspace changed (L18).
+        if port_name(self.currentText()) != port_name(shown):
             self.currentTextChanged.emit(self.currentText())
 
     def showPopup(self) -> None:
@@ -524,6 +527,7 @@ class MainWindow(QMainWindow):
         self.statusBar().addPermanentWidget(self.log_label)
         self.update_label = QLabel()  # "RDT 1.1.0 is available": opens what changed (INS-9)
         self._latest_release = None
+        self._update_dialog = None
         self.update_label.linkActivated.connect(lambda _url: self.show_update_dialog())
         self.update_label.hide()
         self.statusBar().addPermanentWidget(self.update_label)
@@ -702,7 +706,8 @@ class MainWindow(QMainWindow):
         # What changed pops up once per new version on its own; Help > Check for updates and the
         # status bar link show it again whenever asked.
         if manual or self.ui.value("updates/notified") != release.version:
-            self.ui.set_value("updates/notified", release.version)
+            if release.notes:   # notes that failed to load: show it again with them next time
+                self.ui.set_value("updates/notified", release.version)
             self.show_update_dialog()
 
     def show_update(self, version: str | None, url: str = updates.RELEASES_URL) -> None:
@@ -721,7 +726,16 @@ class MainWindow(QMainWindow):
             if not version:
                 return None
             release = updates.Release(version, f"{updates.RELEASES_URL}/tag/v{version}")
-        dlg = helpmenu.UpdateDialog(self, release)
+        # One window: another click raises it instead of opening a second one (L1). A different
+        # release (a newer one found meanwhile) replaces it.
+        dlg = self._update_dialog
+        if dlg is not None and Shiboken.isValid(dlg) and dlg.isVisible():
+            if dlg.release == release:
+                dlg.raise_()
+                dlg.activateWindow()
+                return dlg
+            dlg.close()
+        dlg = self._update_dialog = helpmenu.UpdateDialog(self, release)
         dlg.show()
         return dlg
 
@@ -881,9 +895,14 @@ class MainWindow(QMainWindow):
             name = str(self.ui.value("ui/theme", "system"))
         elif name != self.ui.value("ui/theme", "system"):
             self.ui.set_value("ui/theme", name)
-        name = apply_theme(name, str(self.ui.value("ui/density", "compact")))
+        # A theme or density this RDT doesn't know (a hand-edited ui.toml, or one from another
+        # version) falls back to the default rather than stopping RDT from starting (M6).
+        density = str(self.ui.value("ui/density", "compact"))
+        if density not in DENSITY:
+            density = "compact"
+        name = apply_theme(name, density)
         self.theme_actions[name].setChecked(True)
-        self.density_actions[str(self.ui.value("ui/density", "compact"))].setChecked(True)
+        self.density_actions[density].setChecked(True)
         t = theme()
         self.chart.set_dark(is_dark())
         self.console.restyle(is_dark())
@@ -946,7 +965,10 @@ class MainWindow(QMainWindow):
 
     def load(self, ws: Workspace) -> None:
         self.stop_log()
-        if self.device.target is not None:
+        if self.device.target is not None or self._connecting:
+            # Also cancels a connect still in progress, so the old link never attaches to the
+            # new workspace (H4).
+            self._connecting = False
             self.device.close()
         self.ws = ws
         self.remember(ws.path)
@@ -1082,7 +1104,7 @@ class MainWindow(QMainWindow):
             if not path:
                 return False
         try:
-            self.ui.import_file(path)
+            self.ui.import_file(path, {"ui/theme": THEMES, "ui/density": DENSITY})
         except ConfigError as e:
             QMessageBox.warning(self, "Import interface settings", str(e))
             return False
@@ -1114,6 +1136,7 @@ class MainWindow(QMainWindow):
             t.stop()
         self.stop_log()
         self.console.stop_log()
+        self.hide()              # gone at once, even while shutdown waits for a long job (M7)
         self.device.shutdown()
         event.accept()
 
@@ -1491,7 +1514,18 @@ class MainWindow(QMainWindow):
         event = "" if was_up == self._log_link_up else ("link up" if self._log_link_up else "link down")
         if values or event:
             when = min((r.time for r in readings if r.time), default=time.time())
-            self.log.write(when, values, event)
+            try:
+                self.log.write(when, values, event)
+            except OSError as e:
+                # Disk full or the USB stick pulled: stop logging and say so, rather than
+                # leaving the button on while nothing is written (L11).
+                log, self.log = self.log, None
+                try:
+                    log.close()
+                except OSError:
+                    pass
+                self.status(f"CSV log stopped after {log.rows} rows: cannot write {log.path}: "
+                            f"{e.strerror or e}", error=True)
         self._show_log()
 
     def _show_log(self) -> None:
