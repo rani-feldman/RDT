@@ -13,8 +13,10 @@ import time
 from datetime import date, datetime
 from pathlib import Path
 
-from PySide6.QtCore import QByteArray, QSettings, QSize, Qt, QTimer
-from PySide6.QtGui import QAction, QActionGroup, QColor, QIcon, QKeySequence, QPainter, QPen, QPixmap
+from PySide6.QtCore import QByteArray, QSettings, QSize, Qt, QTimer, QUrl
+from PySide6.QtGui import (
+    QAction, QActionGroup, QColor, QDesktopServices, QIcon, QKeySequence, QPainter, QPen, QPixmap,
+)
 from PySide6.QtWidgets import (
     QAbstractItemView, QApplication, QComboBox, QDialog, QDialogButtonBox, QDockWidget, QFileDialog, QLabel,
     QLineEdit, QMainWindow, QMessageBox, QPushButton, QSpinBox, QTableWidget, QTableWidgetItem, QToolBar,
@@ -28,7 +30,7 @@ from ..errors import ConfigError, LinkDown
 from ..profile import Profile
 from ..session import LinkState
 from ..target import ConnectionConfig, McuConfig, TargetConfig, mcu_color
-from .. import updates
+from .. import appfiles, updates
 from .._version import __version__
 from ..ui_settings import SETTINGS, UiSettings, workspace_dir
 from ..workspace import Workspace, default_target
@@ -642,6 +644,8 @@ class MainWindow(QMainWindow):
         action(m, "&User manual", lambda: self.show_doc("RDT user manual", "manual"))
         action(m, "&Keyboard shortcuts", self.show_shortcuts, "F1")
         action(m, "&Release notes", lambda: self.show_doc("RDT release notes", "changelog"))
+        action(m, "&Video walkthrough", lambda: self.open_media("video"))
+        action(m, "&Presentation", lambda: self.open_media("presentation"))
         m.addSeparator()
         action(m, "&Check for updates", self.check_updates)
         self.update_check_action = action(m, "Check for updates at &start", self.set_update_check)
@@ -669,6 +673,12 @@ class MainWindow(QMainWindow):
         dlg = helpmenu.DocDialog(self, title, name, size)
         dlg.show()
         return dlg
+
+    def open_media(self, name: str) -> None:
+        """The walkthrough video or the presentation, in the PC's player or browser (INS-16)."""
+        url = appfiles.media_url(name)
+        if not QDesktopServices.openUrl(QUrl(url)):
+            self.status(f"Cannot open {url}", error=True)
 
     # --- updates (INS-9) -------------------------------------------------------------------------
 

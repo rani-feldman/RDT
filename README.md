@@ -33,7 +33,7 @@ One connect button that shows the link, a card per MCU with its link and ELF che
 
 ## User manual
 
-[docs/USER_MANUAL.md](docs/USER_MANUAL.md) walks through setting up a bench and operating RDT, from the GUI and from the command line.
+[docs/USER_MANUAL.md](docs/USER_MANUAL.md) walks through setting up a bench and operating RDT, from the GUI and from the command line. [A narrated video](docs/media/rdt-walkthrough.mp4) shows it in use (captions in [rdt-walkthrough.srt](docs/media/rdt-walkthrough.srt)), and [the presentation](docs/media/rdt-presentation.pdf) has the manual as slides; both are also in the GUI's Help menu.
 
 ## Simulated device
 

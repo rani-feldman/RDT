@@ -1,5 +1,5 @@
 """Files that ship with RDT: the user manual, the release notes, the licence and the third-party
-notices (INS-12, INS-13).
+notices (INS-12, INS-13), and where to find the walkthrough video and the presentation (INS-16).
 
 From a source checkout they are in the repository (README beside docs/); in the installed app
 PyInstaller puts them in a ``docs`` folder next to the code. ``doc_path`` finds either.
@@ -31,6 +31,24 @@ def doc_path(name: str) -> Path:
     if getattr(sys, "frozen", False):
         return bundle_root() / "docs" / Path(rel).name
     return bundle_root() / rel
+
+
+# The walkthrough video and the presentation (INS-16). Too big for the installer, so the installed
+# app opens them on GitHub; a source checkout opens its own copies.
+MEDIA = {
+    "video": "docs/media/rdt-walkthrough.mp4",
+    "presentation": "docs/media/rdt-presentation.pdf",
+}
+GITHUB_FILES = "https://github.com/rani-feldman/rdt/blob/main/"
+
+
+def media_url(name: str) -> str:
+    """Where Help opens the video or the presentation: the file in a source checkout, else GitHub."""
+    rel = MEDIA[name]
+    local = bundle_root() / rel
+    if not getattr(sys, "frozen", False) and local.is_file():
+        return local.as_uri()
+    return GITHUB_FILES + rel
 
 
 def read_doc(name: str) -> str | None:

@@ -296,6 +296,7 @@ Agreed with rani on 2026-10-17 (thread "Installer and releases plan", milestone 
 | INS-13 | Release notes from `CHANGELOG.md`: only New features and Bug fixes, one line per feature or bug-fix PR, small changes left out; copied into each GitHub Release; bundled and shown from Help > Release notes (2026-10-17) | Done (PR #131) | [D-INS-13](#d-ins-13-release-notes) |
 | INS-14 | A release starts from the **Run workflow** button (Actions > Release, type the version): it renames `## Unreleased` in CHANGELOG.md to the version and date, commits that to main and builds the draft Release in the same run, with no tag yet: the tag `vX.Y.Z` is created only when rani publishes the draft, so a discarded draft leaves no tag; pushing a `v*` tag by hand still works (2026-10-17, updated 2026-10-17) | Done | [D-INS-14](#d-ins-14-run-workflow-button) |
 | INS-15 | When a newer version is found, an **Update available** window shows what changed in it (the release notes of the versions newer than the running one) with a Download button; it opens by itself once per new version and again from the status-bar link or Help > Check for updates (rani, 2026-10-18) | Done | [D-INS-15](#d-ins-15-update-available-window) |
+| INS-16 | A narrated walkthrough video (GUI and command line, against the simulator) and the user manual as a slide presentation, kept in the repository under `docs/media/` and opened from **Help > Video walkthrough** and **Help > Presentation** (rani, 2026-10-19) | In review | [D-INS-16](#d-ins-16-video-and-presentation) |
 
 Requirements on the firmware itself (FW-1 to FW-10) are in [section 5](#5-firmware-specification).
 
@@ -1495,6 +1496,10 @@ The repository gets an MIT `LICENSE`, and the app ships a third-party notices fi
 
 When the check finds a newer version, `fetch_latest` also reads that tag's `CHANGELOG.md` from `raw.githubusercontent.com` (not the API either), and `changes_since` keeps the `## X.Y.Z (date)` sections newer than the running version, newest first, leaving out empty headings and Unreleased. `UpdateDialog` in `rdt/gui/help.py` shows them as "RDT X.Y.Z is available (you have A.B.C)" and "What changed", with **Download** (opens the release page) and **Close**. It opens by itself once per new version (the version is saved as `updates/notified` in `ui.toml`) and again whenever the status-bar link or **Help > Check for updates** is used. When the notes cannot be read, it points to the release page instead (rani, 2026-10-18).
 
+#### D-INS-16 Video and presentation
+
+`docs/media/` holds `rdt-walkthrough.mp4` (about 13 minutes, 1080p, burnt-in captions, with `rdt-walkthrough.srt` beside it) and `rdt-presentation.pdf` (the 42 slides made from the user manual). They are not bundled into the installer or the zip, which would grow by about 50 MB: `appfiles.media_url` gives the file in a source checkout and its page on GitHub (`github.com/rani-feldman/rdt/blob/main/docs/media/...`) in the installed app, and `MainWindow.open_media` hands that to the PC's player or browser, showing an error if nothing opens it. The video was recorded by driving the GUI on a virtual screen with a real pointer and narrated with an offline voice; the scripts that remake it live in the project files, not in the repository (rani, 2026-10-19).
+
 ## 5. Firmware specification
 
 The firmware side is not written yet; rani adds it to the existing firmware later. This section is the contract it must meet. The simulator meets it today.
@@ -1649,6 +1654,7 @@ The application is built against the simulator. With the firmware's read and wri
 | 2026-10-18 | The update check reads the latest version from the redirect of the releases web page instead of GitHub's API, to stay clear of its hourly limit, and a newer version opens an Update available window with what changed (INS-9, INS-15, PR #136). rani asked for both |
 | 2026-10-18 | Every finding of the whole-code review fixed (LNK-11, SCPI-12, WS-5, POLL-7, CLI-4 and bug fixes elsewhere), at rani's request. A late reply is dropped and a read-modify-write reads twice, except in peripheral ranges. Python's garbage collection runs on a GUI-thread timer, since collecting on the device worker freed widgets off the GUI thread |
 | 2026-10-19 | The simulator's example firmware gets structures, arrays and arrays of structures in their own sections, so the existing variables keep their addresses, plus a Structures tab in the example workspace (SIM-2, PR #142), at rani's request |
+| 2026-10-19 | A narrated walkthrough video and the manual as slides go into the repository under `docs/media/`, linked from the Help menu (INS-16), at rani's request. They stay out of the installer; the installed app opens them on GitHub |
 
 ## 9. Appendix: binary protocol (planned)
 
