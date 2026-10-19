@@ -237,7 +237,7 @@ Each requirement links to its design section.
 | ID | Requirement | Status | Design |
 | --- | --- | --- | --- |
 | SIM-1 | A simulated device stands in for the firmware until it has its memory commands (2026-10-05) | Done | [D-SIM-1](#d-sim-1-simulated-device) |
-| SIM-2 | The simulator's example firmware has structures, arrays and arrays of structures, some of them changing, to try the variable tree on (rani, 2026-10-19) | In review | [D-SIM-2](#d-sim-2-structures-and-arrays-in-the-example-firmware) |
+| SIM-2 | The simulator's example firmware has structures, arrays and arrays of structures, some of them changing, to try the variable tree on (rani, 2026-10-19) | Done | [D-SIM-2](#d-sim-2-structures-and-arrays-in-the-example-firmware) |
 
 ### 2.17 Console
 
@@ -1648,7 +1648,7 @@ The application is built against the simulator. With the firmware's read and wri
 | 2026-10-18 | The COM port list is rescanned each time it opens (LNK-10, PR #134); rani reported that unplugging one port and plugging another left the list stale |
 | 2026-10-18 | The update check reads the latest version from the redirect of the releases web page instead of GitHub's API, to stay clear of its hourly limit, and a newer version opens an Update available window with what changed (INS-9, INS-15, PR #136). rani asked for both |
 | 2026-10-18 | Every finding of the whole-code review fixed (LNK-11, SCPI-12, WS-5, POLL-7, CLI-4 and bug fixes elsewhere), at rani's request. A late reply is dropped and a read-modify-write reads twice, except in peripheral ranges. Python's garbage collection runs on a GUI-thread timer, since collecting on the device worker freed widgets off the GUI thread |
-| 2026-10-19 | The simulator's example firmware gets structures, arrays and arrays of structures in their own sections, so the existing variables keep their addresses, plus a Structures tab in the example workspace (SIM-2), at rani's request |
+| 2026-10-19 | The simulator's example firmware gets structures, arrays and arrays of structures in their own sections, so the existing variables keep their addresses, plus a Structures tab in the example workspace (SIM-2, PR #142), at rani's request |
 
 ## 9. Appendix: binary protocol (planned)
 
