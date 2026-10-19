@@ -1,0 +1,460 @@
+1
+00:00:00,600 --> 00:00:03,757
+This is RDT, the Remote Debugger Tool.
+
+2
+00:00:04,057 --> 00:00:14,596
+It reads, watches and changes the variables and memory of running firmware, over the link your product already has, using each MCU’s ELF file.
+
+3
+00:00:14,896 --> 00:00:18,032
+Let’s watch someone use it, against the simulator.
+
+4
+00:00:20,132 --> 00:00:28,452
+This is RDT, the Remote Debugger Tool, open on the example workspace, with the simulator running on this PC.
+
+5
+00:00:28,902 --> 00:00:33,489
+Across the top are the menus: File, Target, Watch, View and Help.
+
+6
+00:00:35,839 --> 00:00:41,023
+The toolbar starts with the panel buttons: Watch, Scope, Memory and Console.
+
+7
+00:00:41,514 --> 00:00:47,445
+Then the link: the transport, and the IP address and port, or the COM port and baud rate.
+
+8
+00:00:47,895 --> 00:00:53,655
+The gear opens the SCPI profile, and the connect button shows the state of the link.
+
+9
+00:00:54,105 --> 00:01:00,015
+Then RUN and STOP for polling, the polling interval, Poll now, and Log CSV.
+
+10
+00:01:00,465 --> 00:01:09,404
+On the left is the Target panel, with a card for each MCU. In the middle are the watch tabs, and along the bottom, the status bar.
+
+11
+00:01:09,854 --> 00:01:15,294
+To start from scratch, there’s File, New workspace, or File, Open. I’ll keep this one.
+
+12
+00:01:15,897 --> 00:01:23,385
+The link can be changed while disconnected. Serial shows the COM port and baud rate. I’ll go back to TCP.
+
+13
+00:01:25,571 --> 00:01:31,950
+The gear opens the SCPI profile: the read and write commands your firmware understands.
+
+14
+00:01:32,400 --> 00:01:38,651
+The preview shows each command exactly as it will be sent, with the address as eight hex digits.
+
+15
+00:01:39,101 --> 00:01:45,757
+Load from file fills the fields from a profile file, and Test read tries the profile once connected.
+
+16
+00:01:46,207 --> 00:01:49,919
+Target, MCUs and ELF files lists every MCU.
+
+17
+00:01:51,120 --> 00:01:57,456
+Each has an id, a name, a short name and colour for its tag, its ELF file, and its own timeout.
+
+18
+00:01:59,837 --> 00:02:02,312
+A double-click on a colour picks another one.
+
+19
+00:02:02,763 --> 00:02:07,883
+Memory ranges come from a memory map file, with File, Import, Memory map.
+
+20
+00:02:09,988 --> 00:02:13,742
+I pick the file, and add its ranges to the ones I have.
+
+21
+00:02:14,982 --> 00:02:21,297
+Each card’s Memory ranges list shows what RDT may read and write on that MCU.
+
+22
+00:02:21,747 --> 00:02:26,867
+Known commands for the console come in the same way, with File, Import, Commands.
+
+23
+00:02:30,684 --> 00:02:33,308
+Now I connect, with the button or F5.
+
+24
+00:02:33,758 --> 00:02:40,670
+It turns green. Connected means the socket is open; RDT sends nothing to test the device.
+
+25
+00:02:41,120 --> 00:02:47,904
+Each card checks its ELF file against the firmware. The main MCU matches, but motorctl doesn’t.
+
+26
+00:02:48,355 --> 00:02:53,987
+The red bar says so, and every read and write to motorctl is refused until it’s fixed.
+
+27
+00:02:54,437 --> 00:02:59,962
+Load ELF opens the MCU list. I select motorctl’s ELF, and press Browse.
+
+28
+00:03:00,412 --> 00:03:04,082
+I pick the ELF that matches the firmware, and press OK.
+
+29
+00:03:05,304 --> 00:03:08,845
+Both cards are green now, and the red bar is gone.
+
+30
+00:03:10,197 --> 00:03:16,746
+A right-click on a card checks its ELF again, edits the MCUs, or opens it in the memory view.
+
+31
+00:03:17,196 --> 00:03:24,748
+If a secondary MCU stops answering, only its card turns silent. The other MCUs keep working.
+
+32
+00:03:25,198 --> 00:03:28,868
+When it answers again, RDT picks it up by itself.
+
+33
+00:03:29,318 --> 00:03:37,531
+If the whole board stops answering, the button turns red: link down. Writes are refused, and the last values stay in grey.
+
+34
+00:03:37,982 --> 00:03:41,032
+When the replies come back, it goes green again.
+
+35
+00:03:42,482 --> 00:03:50,098
+The Motor tab is live. Each row starts with its MCU’s tag, and a value that just changed flashes yellow.
+
+36
+00:03:50,548 --> 00:03:53,322
+Hovering over a name shows the full expression.
+
+37
+00:03:53,772 --> 00:03:59,254
+To add variables, I open the main card’s Variables, and type in the search box.
+
+38
+00:03:59,705 --> 00:04:02,862
+A double-click adds a variable to the tab in front.
+
+39
+00:04:03,312 --> 00:04:06,533
+Or I select several, and press Add to watch list.
+
+40
+00:04:10,454 --> 00:04:13,291
+Variables can also be dragged onto a tab.
+
+41
+00:04:15,275 --> 00:04:21,035
+Watch, Add expression, or Control E, takes any expression, such as one cell of an array.
+
+42
+00:04:21,486 --> 00:04:28,462
+Structures and arrays open to every field and cell. A closed one isn’t read, which keeps the link free.
+
+43
+00:04:29,134 --> 00:04:32,804
+Enums show their names, and char arrays show as text.
+
+44
+00:04:36,970 --> 00:04:39,936
+A right-click on a field can give it its own row.
+
+45
+00:04:40,386 --> 00:04:47,767
+Hovering over a row shows two small buttons: a wave to chart it, and a cross to remove it. I’ll remove this one.
+
+46
+00:04:48,217 --> 00:04:52,313
+Each tab is its own watch list. The plus button makes a new one.
+
+47
+00:04:52,764 --> 00:04:54,854
+A double-click on a tab renames it.
+
+48
+00:04:56,172 --> 00:04:58,604
+Tabs can be dragged into a new order.
+
+49
+00:05:00,739 --> 00:05:06,883
+Also show in tab puts the same item in another tab. It stays one item, read once.
+
+50
+00:05:09,846 --> 00:05:16,289
+Control Page Down moves to the next tab, and every tab keeps polling, not only the one in front.
+
+51
+00:05:16,739 --> 00:05:21,816
+A right-click on an item sets its format: decimal, hex, binary or char.
+
+52
+00:05:22,266 --> 00:05:29,285
+Settings holds the fixed-point format, scale, offset and unit, the item’s polling, and its write safety.
+
+53
+00:05:33,434 --> 00:05:37,658
+This one shows milliamps as amps, with a scale of one thousandth.
+
+54
+00:05:38,955 --> 00:05:44,267
+To change a value, I double-click it, type the new value in its units, and press Enter.
+
+55
+00:05:44,718 --> 00:05:51,118
+This item asks before writing, so I confirm. RDT writes it, and reads it back to check.
+
+56
+00:05:51,568 --> 00:05:56,752
+A value outside the item’s limits is refused, with the reason in the red bar.
+
+57
+00:05:58,620 --> 00:06:05,511
+Motor mode is read-only, so it’s grey. Watch, All items read-only, protects every item at once.
+
+58
+00:06:09,130 --> 00:06:11,967
+STOP, or F7, pauses all polling.
+
+59
+00:06:12,418 --> 00:06:15,468
+Poll now, or F6, reads everything once.
+
+60
+00:06:15,918 --> 00:06:19,780
+The box beside RUN sets the global polling interval.
+
+61
+00:06:20,230 --> 00:06:26,225
+Each item can follow it, have its own interval, or be read only by hand, with Read now.
+
+62
+00:06:26,675 --> 00:06:32,691
+RUN starts polling again. The Rate column shows how often each item is really read.
+
+63
+00:06:33,141 --> 00:06:34,933
+The Scope button shows the chart.
+
+64
+00:06:35,383 --> 00:06:39,714
+Add to chart puts a value on it, drawn in its MCU’s colour.
+
+65
+00:06:41,901 --> 00:06:46,936
+Or I select a row and press Control G, or drag rows onto the chart.
+
+66
+00:06:59,967 --> 00:07:02,292
+Window sets how much time is shown.
+
+67
+00:07:03,603 --> 00:07:09,107
+Space pauses the view while the data keeps coming. The wheel zooms, and dragging pans.
+
+68
+00:07:15,627 --> 00:07:19,211
+Fit Y rescales, and Run follows the data again.
+
+69
+00:07:20,955 --> 00:07:25,563
+Cursors show each signal’s value at two points, and the time between them.
+
+70
+00:07:29,649 --> 00:07:35,708
+A right-click on a signal moves it to another Y axis, changes its colour, or removes it.
+
+71
+00:07:41,757 --> 00:07:47,346
+Control T adds minimum, maximum, mean and sample columns to the watch tree.
+
+72
+00:07:48,689 --> 00:07:54,833
+Log CSV, or Control L, writes every value to a file you can open in Excel.
+
+73
+00:07:57,172 --> 00:07:59,263
+Pressing it again stops the log.
+
+74
+00:08:01,157 --> 00:08:06,767
+The Memory button shows raw memory. I type a variable name and a length, and press Read.
+
+75
+00:08:10,293 --> 00:08:13,215
+Refresh reads it again at the polling interval.
+
+76
+00:08:13,666 --> 00:08:18,210
+A right-click changes how cells show, such as signed shorts, in decimal.
+
+77
+00:08:23,283 --> 00:08:27,443
+Or as floats, where the motor’s speed and target are easy to read.
+
+78
+00:08:27,893 --> 00:08:33,397
+A double-click on a cell writes a new value. This one is the target, so it asks first.
+
+79
+00:08:34,747 --> 00:08:40,294
+The Console button opens a terminal to the firmware. I type a query and press Enter.
+
+80
+00:08:40,745 --> 00:08:46,356
+A failed command gets no reply at all. The error query reads why from the firmware.
+
+81
+00:08:46,806 --> 00:08:52,524
+As I type, matching commands appear, with the best one in grey. The right arrow takes it.
+
+82
+00:08:52,974 --> 00:08:54,851
+Up walks back through the history.
+
+83
+00:08:55,302 --> 00:09:01,083
+Commands lists the known commands I imported. A double-click puts one on the prompt line.
+
+84
+00:09:01,533 --> 00:09:04,243
+History lists what I sent, to send again.
+
+85
+00:09:08,819 --> 00:09:14,579
+Control F searches the transcript, and Control plus and minus change the text size.
+
+86
+00:09:15,913 --> 00:09:21,481
+Timestamps and Wrap change the view, and Log to file saves the session to a text file.
+
+87
+00:09:22,921 --> 00:09:27,743
+A right-click sends a break on a COM port, or turns a selection into hex.
+
+88
+00:09:28,193 --> 00:09:32,310
+The panel buttons, or Control 1 to 4, show and hide their panels.
+
+89
+00:09:37,126 --> 00:09:41,990
+Drag a panel by its title to dock it somewhere else, stack it, or float it.
+
+90
+00:09:47,340 --> 00:09:55,511
+View, Target hides the MCU cards. Save layout keeps the arrangement, and Reset layout puts every panel back.
+
+91
+00:10:03,108 --> 00:10:06,948
+View, Density switches between compact and comfortable rows.
+
+92
+00:10:21,453 --> 00:10:25,826
+View, Theme changes the look. Here’s Islands, with rounded panels.
+
+93
+00:10:30,854 --> 00:10:32,944
+Instrument, made for scope work.
+
+94
+00:10:40,140 --> 00:10:41,271
+Light pro.
+
+95
+00:10:49,830 --> 00:10:51,643
+And back to Studio dark.
+
+96
+00:10:58,318 --> 00:11:04,505
+A star in the title means unsaved changes. Control S saves the workspace and its files.
+
+97
+00:11:04,967 --> 00:11:09,917
+File, Export saves one part at a time, such as the watch list, to share it.
+
+98
+00:11:16,827 --> 00:11:23,697
+File, Import brings it into another workspace, adding to its tabs or replacing them. Here I’ll cancel.
+
+99
+00:11:32,016 --> 00:11:36,794
+Interface settings, with your theme and console setup, export the same way.
+
+100
+00:11:43,570 --> 00:11:49,160
+Help has the user manual, the release notes, the update check, and the keyboard shortcuts.
+
+101
+00:11:57,595 --> 00:11:59,622
+F1 lists every shortcut.
+
+102
+00:12:00,475 --> 00:12:04,784
+Everything also works from the command line, on the same workspace.
+
+103
+00:12:05,239 --> 00:12:11,276
+rdt info shows the link, the profile, and each MCU’s ELF check and memory map.
+
+104
+00:12:11,746 --> 00:12:16,460
+symbols and ptype look up variables and their types, with no device needed.
+
+105
+00:12:21,400 --> 00:12:27,096
+read opens a structure to every field. With a tab name, it reads that tab’s items.
+
+106
+00:12:30,860 --> 00:12:34,828
+write changes one value, and confirms it by reading it back.
+
+107
+00:12:36,032 --> 00:12:38,485
+dump shows memory as hex and ASCII.
+
+108
+00:12:40,214 --> 00:12:44,310
+watch streams values, and can log them to a CSV file.
+
+109
+00:12:47,219 --> 00:12:54,131
+send sends one SCPI command. With expect, the exit code says whether the reply matched.
+
+110
+00:12:54,609 --> 00:13:01,393
+rdt console is the same console, in the terminal, with RDT’s own dot commands.
+
+111
+00:13:01,844 --> 00:13:05,470
+add, list and tab edit a workspace without a device.
+
+112
+00:13:09,751 --> 00:13:15,810
+And memory, watchlist and commands import and export parts of it, as in the GUI.
+
+113
+00:13:18,465 --> 00:13:19,937
+That’s RDT.
+
+114
+00:13:20,237 --> 00:13:26,275
+The user manual covers every feature in detail, with troubleshooting and where each file lives.
+
+115
+00:13:26,575 --> 00:13:30,713
+Start with the simulator, then point RDT at your own board.
+

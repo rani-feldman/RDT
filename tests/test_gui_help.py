@@ -155,3 +155,21 @@ def test_crash_log_is_written(tmp_path, monkeypatch):
                 logging.getLogger().removeHandler(h)
                 h.close()
     assert "ValueError: boom" in path.read_text(encoding="utf-8")
+
+
+def test_video_and_presentation_open_from_help(win, monkeypatch):
+    """INS-16: Help opens the walkthrough video and the presentation, from the checkout here."""
+    opened = []
+    monkeypatch.setattr("rdt.gui.app.QDesktopServices.openUrl", lambda url: opened.append(url.toString()) or True)
+    actions = help_actions(win)
+    actions["Video walkthrough"].trigger()
+    actions["Presentation"].trigger()
+    assert opened[0].startswith("file://") and opened[0].endswith("docs/media/rdt-walkthrough.mp4")
+    assert opened[1].endswith("docs/media/rdt-presentation.pdf")
+
+
+def test_media_open_on_github_when_installed(monkeypatch):
+    from rdt import appfiles
+    monkeypatch.setattr(appfiles.sys, "frozen", True, raising=False)
+    assert appfiles.media_url("video") == "https://github.com/rani-feldman/rdt/blob/main/docs/media/rdt-walkthrough.mp4"
+    assert appfiles.media_url("presentation").endswith("/blob/main/docs/media/rdt-presentation.pdf")
