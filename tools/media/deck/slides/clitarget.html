@@ -1,0 +1,18 @@
+<section id="clitarget" data-transition="fade" style="background:#F4F5F2;color:#1B222B;font-family:'IBM Plex Sans', Arial, sans-serif;padding:128px 128px 160px;display:flex;flex-direction:column;gap:36px">
+<p style="font-size:24px;font-weight:600;color:#1F8A5F;letter-spacing:2px;text-transform:uppercase">Choose the target</p>
+<h2 style="font-size:64px;font-weight:600;line-height:1.15;color:#1B222B">A workspace, or rdt.toml, plus overrides</h2>
+<div style="display:flex;flex-direction:column;gap:6px;background:#161B22;padding:32px 40px;border-radius:16px;font-family:'JetBrains Mono', 'Courier New', monospace;color:#D6DEE6">
+<p style="font-size:26px">rdt -w bench.rdtw info   <span style="color:#7D8896"># a workspace</span></p>
+<p style="font-size:26px">rdt info                 <span style="color:#7D8896"># rdt.toml here, else in %LOCALAPPDATA%\rdt</span></p>
+</div>
+<table style="font-size:26px;color:#1B222B">
+<tr><th style="width:44%">Option</th><th style="width:56%">Meaning</th></tr>
+<tr><td style="font-family:'JetBrains Mono', 'Courier New', monospace">--serial COM5 --baud 115200</td><td>Use a COM port</td></tr>
+<tr><td style="font-family:'JetBrains Mono', 'Courier New', monospace">--tcp HOST:PORT, --udp</td><td>Use LAN</td></tr>
+<tr><td style="font-family:'JetBrains Mono', 'Courier New', monospace">--profile, --timeout, --mcu</td><td>Override for this run only</td></tr>
+<tr><td style="font-family:'JetBrains Mono', 'Courier New', monospace">--allow-mismatch</td><td>Use an MCU whose ELF does not match</td></tr>
+<tr><td style="font-family:'JetBrains Mono', 'Courier New', monospace">-v, -vv</td><td>Log link events; every command and reply</td></tr>
+</table>
+<p style="position:absolute;left:128px;bottom:64px;width:1664px;font-size:24px;color:#6A7480">RDT user manual · Part 3: Operating from the command line</p>
+<aside>Every command that talks to the device needs a workspace or a target file. Give it with dash w, or RDT uses r d t dot toml from the current folder, or from your local app data folder. Options override the file for that run only: a COM port or a LAN address, another profile, a timeout, or the MCUs. Allow mismatch is the only way to use an MCU whose ELF doesn’t match. Dash v v logs every command and reply.</aside>
+</section>

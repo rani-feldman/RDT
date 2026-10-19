@@ -1,0 +1,22 @@
+<section id="cliexit" data-transition="fade" style="background:#F4F5F2;color:#1B222B;font-family:'IBM Plex Sans', Arial, sans-serif;padding:128px 128px 160px;display:flex;flex-direction:column;gap:40px">
+<p style="font-size:24px;font-weight:600;color:#1F8A5F;letter-spacing:2px;text-transform:uppercase">Exit codes and scripts</p>
+<h2 style="font-size:64px;font-weight:600;line-height:1.15;color:#1B222B">Ready for scripts and test benches</h2>
+<div style="display:flex;flex-direction:row;gap:48px">
+<table style="flex:1;font-size:26px;color:#1B222B">
+<tr><th style="width:24%">Code</th><th style="width:76%">Meaning</th></tr>
+<tr><td>0</td><td>Success</td></tr>
+<tr><td>1</td><td>Anything failed; stderr says what</td></tr>
+<tr><td>11</td><td>send --expect got no reply, or no match</td></tr>
+</table>
+<div style="flex:1;display:flex;flex-direction:column;gap:2px;background:#161B22;padding:32px 40px;border-radius:16px;font-family:'JetBrains Mono', 'Courier New', monospace;color:#D6DEE6">
+<p style="font-size:24px;color:#7D8896"># the Python API under the CLI and GUI</p>
+<p style="font-size:24px">from rdt import Target</p>
+<p style="font-size:24px">with Target.from_file("bench.rdtw") as t:</p>
+<p style="font-size:24px">  print(t.read_value("main:motor.speed"))</p>
+<p style="font-size:24px">  t.write_value("main:motor.mode",</p>
+<p style="font-size:24px">                "MODE_RUN")</p>
+</div>
+</div>
+<p style="position:absolute;left:128px;bottom:64px;width:1664px;font-size:24px;color:#6A7480">RDT user manual · Part 3: Operating from the command line</p>
+<aside>For scripts, the exit code is zero on success and one when anything fails, with the reason on standard error. Send with expect returns eleven when the reply doesn’t match. For longer scripts, use the Python API that the command line and GUI are built on: open a target from a workspace, then read and write values by name.</aside>
+</section>

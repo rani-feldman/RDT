@@ -1,0 +1,22 @@
+# RDT workspace. Saved by RDT, so comments are not kept.
+# The SCPI profile, the watch tabs and the known commands are in the files it names.
+format      = 1
+profile     = "sim_bench.profile.toml"
+poll_ms     = 500
+memory_file = "sim_bench.memory.toml"
+watch_file  = "sim_bench.watch.toml"
+
+[connection]
+transport = "tcp"
+address   = "127.0.0.1:5025"
+
+[[mcu]]
+id   = 0
+name = "main"
+elf  = "firmware/main.elf"
+
+[[mcu]]
+id         = 1
+name       = "motorctl"
+elf        = "firmware/motorctl_old.elf"
+timeout_ms = 1000

@@ -1,0 +1,19 @@
+<section id="cliinfo" data-transition="fade" style="background:#F4F5F2;color:#1B222B;font-family:'IBM Plex Sans', Arial, sans-serif;padding:128px 128px 160px;display:flex;flex-direction:column;gap:36px">
+<p style="font-size:24px;font-weight:600;color:#1F8A5F;letter-spacing:2px;text-transform:uppercase">Look at the device</p>
+<h2 style="font-size:64px;font-weight:600;line-height:1.15;color:#1B222B">rdt info: the link, each ELF check, the memory map</h2>
+<div style="display:flex;flex-direction:column;gap:2px;background:#161B22;padding:32px 40px;border-radius:16px;font-family:'JetBrains Mono', 'Courier New', monospace;color:#D6DEE6">
+<p style="font-size:24px;color:#3DBE8B">$ rdt -w bench.rdtw info</p>
+<p style="font-size:24px">Link:          tcp 127.0.0.1:5025</p>
+<p style="font-size:24px">Profile:       RDT simulator</p>
+<p style="font-size:24px">MCU 0 main (main.elf, little endian)</p>
+<p style="font-size:24px">    identity: match, 4 flash blocks (136 bytes) match main.elf</p>
+<p style="font-size:24px">    0x08000000     80  ro  section     .text</p>
+<p style="font-size:24px">    0x20000000     36  rw  section     .data</p>
+<p style="font-size:24px">    0x48000000   1024  rw  peripheral  GPIOA</p>
+<p style="font-size:24px">MCU 1 motorctl (motorctl.elf, little endian)</p>
+<p style="font-size:24px">    identity: match, 2 flash blocks (88 bytes) match motorctl.elf</p>
+</div>
+<p style="font-size:26px;color:#46515E"><b>rdt symbols main 'motor*'</b> finds variables and <b>rdt ptype main:motor</b> shows a type’s layout, with no device needed.</p>
+<p style="position:absolute;left:128px;bottom:64px;width:1664px;font-size:24px;color:#6A7480">RDT user manual · Part 3: Operating from the command line · output from the simulator</p>
+<aside>R D T info shows the link, the profile, and for each MCU its ELF check and memory map. This is real output from the simulator: both MCUs match their ELF files, and you can see each section and the peripheral range. Symbols and p type look things up in the ELF, with no device needed.</aside>
+</section>

@@ -1,0 +1,23 @@
+<section id="polling" data-transition="fade" style="background:#F4F5F2;color:#1B222B;font-family:'IBM Plex Sans', Arial, sans-serif;padding:128px 128px 160px;display:flex;flex-direction:column;gap:48px">
+<p style="font-size:24px;font-weight:600;color:#1F8A5F;letter-spacing:2px;text-transform:uppercase">Polling</p>
+<h2 style="font-size:64px;font-weight:600;line-height:1.15;color:#1B222B">You decide how often each value is read</h2>
+<div style="display:flex;flex-direction:row;gap:32px">
+<div style="flex:1;display:flex;flex-direction:column;gap:16px;background:#FBFBF9;padding:40px;border:1px solid #DDE1DC;border-radius:16px">
+<p style="font-size:28px;font-weight:600;color:#F4F5F2;background:#1F8A5F;padding:10px 20px;border-radius:8px;width:200px">▶ RUN</p>
+<h3 style="font-size:36px;font-weight:600">RUN / STOP (F7)</h3>
+<p style="font-size:28px;line-height:1.45;color:#46515E">Stops or starts all polling. The global interval sits next to it, 500 ms by default.</p>
+</div>
+<div style="flex:1;display:flex;flex-direction:column;gap:16px;background:#FBFBF9;padding:40px;border:1px solid #DDE1DC;border-radius:16px">
+<x-icon name="Clock" style="color:#1F8A5F;width:56px;height:56px"></x-icon>
+<h3 style="font-size:36px;font-weight:600">Poll now (F6)</h3>
+<p style="font-size:28px;line-height:1.45;color:#46515E">Reads every watched item once, in every tab, whether polling runs or not.</p>
+</div>
+<div style="flex:1;display:flex;flex-direction:column;gap:16px;background:#FBFBF9;padding:40px;border:1px solid #DDE1DC;border-radius:16px">
+<x-icon name="Lightning" style="color:#1F8A5F;width:56px;height:56px"></x-icon>
+<h3 style="font-size:36px;font-weight:600">Merged reads</h3>
+<p style="font-size:28px;line-height:1.45;color:#46515E">Nearby items on one MCU come in one command, from the same moment.</p>
+</div>
+</div>
+<p style="position:absolute;left:128px;bottom:64px;width:1664px;font-size:24px;color:#6A7480">RDT user manual · Part 2: Operating from the GUI</p>
+<aside>Polling is under your control. The run and stop key, F7, stops or starts all polling, and the global interval sits next to it. Poll now, F6, reads every watched item once. Items close together on the same MCU are read in one command, so they come from the same moment. On a slow link, items fall behind instead of queueing, and the rate column shows what each one actually gets.</aside>
+</section>

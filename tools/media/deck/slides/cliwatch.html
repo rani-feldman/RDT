@@ -1,0 +1,18 @@
+<section id="cliwatch" data-transition="fade" style="background:#F4F5F2;color:#1B222B;font-family:'IBM Plex Sans', Arial, sans-serif;padding:128px 128px 160px;display:flex;flex-direction:column;gap:36px">
+<p style="font-size:24px;font-weight:600;color:#1F8A5F;letter-spacing:2px;text-transform:uppercase">Watch, log and send</p>
+<h2 style="font-size:64px;font-weight:600;line-height:1.15;color:#1B222B">Stream values, log to CSV, talk SCPI</h2>
+<div style="display:flex;flex-direction:column;gap:2px;background:#161B22;padding:32px 40px;border-radius:16px;font-family:'JetBrains Mono', 'Courier New', monospace;color:#D6DEE6">
+<p style="font-size:24px;color:#3DBE8B">$ rdt -w bench.rdtw watch main:motor.speed motorctl:temperature -i 200</p>
+<p style="font-size:24px">time          main:motor.speed  motorctl:temperature</p>
+<p style="font-size:24px">05:45:33.535    2418.24316 rpm       36.8205338 degC</p>
+<p style="font-size:24px">05:45:33.638    2747.80127 rpm       36.8205338 degC</p>
+<p style="font-size:24px">05:45:33.739    2944.02393 rpm       36.8205338 degC</p>
+<p style="font-size:24px;color:#3DBE8B">$ rdt -w bench.rdtw watch --tab Motor --csv run1.csv</p>
+<p style="font-size:24px;color:#3DBE8B">$ rdt -w bench.rdtw send "*IDN?"</p>
+<p style="font-size:24px">RDT,Simulator,SIM0001,0.1.0</p>
+<p style="font-size:24px;color:#3DBE8B">$ rdt -w bench.rdtw console</p>
+</div>
+<p style="font-size:26px;color:#46515E">watch rides through a lost link and an ELF rebuild. In <b>rdt console</b>, lines starting with a dot are RDT’s own: .read, .write, .history, .quit.</p>
+<p style="position:absolute;left:128px;bottom:64px;width:1664px;font-size:24px;color:#6A7480">RDT user manual · Part 3: Operating from the command line · output from the simulator</p>
+<aside>Watch prints one line per sample until you stop it, and with dash dash C S V it also logs to a file. It keeps running through a lost link and reconnects on its own, and it reloads a rebuilt ELF. Send sends one SCPI command, and a query waits for its reply. Console opens the same interactive console as the GUI, with RDT’s own dot commands to read, write and recall history.</aside>
+</section>

@@ -1,0 +1,14 @@
+<section id="trouble1" data-transition="fade" style="background:#F4F5F2;color:#1B222B;font-family:'IBM Plex Sans', Arial, sans-serif;padding:128px 128px 160px;display:flex;flex-direction:column;gap:36px">
+<p style="font-size:24px;font-weight:600;color:#1F8A5F;letter-spacing:2px;text-transform:uppercase">Troubleshooting · the link</p>
+<h2 style="font-size:56px;font-weight:600;line-height:1.15;color:#1B222B">When the device doesn’t answer</h2>
+<table style="font-size:24px;color:#1B222B">
+<tr><th style="width:28%">What you see</th><th style="width:34%">Why</th><th style="width:38%">What to do</th></tr>
+<tr><td>Every read times out</td><td>The read command or link settings are wrong</td><td>Check the template and terminator; try Test read; type SYST:ERR?</td></tr>
+<tr><td>Link down, port still open</td><td>No reply to the last three reads</td><td>Check the board runs; reset it if it hung</td></tr>
+<tr><td>Link down after unplugging</td><td>The COM port disappeared</td><td>Plug it back; RDT reconnects by itself</td></tr>
+<tr><td>MCU silent</td><td>A secondary MCU stopped answering</td><td>Check that MCU; RDT retries every 2 s</td></tr>
+<tr><td>A reply is refused</td><td>Not comma-separated hex words</td><td>Check the reply format and align</td></tr>
+</table>
+<p style="position:absolute;left:128px;bottom:64px;width:1664px;font-size:24px;color:#6A7480">RDT user manual · Part 4: Troubleshooting</p>
+<aside>When every read times out, the firmware doesn’t answer the read command as written, or the link settings are wrong: check the template and terminator, try the command in the console, or use Test read. Link down with the port still open means the device answered none of the last three reads, so check that the board is running. An unplugged COM port comes back by itself. A silent secondary MCU is retried every two seconds. And a refused reply means the firmware’s reply isn’t comma-separated hex words.</aside>
+</section>

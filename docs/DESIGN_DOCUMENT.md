@@ -1498,7 +1498,7 @@ When the check finds a newer version, `fetch_latest` also reads that tag's `CHAN
 
 #### D-INS-16 Video and presentation
 
-`docs/media/` holds `rdt-walkthrough.mp4` (about 13 minutes, 1080p, burnt-in captions, with `rdt-walkthrough.srt` beside it) and `rdt-presentation.pdf` (the 42 slides made from the user manual). They are not bundled into the installer or the zip, which would grow by about 50 MB: `appfiles.media_url` gives the file in a source checkout and its page on GitHub (`github.com/rani-feldman/rdt/blob/main/docs/media/...`) in the installed app, and `MainWindow.open_media` hands that to the PC's player or browser, showing an error if nothing opens it. The video was recorded by driving the GUI on a virtual screen with a real pointer and narrated with an offline voice; the scripts that remake it live in the project files, not in the repository (rani, 2026-10-19).
+`docs/media/` holds `rdt-walkthrough.mp4` (about 13 minutes, 1080p, burnt-in captions, with `rdt-walkthrough.srt` beside it) and `rdt-presentation.pdf` (the 42 slides made from the user manual). They are not bundled into the installer or the zip, which would grow by about 50 MB: `appfiles.media_url` gives the file in a source checkout and its page on GitHub (`github.com/rani-feldman/rdt/blob/main/docs/media/...`) in the installed app, and `MainWindow.open_media` hands that to the PC's player or browser, showing an error if nothing opens it. The video was recorded by driving the GUI on a virtual screen with a real pointer and narrated with an offline voice; the scripts that remake both are in `tools/media/` (see its README), so they change along with the GUI they drive (rani, 2026-10-19).
 
 ## 5. Firmware specification
 
@@ -1655,6 +1655,7 @@ The application is built against the simulator. With the firmware's read and wri
 | 2026-10-18 | Every finding of the whole-code review fixed (LNK-11, SCPI-12, WS-5, POLL-7, CLI-4 and bug fixes elsewhere), at rani's request. A late reply is dropped and a read-modify-write reads twice, except in peripheral ranges. Python's garbage collection runs on a GUI-thread timer, since collecting on the device worker freed widgets off the GUI thread |
 | 2026-10-19 | The simulator's example firmware gets structures, arrays and arrays of structures in their own sections, so the existing variables keep their addresses, plus a Structures tab in the example workspace (SIM-2, PR #142), at rani's request |
 | 2026-10-19 | A narrated walkthrough video and the manual as slides go into the repository under `docs/media/`, linked from the Help menu (INS-16, PR #144), at rani's request. They stay out of the installer; the installed app opens them on GitHub |
+| 2026-10-19 | The scripts that remake the video and the slides move from the project files into `tools/media/`, at rani's request, so a release that changes the GUI can remake them from the same checkout (INS-16) |
 
 ## 9. Appendix: binary protocol (planned)
 

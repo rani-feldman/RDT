@@ -1,0 +1,15 @@
+<section id="write" data-transition="fade" style="background:#F4F5F2;color:#1B222B;font-family:'IBM Plex Sans', Arial, sans-serif;padding:96px 128px 160px;display:flex;flex-direction:row;gap:56px;align-items:center">
+<div style="display:flex;flex-direction:column;gap:28px;width:480px">
+<p style="font-size:24px;font-weight:600;color:#1F8A5F;letter-spacing:2px;text-transform:uppercase">Change a value</p>
+<h2 style="font-size:56px;font-weight:600;line-height:1.1;color:#1B222B">Edit in place, confirmed by read-back</h2>
+<ol style="font-size:26px;line-height:1.45;color:#46515E">
+<li>Double-click the value</li>
+<li>Type it in the item’s units, or an enum name</li>
+<li>Press Enter: RDT writes and reads it back</li>
+</ol>
+<p style="font-size:26px;line-height:1.45;color:#46515E">Refused when read-only, out of limits, or the ELF does not match.</p>
+</div>
+<img src="/_blob/037fd3e4273beaf9783b720743e8cab5" alt="motor.target changed to 2500 rpm, with the status bar saying it was confirmed by read-back" style="width:1128px;height:634px;object-fit:contain;border-radius:12px;box-shadow:0 16px 48px rgba(17,22,29,0.25)">
+<p style="position:absolute;left:128px;bottom:64px;width:1664px;font-size:24px;color:#6A7480">RDT user manual · Part 2: Operating from the GUI</p>
+<aside>To change a value, double-click it, type the new value in the item’s units, and press Enter. Here, the motor target is set to twenty-five hundred r p m. RDT writes it and reads it back to confirm, and the status bar says so. Enums take their names, and integers take decimal, hex or binary. The write is refused, with the reason, when the item is read-only, the value is outside its limits, or the MCU’s ELF doesn’t match.</aside>
+</section>

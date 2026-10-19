@@ -1,0 +1,8 @@
+# RDT memory map: the memory regions RDT may access beyond the ELF's sections.
+# Each range may name an mcu. Saved by RDT, so comments are not kept.
+
+[[ranges]]
+name  = "GPIOA"
+start = 0x48000000
+size  = 0x400
+mcu   = "main"

@@ -1,0 +1,62 @@
+# RDT watch list: watch tabs, their items and the chart.
+# Saved by RDT, so comments are not kept.
+
+[[tab]]
+name = "Motor"
+
+[[tab.watch]]
+expr = "main:motor.speed"
+poll = 100
+unit = "rpm"
+
+[[tab.watch]]
+expr    = "main:motor.target"
+unit    = "rpm"
+min     = 0
+max     = 3000
+confirm = true
+
+[[tab.watch]]
+expr  = "main:motor.current_ma"
+scale = 0.001
+unit  = "A"
+
+[[tab.watch]]
+expr      = "main:motor.mode"
+read_only = true
+
+[[tab]]
+name = "System"
+
+[[tab.watch]]
+expr   = "main:tick_count"
+format = "hex"
+
+[[tab.watch]]
+expr = "motorctl:temperature"
+poll = "manual"
+unit = "degC"
+
+[[tab.watch]]
+expr = "main:motor.mode"
+
+[[tab]]
+name = "Structures"
+
+[[tab.watch]]
+expr = "main:imu"
+
+[[tab.watch]]
+expr = "main:channels"
+
+[[tab.watch]]
+expr = "main:adc_samples"
+
+[[tab.watch]]
+expr = "main:lookup"
+
+[[tab.watch]]
+expr = "main:boards"
+
+[[tab.watch]]
+expr = "main:limits"

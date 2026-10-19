@@ -1,0 +1,24 @@
+<section id="connect" data-transition="fade" style="background:#F4F5F2;color:#1B222B;font-family:'IBM Plex Sans', Arial, sans-serif;padding:128px 128px 160px;display:flex;flex-direction:column;gap:40px">
+<p style="font-size:24px;font-weight:600;color:#1F8A5F;letter-spacing:2px;text-transform:uppercase">Connect</p>
+<h2 style="font-size:64px;font-weight:600;line-height:1.15;color:#1B222B">One button shows the link and toggles it (F5)</h2>
+<div style="display:flex;flex-direction:column;gap:20px">
+<div style="display:flex;flex-direction:row;gap:32px;align-items:center">
+<p style="width:520px;font-size:28px;font-weight:600;color:#F4F5F2;background:#2F6FB5;padding:16px 28px;border-radius:10px">Disconnected · COM3</p>
+<p style="flex:1;font-size:28px;color:#46515E">Not connected. A click connects.</p>
+</div>
+<div style="display:flex;flex-direction:row;gap:32px;align-items:center">
+<p style="width:520px;font-size:28px;font-weight:600;color:#1B222B;background:#E8A33D;padding:16px 28px;border-radius:10px">Connecting · COM3</p>
+<p style="flex:1;font-size:28px;color:#46515E">Opening the port or socket. A click cancels.</p>
+</div>
+<div style="display:flex;flex-direction:row;gap:32px;align-items:center">
+<p style="width:520px;font-size:28px;font-weight:600;color:#F4F5F2;background:#1F8A5F;padding:16px 28px;border-radius:10px">Connected · COM3</p>
+<p style="flex:1;font-size:28px;color:#46515E">The port or socket is open. A click disconnects.</p>
+</div>
+<div style="display:flex;flex-direction:row;gap:32px;align-items:center">
+<p style="width:520px;font-size:28px;font-weight:600;color:#F4F5F2;background:#C0392B;padding:16px 28px;border-radius:10px">Link down · COM3</p>
+<p style="flex:1;font-size:28px;color:#46515E">Port broke, or three reads got no reply. Writes refused; RDT reconnects.</p>
+</div>
+</div>
+<p style="position:absolute;left:128px;bottom:64px;width:1664px;font-size:24px;color:#6A7480">RDT user manual · Part 2: Operating from the GUI</p>
+<aside>To connect, click the connect button or press F5. The button shows the state and the link. Blue means disconnected. Amber means connecting, and a click cancels. Green means the port or socket is open. Red means the link is down: the port broke, or the device answered none of the last three reads. While the link is down, writes are refused, the last values stay on screen in grey, and RDT reconnects by itself.</aside>
+</section>

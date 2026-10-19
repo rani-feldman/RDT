@@ -1,0 +1,19 @@
+<section id="cliread" data-transition="fade" style="background:#F4F5F2;color:#1B222B;font-family:'IBM Plex Sans', Arial, sans-serif;padding:128px 128px 160px;display:flex;flex-direction:column;gap:36px">
+<p style="font-size:24px;font-weight:600;color:#1F8A5F;letter-spacing:2px;text-transform:uppercase">Read and write</p>
+<h2 style="font-size:64px;font-weight:600;line-height:1.15;color:#1B222B">Every line of read can be pasted into write</h2>
+<div style="display:flex;flex-direction:column;gap:2px;background:#161B22;padding:32px 40px;border-radius:16px;font-family:'JetBrains Mono', 'Courier New', monospace;color:#D6DEE6">
+<p style="font-size:24px;color:#3DBE8B">$ rdt -w bench.rdtw read main:motor</p>
+<p style="font-size:24px">main:motor  motor_t, 16 bytes at 0x20000000</p>
+<p style="font-size:24px">main:motor.speed      = 27.0084591     float</p>
+<p style="font-size:24px">main:motor.target     = 3000           float</p>
+<p style="font-size:24px">main:motor.current_ma = -120 (0xFF88)  int16_t</p>
+<p style="font-size:24px">main:motor.mode       = MODE_RUN (1)   mode_t</p>
+<p style="font-size:24px;color:#3DBE8B">$ rdt -w bench.rdtw write main:motor.target 2500 -y</p>
+<p style="font-size:24px">main:motor.target = 2500 rpm (confirmed by read-back)</p>
+<p style="font-size:24px;color:#3DBE8B">$ rdt -w bench.rdtw dump main 0x20000000 32</p>
+<p style="font-size:24px">20000000  D9 37 AD 44 00 40 1C 45 88 FF 01 00 01 00 00 00  |.7.D.@.E........|</p>
+</div>
+<p style="font-size:26px;color:#46515E">Also <b>poke</b> for raw bytes. Item scaling and write safety apply on the command line too.</p>
+<p style="position:absolute;left:128px;bottom:64px;width:1664px;font-size:24px;color:#6A7480">RDT user manual · Part 3: Operating from the command line · output from the simulator</p>
+<aside>Read opens a struct or array to every field, one line each, so any line can be copied into a write command. Write takes one value, in the item’s units, and confirms it by reading it back. Dump shows memory as hex and ASCII, and poke writes raw bytes. A watched item’s scaling and write safety apply here too.</aside>
+</section>

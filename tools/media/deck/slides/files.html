@@ -1,0 +1,16 @@
+<section id="files" data-transition="fade" style="background:#F4F5F2;color:#1B222B;font-family:'IBM Plex Sans', Arial, sans-serif;padding:128px 128px 160px;display:flex;flex-direction:column;gap:32px">
+<p style="font-size:24px;font-weight:600;color:#1F8A5F;letter-spacing:2px;text-transform:uppercase">Files and where they are</p>
+<h2 style="font-size:56px;font-weight:600;line-height:1.15;color:#1B222B">Settings live in %LOCALAPPDATA%\rdt</h2>
+<table style="font-size:24px;color:#1B222B">
+<tr><th style="width:30%">File</th><th style="width:34%">Where</th><th style="width:36%">What</th></tr>
+<tr><td>bench.rdtw and its .toml files</td><td>Side by side, default %LOCALAPPDATA%\rdt</td><td>The workspace</td></tr>
+<tr><td>rdt.toml</td><td>Current folder, else %LOCALAPPDATA%\rdt</td><td>Default target when none is given</td></tr>
+<tr><td>ui.toml</td><td>%LOCALAPPDATA%\rdt</td><td>GUI settings and layout, per user</td></tr>
+<tr><td>console_history.txt</td><td>%LOCALAPPDATA%\rdt</td><td>Console history, GUI and CLI</td></tr>
+<tr><td>cache</td><td>%LOCALAPPDATA%\rdt\cache</td><td>Parsed ELFs; safe to delete</td></tr>
+<tr><td>logs\rdt.log</td><td>%LOCALAPPDATA%\rdt\logs</td><td>Warnings and errors; safe to delete</td></tr>
+<tr><td>The installed RDT</td><td>%LOCALAPPDATA%\Programs\RDT</td><td>Programs, examples, simulator</td></tr>
+</table>
+<p style="position:absolute;left:128px;bottom:64px;width:1664px;font-size:24px;color:#6A7480">RDT user manual · Part 5: Files and where they are</p>
+<aside>Here’s where each file lives. The workspace and its files sit side by side, by default in your local app data folder, under R D T. That folder also holds your per-user GUI settings, the console history shared by the GUI and the command line, a cache of parsed ELF files, and the log. All of these are safe to delete except your workspaces. The programs themselves are installed under Programs, R D T.</aside>
+</section>

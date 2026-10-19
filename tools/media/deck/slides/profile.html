@@ -1,0 +1,23 @@
+<section id="profile" data-transition="fade" style="background:#F4F5F2;color:#1B222B;font-family:'IBM Plex Sans', Arial, sans-serif;padding:128px 128px 160px;display:flex;flex-direction:column;gap:40px">
+<p style="font-size:24px;font-weight:600;color:#1F8A5F;letter-spacing:2px;text-transform:uppercase">SCPI profile</p>
+<h2 style="font-size:64px;font-weight:600;line-height:1.15;color:#1B222B">You tell RDT how your firmware spells read and write</h2>
+<div style="display:flex;flex-direction:row;gap:56px">
+<div style="flex:1;display:flex;flex-direction:column;gap:6px;background:#161B22;padding:40px;border-radius:16px;font-family:'JetBrains Mono', 'Courier New', monospace;color:#D6DEE6">
+<p style="font-size:24px;color:#7D8896">[scpi]</p>
+<p style="font-size:24px">read  = "SERV:MEM:READ? {mcu},{addr},{len}"</p>
+<p style="font-size:24px">write = "SERV:MEM:WRIT {mcu},{addr},{value},{size}"</p>
+<p style="font-size:24px">align        = 4</p>
+<p style="font-size:24px">max_response = 1024</p>
+<p style="font-size:24px">timeout_ms   = 500</p>
+</div>
+<ul style="flex:1;font-size:28px;line-height:1.5;color:#46515E">
+<li>Addresses are 8-digit bare hex: <b>08000000</b></li>
+<li>Replies are comma-separated 32-bit hex words</li>
+<li>A failed command gets no reply, so it times out</li>
+<li>Every write is confirmed by reading it back</li>
+<li>RDT never sends *IDN? or SYST:ERR? by itself</li>
+</ul>
+</div>
+<p style="position:absolute;left:128px;bottom:64px;width:1664px;font-size:24px;color:#6A7480">RDT user manual · Part 1: Before you start</p>
+<aside>RDT has no built-in firmware commands. The SCPI profile says how your firmware spells a memory read and a memory write. Addresses are sent as eight-digit hex with no prefix, and a read reply is comma-separated thirty-two-bit words in hex. A failed command gets no reply at all, so RDT sees it as a timeout, and it confirms every write by reading it back. RDT sends nothing else on its own: no identity query and no error query.</aside>
+</section>
