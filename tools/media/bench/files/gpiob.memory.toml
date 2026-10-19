@@ -1,0 +1,5 @@
+[[ranges]]
+name  = "GPIOB"
+start = 0x48000400
+size  = 0x400
+mcu   = "main"

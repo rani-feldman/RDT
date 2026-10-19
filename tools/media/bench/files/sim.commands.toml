@@ -1,0 +1,24 @@
+[[command]]
+command = "*IDN?"
+name = "Identify"
+group = "Standard"
+
+[[command]]
+command = "*OPC?"
+name = "Operation complete"
+group = "Standard"
+
+[[command]]
+command = "SYSTem:ERRor?"
+name = "Read error queue"
+group = "Standard"
+
+[[command]]
+command = "SIMulation:MCU:LIST?"
+name = "List MCUs"
+group = "Simulator"
+
+[[command]]
+command = "SIMulation:MCU:SILent? 1"
+name = "Is motorctl silent"
+group = "Simulator"

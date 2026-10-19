@@ -10,6 +10,13 @@ Every pull request that adds a feature or fixes a bug adds one line to `CHANGELO
 `## Unreleased`, in `### New features` or `### Bug fixes`. Write it for someone using RDT, not for
 a developer. Small changes (tweaks, refactors, documentation, tests) get no line.
 
+## Before a release: the video and the presentation
+
+The Help menu opens a walkthrough video and a slide presentation from `docs/media/`. When the
+release adds or changes something a user would see, remake them with the scripts in
+[tools/media](../tools/media/README.md) (on Linux, against the simulator) and merge that before
+running the release.
+
 ## Make a release
 
 1. Open the repository on GitHub, click **Actions**, then **release** on the left.

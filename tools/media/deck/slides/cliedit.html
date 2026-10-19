@@ -1,0 +1,16 @@
+<section id="cliedit" data-transition="fade" style="background:#F4F5F2;color:#1B222B;font-family:'IBM Plex Sans', Arial, sans-serif;padding:128px 128px 160px;display:flex;flex-direction:column;gap:36px">
+<p style="font-size:24px;font-weight:600;color:#1F8A5F;letter-spacing:2px;text-transform:uppercase">Edit a workspace</p>
+<h2 style="font-size:64px;font-weight:600;line-height:1.15;color:#1B222B">Build a bench from a script, no device needed</h2>
+<div style="display:flex;flex-direction:column;gap:2px;background:#161B22;padding:32px 40px;border-radius:16px;font-family:'JetBrains Mono', 'Courier New', monospace;color:#D6DEE6">
+<p style="font-size:24px">rdt --serial COM3 --profile fw.toml --mcu main=0:main.elf init bench.rdtw</p>
+<p style="font-size:24px">rdt -w bench.rdtw add main:motor.speed --tab Motor --unit rpm --poll 100</p>
+<p style="font-size:24px">rdt -w bench.rdtw add main:motor.target --min 0 --max 3000 --confirm</p>
+<p style="font-size:24px">rdt -w bench.rdtw add main:motor.mode --read-only</p>
+<p style="font-size:24px">rdt -w bench.rdtw tab add Tuning</p>
+<p style="font-size:24px">rdt -w bench.rdtw memory import h7.memory.toml</p>
+<p style="font-size:24px">rdt -w bench.rdtw commands import gac.csv</p>
+</div>
+<p style="font-size:26px;color:#46515E">The same import and export as the GUI: memory, watchlist, commands. Plus <b>rdt ui show</b> and <b>rdt history</b>.</p>
+<p style="position:absolute;left:128px;bottom:64px;width:1664px;font-size:24px;color:#6A7480">RDT user manual · Part 3: Operating from the command line</p>
+<aside>You can build and edit a workspace from the command line, with no device. Init saves a new workspace. Add puts an item in a tab, with its unit, polling, limits and write safety. Tab adds, renames or removes tabs, and memory, watch list and commands import and export the same parts as the GUI.</aside>
+</section>

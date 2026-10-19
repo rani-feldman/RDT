@@ -1,0 +1,15 @@
+<section id="elfcheck" data-transition="fade" style="background:#F4F5F2;color:#1B222B;font-family:'IBM Plex Sans', Arial, sans-serif;padding:96px 128px 160px;display:flex;flex-direction:row;gap:56px;align-items:center">
+<div style="display:flex;flex-direction:column;gap:28px;width:480px">
+<p style="font-size:24px;font-weight:600;color:#1F8A5F;letter-spacing:2px;text-transform:uppercase">MCU cards</p>
+<h2 style="font-size:56px;font-weight:600;line-height:1.1;color:#1B222B">Each MCU’s health at a glance</h2>
+<ul style="font-size:26px;line-height:1.45;color:#46515E">
+<li>Dot: green OK, amber slow, red mismatch or link down</li>
+<li>Link: reply time, or silent</li>
+<li>ELF: matches, does not match, or not checked</li>
+<li>On a mismatch, the red bar offers Load ELF and Check again</li>
+</ul>
+</div>
+<img src="/_blob/ef9490600b48e36a0b0c9a4190228906" alt="RDT with a red error bar saying the ELF does not match the firmware on motorctl, and the motorctl card showing a red dot and a mismatch" style="width:1128px;height:634px;object-fit:contain;border-radius:12px;box-shadow:0 16px 48px rgba(17,22,29,0.25)">
+<p style="position:absolute;left:128px;bottom:64px;width:1664px;font-size:24px;color:#6A7480">RDT user manual · Part 2: Operating from the GUI</p>
+<aside>Once connected, each MCU card shows a dot, the MCU’s reply time, and its ELF check. Here, the motor control ELF is from an older build. Its card shows a red dot and does not match, and the red error bar says reads and writes to it are refused. Load the matching ELF, or flash the matching firmware, then press Check again. There is no way around this in the GUI. A secondary MCU that stops answering is marked silent on its own card, and the others keep working.</aside>
+</section>

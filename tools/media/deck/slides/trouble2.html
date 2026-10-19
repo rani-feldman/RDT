@@ -1,0 +1,14 @@
+<section id="trouble2" data-transition="fade" style="background:#F4F5F2;color:#1B222B;font-family:'IBM Plex Sans', Arial, sans-serif;padding:128px 128px 160px;display:flex;flex-direction:column;gap:36px">
+<p style="font-size:24px;font-weight:600;color:#1F8A5F;letter-spacing:2px;text-transform:uppercase">Troubleshooting · refused access</p>
+<h2 style="font-size:56px;font-weight:600;line-height:1.15;color:#1B222B">When RDT refuses a read or write</h2>
+<table style="font-size:24px;color:#1B222B">
+<tr><th style="width:30%">What you see</th><th style="width:32%">Why</th><th style="width:38%">What to do</th></tr>
+<tr><td>ELF does not match the firmware</td><td>The device runs another build</td><td>Load the matching ELF or flash the matching firmware, then Check again</td></tr>
+<tr><td>Outside the MCU’s known memory</td><td>No ELF section or listed range</td><td>Add the bank or register block to the memory map</td></tr>
+<tr><td>Read-only</td><td>The item, workspace default or section</td><td>Change the item’s settings, or turn off All items read-only</td></tr>
+<tr><td>Not confirmed: wrote, read back</td><td>The value read back differs</td><td>The firmware changed or refused it; check SYST:ERR?</td></tr>
+</table>
+<p style="font-size:26px;color:#46515E">Add only regions the firmware can read safely, and keep register blocks as peripherals.</p>
+<p style="position:absolute;left:128px;bottom:64px;width:1664px;font-size:24px;color:#6A7480">RDT user manual · Part 4: Troubleshooting</p>
+<aside>RDT also refuses access on purpose. An ELF mismatch means the device runs another build: load the matching ELF or flash the matching firmware. Outside known memory means the address is in no ELF section or listed range. Read-only comes from the item, the workspace default, or a code section. And not confirmed means the value read back differs from the one written. Add only memory the firmware can read safely, and keep register blocks as peripherals.</aside>
+</section>

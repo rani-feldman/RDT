@@ -1,0 +1,24 @@
+<section id="simulator" data-transition="fade" style="background:#F4F5F2;color:#1B222B;font-family:'IBM Plex Sans', Arial, sans-serif;padding:128px 128px 160px;display:flex;flex-direction:column;gap:40px">
+<p style="font-size:24px;font-weight:600;color:#1F8A5F;letter-spacing:2px;text-transform:uppercase">Try it on the simulator</p>
+<h2 style="font-size:64px;font-weight:600;line-height:1.15;color:#1B222B">A simulated device stands in for the firmware</h2>
+<div style="display:flex;flex-direction:row;gap:56px">
+<div style="flex:1;display:flex;flex-direction:column;gap:20px">
+<p style="font-size:30px;line-height:1.45;color:#46515E">Two MCUs, <b>main</b> and <b>motorctl</b>, each with an example ELF, on TCP and UDP port 5025.</p>
+<ol style="font-size:28px;line-height:1.5;color:#46515E">
+<li>Start the simulator</li>
+<li>Open the example workspace</li>
+<li>Press Connect (F5): the Motor tab starts to move</li>
+</ol>
+</div>
+<div style="flex:1;display:flex;flex-direction:column;gap:8px;background:#161B22;padding:40px;border-radius:16px;font-family:'JetBrains Mono', 'Courier New', monospace;font-size:26px;color:#D6DEE6">
+<p style="font-size:26px;color:#7D8896"># terminal 1</p>
+<p style="font-size:26px">python -m sim</p>
+<p style="font-size:26px;color:#7D8896"># terminal 2</p>
+<p style="font-size:26px">rdt-gui examples/sim_bench.rdtw</p>
+<p style="font-size:26px;color:#7D8896"># or from the command line</p>
+<p style="font-size:26px">rdt -w examples/sim_bench.rdtw watch</p>
+</div>
+</div>
+<p style="position:absolute;left:128px;bottom:64px;width:1664px;font-size:24px;color:#6A7480">RDT user manual · Part 1: Before you start</p>
+<aside>You can try everything without hardware. The simulator is a device on your own PC, with two MCUs, main and motor control, each with an example ELF file, listening on TCP and UDP port 5025. Start it in one terminal, open the example workspace in the GUI, and press Connect or F5. The values in the Motor tab start to move. Everything in this tour was recorded against the simulator.</aside>
+</section>

@@ -1,0 +1,14 @@
+# RDT SCPI profile: the memory read and write commands and the reply format.
+# Saved by RDT, so comments are not kept.
+
+[scpi]
+name         = "RDT simulator"
+read         = "MEMory:READ? {mcu},{addr},{len}"
+write        = "MEMory:WRITE {mcu},{addr},{value},{size}"
+max_write    = 4
+align        = 4
+byte_order   = "little"
+max_response = 1024
+terminator   = "\n"
+timeout_ms   = 500
+retries      = 2

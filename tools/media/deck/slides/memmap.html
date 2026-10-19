@@ -1,0 +1,18 @@
+<section id="memmap" data-transition="fade" style="background:#F4F5F2;color:#1B222B;font-family:'IBM Plex Sans', Arial, sans-serif;padding:128px 128px 160px;display:flex;flex-direction:column;gap:48px">
+<p style="font-size:24px;font-weight:600;color:#1F8A5F;letter-spacing:2px;text-transform:uppercase">Safety built in</p>
+<h2 style="font-size:64px;font-weight:600;line-height:1.15;color:#1B222B">RDT only touches memory it knows is safe</h2>
+<div style="display:flex;flex-direction:row;gap:32px">
+<div style="flex:1;display:flex;flex-direction:column;gap:20px;background:#FBFBF9;padding:48px;border:1px solid #DDE1DC;border-radius:16px">
+<x-icon name="Database" style="color:#1F8A5F;width:56px;height:56px"></x-icon>
+<h3 style="font-size:40px;font-weight:600">Memory map</h3>
+<p style="font-size:28px;line-height:1.45;color:#46515E">Access outside the ELF sections and your listed ranges is refused before anything is sent. Register blocks are read alone, at their exact size. Code and constants are read-only.</p>
+</div>
+<div style="flex:1;display:flex;flex-direction:column;gap:20px;background:#FBFBF9;padding:48px;border:1px solid #DDE1DC;border-radius:16px">
+<x-icon name="Verified" style="color:#1F8A5F;width:56px;height:56px"></x-icon>
+<h3 style="font-size:40px;font-weight:600">ELF check</h3>
+<p style="font-size:28px;line-height:1.45;color:#46515E">On connect, RDT compares a sample of flash with each ELF. On a mismatch, every read and write to that MCU is refused, so a stale ELF never hits the wrong address.</p>
+</div>
+</div>
+<p style="position:absolute;left:128px;bottom:64px;width:1664px;font-size:24px;color:#6A7480">RDT user manual · Part 1: Before you start</p>
+<aside>Two safety nets protect the device. The memory map: RDT refuses any access outside each MCU’s ELF sections and the ranges you list, before anything is sent. Register blocks are marked as peripherals and always read alone at their exact size, and code and constants are read-only. And the ELF check: on connect, RDT compares a sample of the flash on the device with each ELF. If they don’t match, every read and write to that MCU is refused, so a stale ELF can never read or write the wrong address.</aside>
+</section>
