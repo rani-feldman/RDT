@@ -41,3 +41,26 @@ name = "System"
 
   [[tab.watch]]
   expr = "main:motor.mode"    # an item can be in several tabs; its settings are given once
+
+# Structures, arrays and arrays of structures (sim/examples/firmware/main_data.c).
+# A whole struct or array is one row that opens into all its members and elements.
+[[tab]]
+name = "Structures"
+
+  [[tab.watch]]
+  expr = "main:imu"             # a structure with structures inside
+
+  [[tab.watch]]
+  expr = "main:channels"        # an array of structures, each with an array inside
+
+  [[tab.watch]]
+  expr = "main:adc_samples"     # an array
+
+  [[tab.watch]]
+  expr = "main:lookup"          # a two-dimensional array
+
+  [[tab.watch]]
+  expr = "main:boards"          # an array of structures holding bit fields and another array
+
+  [[tab.watch]]
+  expr = "main:limits"          # a constant array of structures in flash

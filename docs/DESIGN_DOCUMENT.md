@@ -237,6 +237,7 @@ Each requirement links to its design section.
 | ID | Requirement | Status | Design |
 | --- | --- | --- | --- |
 | SIM-1 | A simulated device stands in for the firmware until it has its memory commands (2026-10-05) | Done | [D-SIM-1](#d-sim-1-simulated-device) |
+| SIM-2 | The simulator's example firmware has structures, arrays and arrays of structures, some of them changing, to try the variable tree on (rani, 2026-10-19) | In review | [D-SIM-2](#d-sim-2-structures-and-arrays-in-the-example-firmware) |
 
 ### 2.17 Console
 
@@ -1324,6 +1325,16 @@ The CLI prints the message and exits with code 1. The GUI shows it on the red er
 
 Usage is in [SIMULATOR.md](SIMULATOR.md).
 
+#### D-SIM-2 Structures and arrays in the example firmware
+
+`main.elf` is built from `main.c` and `main_data.c` (`sim/examples/firmware/build.sh`). `main_data.c` holds:
+
+- **Structures:** `imu` (`imu_t`, with two `vec3_t` structures inside).
+- **Arrays:** `pid_gains[3]`, `adc_samples[16]` (in `.bss`), the two-dimensional `lookup[4][4]` and the string `device_name[16]`.
+- **Arrays of structures:** `channels[4]` (each `channel_t` with a `history[8]` array and an enum), `waypoints[3]`, `boards[2]` (each with a bit-field structure and a `channel_t[2]` inside) and the constant table `limits[4]` in flash.
+
+A `#pragma clang section` puts these in `.demo.*` sections, which `link.ld` places after `main.c`'s: RAM from `0x20000400`, the constant table after `main.c`'s constants. So `main.c`'s variables keep the addresses the tests, examples and screenshots use; only the ELF check samples one more flash block (`limits`). `two_mcus.toml` gives nine of the new members signals (`imu.accel.x`, three `channels[i].measured`, an error counter, two ADC samples and so on), and `examples/sim_bench.watch.toml` has a **Structures** tab with a whole-variable row for each kind. `tools/screenshots.py --tab NAME --expand` shows a watch tab with every row open.
+
 ### 4.17 Console
 
 The console code that is not Qt lives in `rdt/console.py`, so the GUI console (`Console` in `rdt/gui/panels.py`) and `rdt console` (`rdt/cli.py`) share it.
@@ -1636,8 +1647,9 @@ The application is built against the simulator. With the firmware's read and wri
 | 2026-10-17 | The release tag is created only when rani publishes the draft, not by Run workflow, so a draft found to be bad leaves no wrong tag in git; the next attempt takes the next patch version (INS-14, PR #133) |
 | 2026-10-18 | The COM port list is rescanned each time it opens (LNK-10, PR #134); rani reported that unplugging one port and plugging another left the list stale |
 | 2026-10-18 | The update check reads the latest version from the redirect of the releases web page instead of GitHub's API, to stay clear of its hourly limit, and a newer version opens an Update available window with what changed (INS-9, INS-15, PR #136). rani asked for both |
-
 | 2026-10-18 | Every finding of the whole-code review fixed (LNK-11, SCPI-12, WS-5, POLL-7, CLI-4 and bug fixes elsewhere), at rani's request. A late reply is dropped and a read-modify-write reads twice, except in peripheral ranges. Python's garbage collection runs on a GUI-thread timer, since collecting on the device worker freed widgets off the GUI thread |
+| 2026-10-19 | The simulator's example firmware gets structures, arrays and arrays of structures in their own sections, so the existing variables keep their addresses, plus a Structures tab in the example workspace (SIM-2), at rani's request |
+
 ## 9. Appendix: binary protocol (planned)
 
 A compact binary protocol was designed as a faster alternative to SCPI for when the firmware part is written. It is not built, and the firmware does not have it. It would plug in as a second protocol under the session, with nothing above it changing.

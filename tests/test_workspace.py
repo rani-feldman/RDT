@@ -220,7 +220,7 @@ def test_a_target_file_is_a_workspace():
 
 def test_the_example_workspace_loads():
     ws = Workspace.load(EXAMPLE_WORKSPACE)
-    assert [t.name for t in ws.tabs] == ["Motor", "System"]
+    assert [t.name for t in ws.tabs] == ["Motor", "System", "Structures"]
     assert ws.tab("System").watch("main:motor.mode") is ws.tab("Motor").watch("main:motor.mode")
     assert all(m.elf.exists() for m in ws.config.mcus)
 

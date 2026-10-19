@@ -6,9 +6,11 @@ run, and saves the window once per theme. Your own ui.toml is not touched.
 
     python tools/screenshots.py OUT_DIR [--theme light --theme studio ...] [--panel memory ...]
         [--workspace examples/sim_bench.rdtw] [--size 1500x860] [--seconds 2] [--name main-window]
+        [--tab Structures [--expand]]
 
 Each picture is OUT_DIR/<name>-<theme>.png. --panel shows a panel (watch, scope, memory, console)
-in addition to the ones the workspace shows.
+in addition to the ones the workspace shows. --tab shows that watch tab, and --expand opens every
+row in it, such as each structure's members and each array's elements.
 """
 
 from __future__ import annotations
@@ -47,6 +49,8 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--size", default="1500x860", help="window size, WIDTHxHEIGHT")
     p.add_argument("--seconds", type=float, default=2.0, help="how long to poll before each picture")
     p.add_argument("--name", default="main-window", help="file name before -<theme>.png")
+    p.add_argument("--tab", help="watch tab to show")
+    p.add_argument("--expand", action="store_true", help="open every row of the watch tab shown")
     args = p.parse_args(argv)
 
     app = QApplication([])
@@ -75,9 +79,18 @@ def main(argv: list[str] | None = None) -> int:
             w.set_theme(name)
             for panel in args.panel:
                 w.toggle_panel(panel, True)
+            tabs = w.watch_tabs
+            if args.tab:
+                names = [tabs.tabText(i) for i in range(tabs.count())]
+                if args.tab not in names:
+                    p.error(f"no watch tab {args.tab!r}; the workspace has {', '.join(names)}")
+                tabs.setCurrentIndex(names.index(args.tab))
             w.show()
             w.connect()
-            pump(app, args.seconds)
+            pump(app, args.seconds / 2)
+            if args.expand:
+                tabs.trees[tabs.currentIndex()].expandAll()
+            pump(app, args.seconds / 2)
             path = args.out / f"{args.name}-{name}.png"
             w.grab().save(str(path))
             print(path)

@@ -60,7 +60,7 @@ def test_matching_elf(sim):
     with make_target("tcp", sim.tcp_address, mcus=mcus()) as t:
         assert [(m.name, m.identity.status) for m in t.mcus.values()] == [("main", "match"), ("motorctl", "match")]
         assert "2 flash blocks (88 bytes) match motorctl.elf" in str(t.mcus["motorctl"].identity)
-        assert "3 flash blocks (112 bytes) match main.elf" in str(t.mcus["main"].identity)
+        assert "4 flash blocks (136 bytes) match main.elf" in str(t.mcus["main"].identity)
         t.write_value("main:gains[0]", 5)   # writes go through
 
 
@@ -68,7 +68,7 @@ def test_mismatch_refuses_writes_until_allowed(sim, tmp_path):
     with make_target("tcp", sim.tcp_address, mcus=mcus(other_build(tmp_path))) as t:
         ident = t.mcus["main"].identity
         assert ident.status == "mismatch"
-        assert "1 of 3 flash blocks (112 bytes) differ" in ident.detail
+        assert "1 of 4 flash blocks (136 bytes) differ" in ident.detail
         with pytest.raises(WriteRefused, match="does not match the firmware"):
             t.write_value("main:gains[0]", 5)
         with pytest.raises(WriteRefused):
@@ -163,7 +163,7 @@ def test_checked_again_after_the_link_comes_back(sim):
 def test_flash_samples_without_a_build_id(sim, tmp_path):
     """No build ID: blocks of the read-only sections are compared (SYM-8)."""
     samples = flash_samples(FIRMWARE / "main.elf")
-    assert [(hex(a), len(b)) for a, b in samples] == [("0x8000000", 80), ("0x8000050", 16), ("0x8000060", 16)]
+    assert [(hex(a), len(b)) for a, b in samples] == [("0x8000000", 80), ("0x8000050", 16), ("0x8000060", 16), ("0x8000094", 24)]
     data = bytearray((FIRMWARE / "main.elf").read_bytes())
     at = data.index(samples[0][1][:16]) + 8                 # a byte of .text in the file
     data[at] ^= 0xFF
@@ -172,7 +172,7 @@ def test_flash_samples_without_a_build_id(sim, tmp_path):
     with make_target("tcp", sim.tcp_address, mcus=mcus(elf)) as t:
         ident = t.mcus["main"].identity
         assert ident.status == "mismatch"
-        assert "1 of 3 flash blocks (112 bytes) differ, first at 0x08000008" in ident.detail
+        assert "1 of 4 flash blocks (136 bytes) differ, first at 0x08000008" in ident.detail
         with pytest.raises(ImageMismatch):
             t.read("main", 0x20000000, 4)
     big = flash_samples("/bin/ls") if Path("/bin/ls").is_file() else []   # a large ELF, where there is one
@@ -252,7 +252,7 @@ def test_cli(sim, tmp_path, capsys):
     address = "%s:%d" % tuple(sim.tcp_address)
     out = io.StringIO()
     assert main(["-t", str(EXAMPLE_TARGET), "--tcp", address, "info"], out=out) == 0
-    assert "identity: match, 3 flash blocks (112 bytes) match main.elf" in out.getvalue()
+    assert "identity: match, 4 flash blocks (136 bytes) match main.elf" in out.getvalue()
 
     target = tmp_path / "target.toml"
     target.write_text(EXAMPLE_TARGET.read_text().replace(
@@ -262,7 +262,7 @@ def test_cli(sim, tmp_path, capsys):
     out = io.StringIO()
     assert main(["-t", str(target), "--tcp", address, "write", "main:gains[0]", "5"], out=out) == 1
     err = capsys.readouterr().err
-    assert "warning: MCU main: flash differs from main.elf: 1 of 3 flash blocks" in err and "--allow-mismatch" in err
+    assert "warning: MCU main: flash differs from main.elf: 1 of 4 flash blocks" in err and "--allow-mismatch" in err
     assert "writes are refused" in err
     out = io.StringIO()
     assert main(["-t", str(target), "--tcp", address, "--allow-mismatch", "write", "main:gains[0]", "5"], out=out) == 0

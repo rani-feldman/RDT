@@ -37,6 +37,82 @@ elf  = "firmware/main.elf"
   amplitude = 1500
   offset    = 1500
 
+  # Members of the structures and arrays in main_data.c, so they change too.
+  [[mcu.signals]]
+  name      = "imu.accel.x"
+  addr      = 0x20000400
+  type      = "f32"
+  kind      = "sine"
+  period_ms = 1500
+  amplitude = 2
+
+  [[mcu.signals]]
+  name      = "imu.gyro.z"
+  addr      = 0x20000414
+  type      = "f32"
+  kind      = "sawtooth"
+  period_ms = 4000
+  amplitude = 90
+
+  [[mcu.signals]]
+  name      = "channels[0].measured"
+  addr      = 0x20000464
+  type      = "f32"
+  kind      = "sine"
+  period_ms = 3000
+  amplitude = 0.5
+  offset    = 12
+
+  [[mcu.signals]]
+  name      = "channels[1].measured"
+  addr      = 0x20000488
+  type      = "f32"
+  kind      = "square"
+  period_ms = 2000
+  amplitude = 0.2
+  offset    = 2.5
+
+  [[mcu.signals]]
+  name      = "channels[2].measured"
+  addr      = 0x200004AC
+  type      = "f32"
+  kind      = "sawtooth"
+  period_ms = 6000
+  amplitude = 5
+  offset    = 40
+
+  [[mcu.signals]]
+  name      = "channels[1].error_count"
+  addr      = 0x2000049C
+  type      = "u32"
+  kind      = "counter"
+  period_ms = 1000
+
+  [[mcu.signals]]
+  name      = "adc_samples[0]"
+  addr      = 0x200005BC
+  type      = "i16"
+  kind      = "sine"
+  period_ms = 1000
+  amplitude = 2000
+
+  [[mcu.signals]]
+  name      = "adc_samples[1]"
+  addr      = 0x200005BE
+  type      = "i16"
+  kind      = "sawtooth"
+  period_ms = 1000
+  amplitude = 2000
+
+  [[mcu.signals]]
+  name      = "boards[0].channel[1].measured"
+  addr      = 0x2000054C
+  type      = "f32"
+  kind      = "sine"
+  period_ms = 2500
+  amplitude = 0.3
+  offset    = 1
+
 [[mcu]]
 id               = 1
 name             = "motorctl"
