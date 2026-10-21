@@ -512,7 +512,7 @@ The error query that read the queue once after a timeout, its `error_query` prof
 
 #### D-SCPI-6 Write confirmation
 
-A write gets no reply whether it succeeds or fails, so `Session.write` reads the written bytes back after every write and compares them. The read-back covers whole aligned words, and only the bytes written are compared (D-SCPI-10). A mismatch raises `WriteNotConfirmed` with both values. Over UDP, a write whose read-back shows it missing is sent again, and only then. Bit-field writes are confirmed the same way (D-VAL-5).
+A write gets no reply whether it succeeds or fails, so `Session.write` reads the written bytes back after every write and compares them. The read-back covers whole aligned words, and only the bytes written are compared (D-SCPI-10). A mismatch raises `WriteNotConfirmed` with both values. Over UDP, a write whose read-back shows it missing is sent again, and only then. Bit-field writes are confirmed the same way (D-VAL-5). The `WriteNotConfirmed` message names the value's own address and also each word as sent, such as `(sent 1234FF02 at 24062BC0)`, since the value's address can be unaligned and rani took it for the address in the command (rani, 2026-10-21).
 
 #### D-SCPI-8 SCPI console
 

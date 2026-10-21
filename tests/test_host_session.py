@@ -112,6 +112,7 @@ def test_write_to_a_value_the_firmware_changes_is_not_confirmed(two_mcus):
             with pytest.raises(WriteNotConfirmed) as e:
                 t.write_value("@main:0x20000010:u32", 0)
             assert e.value.read_back is not None
+            assert "(sent 0 at 20000010)" in str(e.value)    # the word as sent, beside the value
 
 
 def test_max_response_comes_from_the_profile_only(two_mcus):
@@ -606,3 +607,18 @@ def test_a_peripheral_register_is_read_once_for_a_read_modify_write(two_mcus):
             t.write_value("@main:0x30000002:u16", 0x3333)
             assert bytes(reg) == bytes.fromhex("11113333")
             assert len(reads) == 2                                 # one read to patch, one read-back
+
+
+def test_every_write_address_is_4_byte_aligned(two_mcus):
+    """Whatever the value's address and size, the address in each write command is a multiple of
+    4 (rani, 2026-10-21)."""
+    dev = Device(two_mcus)
+    with Simulator(dev, TransportConfig(tcp="127.0.0.1:0", udp=None)) as s:
+        t = make_target("tcp", s.tcp_address)
+        sent = _record(t)
+        with t:
+            for offset in range(8):
+                for size in (1, 2, 4, 8):
+                    t.write("main", 0x20000020 + offset, bytes(range(1, size + 1)))
+        writes = [c for c in sent if c.startswith("MEMory:WRITE")]
+        assert writes and all(int(c.split(",")[1], 16) % 4 == 0 for c in writes)
