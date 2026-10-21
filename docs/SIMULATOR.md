@@ -43,7 +43,7 @@ The read, write and error commands come from the SCPI profile, the same `[scpi]`
 | Command (default profile) | Reply |
 | --- | --- |
 | `MEMory:READ? <mcu>,<addr>,<len>` | `<len>` bytes as comma-separated words: one bare hex value per `align`-byte word, lowest address first, such as `3FC00000,43B40000`. `<addr>` and `<len>` are multiples of `align` |
-| `MEMory:WRITE <mcu>,<addr>,<value>,<size>` | none. `<size>` is 1, 2, 4 or 8 bytes, at least `align` and at most `max_write`; `<addr>` is a multiple of `align`. A profile whose write template has no `{size}` writes `max_write` bytes |
+| `MEMory:WRITE <mcu>,<addr>,<value>` | none. Stores `max_write` bytes (1, 2 or 4); `<addr>` is a multiple of `align`. A simulator profile may add `{size}` to its own write template to try other firmware |
 | `SYSTem:ERRor?` | oldest error, or `0,"No error"` |
 | `*IDN?`, `*RST`, `*CLS`, `*OPC?` | standard. `*RST` reloads every MCU's memory from its image |
 | `SIMulation:MCU:SILent <mcu>,ON\|OFF` | none. Makes a secondary MCU stop answering |
@@ -53,7 +53,7 @@ The read, write and error commands come from the SCPI profile, the same `[scpi]`
 
 Long and short header forms both work, in any case (`MEMORY:READ?`, `mem:read?`).
 
-`<addr>` and `<value>` are bare hex with no prefix, as in the firmware. An address is exactly 8 digits, zero-padded (`08000000`); a shorter or longer one fails with `-104`, so it gets no reply. A value is unpadded, and a write of 1.5 as a float is `MEMory:WRITE 0,20000004,3FC00000,4`. A prefixed or signed number (`0x20000000`, `#H20`, `-1`) fails with `-104,"Data type error"`. `<mcu>`, `<len>` and `<size>` are plain decimal; `0x10`, `#H10`, `+4` or `1_6` fail with `-104`. Reads and writes are whole aligned words: with the default `align = 4`, `MEMory:READ? 0,20000002,2` fails with `-224`, and RDT asks for `MEMory:READ? 0,20000000,4` instead. A read reply is one bare hex value per word, comma-separated, as the firmware prints a `uint32_t`: on a little-endian MCU the 8 bytes `00 00 C0 3F 00 00 B4 43` (the floats 1.5 and 360.0) come back as `3FC00000,43B40000`.
+`<addr>` and `<value>` are bare hex with no prefix, as in the firmware. An address is exactly 8 digits, zero-padded (`08000000`); a shorter or longer one fails with `-104`, so it gets no reply. A value is unpadded, and a write of 1.5 as a float is `MEMory:WRITE 0,20000004,3FC00000`. A prefixed or signed number (`0x20000000`, `#H20`, `-1`) fails with `-104,"Data type error"`. `<mcu>` and `<len>` are plain decimal; `0x10`, `#H10`, `+4` or `1_6` fail with `-104`. Reads and writes are whole aligned words: with the default `align = 4`, `MEMory:READ? 0,20000002,2` fails with `-224`, and RDT asks for `MEMory:READ? 0,20000000,4` instead. A read reply is one bare hex value per word, comma-separated, as the firmware prints a `uint32_t`: on a little-endian MCU the 8 bytes `00 00 C0 3F 00 00 B4 43` (the floats 1.5 and 360.0) come back as `3FC00000,43B40000`.
 
 ## Errors
 

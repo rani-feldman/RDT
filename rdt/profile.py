@@ -23,7 +23,9 @@ from .errors import BadReply, ConfigError, DeviceError
 RETIRED_KEYS = {"size_query", "addr_format", "value_format", "data_format", "error_query", "probe", "reply_regex"}
 # A width must have its leading 0: {addr:8X} would pad with spaces, which the firmware rejects (L5).
 _HEX_SPEC = re.compile(r"^(0\d+)?X$")
-TEMPLATE_FIELDS = {"read": {"mcu", "addr", "len"}, "write": {"mcu", "addr", "value", "size"}}
+WORD_SIZES = (1, 2, 4)   # allowed max_write and align, in bytes
+
+TEMPLATE_FIELDS = {"read": {"mcu", "addr", "len"}, "write": {"mcu", "addr", "value"}}
 
 
 RANGE_KINDS = ("peripheral", "memory")
@@ -119,7 +121,7 @@ def fill_template(template: str, **values) -> str:
 class Profile:
     name: str = "Default"
     read: str = "MEMory:READ? {mcu},{addr},{len}"
-    write: str = "MEMory:WRITE {mcu},{addr},{value},{size}"
+    write: str = "MEMory:WRITE {mcu},{addr},{value}"
     max_write: int = 4                     # largest value one write accepts, in bytes
     align: int = 4                         # every read and write covers whole aligned words of this size
     byte_order: str = "little"             # used for an MCU without an ELF
@@ -134,10 +136,12 @@ class Profile:
             raise ConfigError(f"byte_order must be little or big, not {self.byte_order!r}")
         if self.max_response < 1:
             raise ConfigError("max_response must be at least 1")
-        if self.max_write not in (1, 2, 4, 8):
-            raise ConfigError("max_write must be 1, 2, 4 or 8")
-        if self.align not in (1, 2, 4, 8):
-            raise ConfigError("align must be 1, 2, 4 or 8")
+        # 8 was dropped for both: the firmware is 32-bit and stores at most 4 bytes, so an 8-byte
+        # value is always two word writes (rani, 2026-10-21, SCPI-13).
+        if self.max_write not in WORD_SIZES:
+            raise ConfigError("max_write must be 1, 2 or 4")
+        if self.align not in WORD_SIZES:
+            raise ConfigError("align must be 1, 2 or 4")
         if self.max_write < self.align:
             raise ConfigError(f"max_write ({self.max_write}) must be at least align ({self.align})")
         if self.max_response < self.align:
@@ -150,6 +154,11 @@ class Profile:
             raise ConfigError("retries must be 0 or more")
         for key, allowed in TEMPLATE_FIELDS.items():
             names = {n for _, n, _, _ in string.Formatter().parse(getattr(self, key)) if n is not None}
+            if key == "write" and "size" in names:
+                # Every write is one max_write-byte word, so the firmware needs no size (rani,
+                # 2026-10-21, SCPI-13).
+                raise ConfigError("write template: {size} was removed; every write is max_write bytes, "
+                                  "so take ,{size} out of the template")
             if names - allowed:
                 raise ConfigError(f"{key} template uses unknown placeholders: {', '.join(sorted(names - allowed))}")
             if key == "read" and not {"addr", "len"} <= names:
@@ -158,7 +167,7 @@ class Profile:
                 raise ConfigError("write template needs {addr} and {value}")
         # Catch format typos now rather than on the first command.
         self.format_read(0, 0, 1)
-        self.format_write(0, 0, 0, 1)
+        self.format_write(0, 0, 0)
 
     # --- loading -----------------------------------------------------------------------------
 
@@ -194,8 +203,8 @@ class Profile:
     def format_read(self, mcu: int, addr: int, length: int) -> str:
         return self._fill(self.read, mcu=mcu, addr=addr, len=length)
 
-    def format_write(self, mcu: int, addr: int, value: int, size: int) -> str:
-        return self._fill(self.write, mcu=mcu, addr=addr, value=value, size=size)
+    def format_write(self, mcu: int, addr: int, value: int) -> str:
+        return self._fill(self.write, mcu=mcu, addr=addr, value=value)
 
     def _fill(self, template: str, **kw) -> str:
         try:

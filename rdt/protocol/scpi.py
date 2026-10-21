@@ -91,7 +91,7 @@ class ScpiProtocol:
             self._owe_reply(timeout)
             raise
 
-    def write_mem(self, mcu: int, addr: int, value: int, size: int) -> None:
+    def write_mem(self, mcu: int, addr: int, value: int) -> None:
         """One write command. The firmware sends no reply to a write, success or failure."""
-        self.send(self.profile.format_write(mcu, addr, value, size))
+        self.send(self.profile.format_write(mcu, addr, value))
 

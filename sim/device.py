@@ -14,12 +14,11 @@ from collections import deque
 
 from .mcu import Mcu
 from .memory import MemoryFault
-from .profile import CommandPattern, Profile, parse_hex
+from .profile import WRITE_SIZES, CommandPattern, Profile, parse_hex
 
 log = logging.getLogger("sim")
 
 ERROR_QUEUE_SIZE = 16
-WRITE_SIZES = (1, 2, 4, 8)
 _DECIMAL = re.compile(r"[0-9]+")
 _ADDRESS = re.compile(r"[0-9A-Fa-f]{8}")
 

@@ -140,7 +140,7 @@ def test_addresses_values_and_replies_are_bare_hex(two_mcus):
             t.write("main", 0x20000024, data)
             assert t.read("main", 0x20000024, 6) == data
             assert t.read_value("@main:0x20000000:f32") == 1.5
-        assert "MEMory:WRITE 0,20000024,230D0A,4" in sent      # bytes 0A 0D 23 00, little endian
+        assert "MEMory:WRITE 0,20000024,230D0A" in sent      # bytes 0A 0D 23 00, little endian
         assert "MEMory:READ? 0,20000024,8" in sent             # 6 bytes are read as two whole words
         assert not any("0x" in c for c in sent)
 
@@ -178,17 +178,16 @@ def test_small_write_is_a_read_modify_write(two_mcus):
             assert t.read("main", 0x20000008, 4) == before[:2] + bytes.fromhex("EFBE")   # neighbour kept
         assert sent[:4] == ["MEMory:READ? 0,20000008,4",                                  # read the word
                             "MEMory:READ? 0,20000008,4",                                  # twice, to agree
-                            f"MEMory:WRITE 0,20000008,BEEF{before[1]:02X}{before[0]:02X},4",  # write it whole
+                            f"MEMory:WRITE 0,20000008,BEEF{before[1]:02X}{before[0]:02X}",  # write it whole
                             "MEMory:READ? 0,20000008,4"]                                  # and confirm
 
 
-def test_write_template_without_size_sends_single_words(two_mcus):
-    """A firmware that always stores 32 bits needs no {size}: with max_write = 4 every write is
-    one aligned 4-byte word, and an 8-byte value goes out as two of them (rani, 2026-10-21)."""
-    dev = Device(two_mcus, SimProfile(write="MEMory:WRITE {mcu},{addr},{value}"))
+def test_an_8_byte_value_is_two_word_writes(two_mcus):
+    """The write command has no size: every write is one aligned 4-byte word, and an 8-byte value
+    goes out as two of them (rani, 2026-10-21, SCPI-13)."""
+    dev = Device(two_mcus)
     with Simulator(dev, TransportConfig(tcp="127.0.0.1:0", udp=None)) as s:
-        profile = Profile(timeout_ms=300, write="MEMory:WRITE {mcu},{addr},{value}")
-        t = make_target("tcp", s.tcp_address, profile)
+        t = make_target("tcp", s.tcp_address)
         sent = _record(t)
         with t:
             sent.clear()
@@ -286,7 +285,7 @@ def test_read_replies_are_comma_separated_words(two_mcus):
 
 
 def test_user_defined_commands(two_mcus):
-    p = dict(read="RD? {mcu},{addr},{len}", write="WR {mcu},{addr},{value},{size}")
+    p = dict(read="RD? {mcu},{addr},{len}", write="WR {mcu},{addr},{value}")
     dev = Device(two_mcus, SimProfile(**p))
     with Simulator(dev, TransportConfig(tcp="127.0.0.1:0", udp=None)) as s:
         with make_target("tcp", s.tcp_address, Profile(**p, timeout_ms=300)) as t:

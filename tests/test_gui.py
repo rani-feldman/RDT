@@ -616,7 +616,7 @@ def test_profile_dialog_preview_and_apply(qtbot, win):
 def test_profile_dialog_loads_a_file(qtbot, win, tmp_path, monkeypatch):
     path = tmp_path / "gac.toml"
     path.write_text('[scpi]\nname = "RDT GAC"\nread = "SERV:MEM:READ? {mcu},{addr},{len}"\n'
-                    'write = "SERV:MEM:WRIT {mcu},{addr},{value},{size}"\nmax_response = 500\n')
+                    'write = "SERV:MEM:WRIT {mcu},{addr},{value}"\nmax_response = 500\n')
     assert not any(a.text().startswith("Load profile") for a in win.findChildren(QAction))
     dlg = ProfileDialog(win.ws.config.profile, win.device, win)
     qtbot.addWidget(dlg)

@@ -17,11 +17,14 @@ from pathlib import Path
 _PLACEHOLDER = re.compile(r"\{(\w+)(?::[^}]*)?\}")
 
 
+WRITE_SIZES = (1, 2, 4)   # the firmware is 32-bit: no 8-byte writes (rani, 2026-10-21)
+
+
 @dataclass
 class Profile:
     name: str = "Default"
     read: str = "MEMory:READ? {mcu},{addr},{len}"
-    write: str = "MEMory:WRITE {mcu},{addr},{value},{size}"
+    write: str = "MEMory:WRITE {mcu},{addr},{value}"
     max_write: int = 4
     align: int = 4          # addr, len and size must be multiples of this (rani, 2026-10-12)
     max_response: int = 1024
@@ -31,8 +34,10 @@ class Profile:
     def __post_init__(self) -> None:
         if self.max_response < 1:
             raise ValueError("max_response must be at least 1")
-        if self.align not in (1, 2, 4, 8):
-            raise ValueError("align must be 1, 2, 4 or 8")
+        if self.align not in (1, 2, 4):
+            raise ValueError("align must be 1, 2 or 4")
+        if self.max_write not in WRITE_SIZES:
+            raise ValueError("max_write must be 1, 2 or 4")
         if not self.terminator:
             raise ValueError("terminator must not be empty")
 
