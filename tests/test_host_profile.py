@@ -14,23 +14,23 @@ def test_default_commands_use_bare_hex():
     p = Profile()
     assert p.format_read(1, 0x20000084, 4) == "MEMory:READ? 1,20000084,4"
     assert p.format_read(0, 0x08000000, 4) == "MEMory:READ? 0,08000000,4"   # leading zero kept (rani)
-    assert p.format_write(0, 0x20000000, 0x3FC00000, 4) == "MEMory:WRITE 0,20000000,3FC00000,4"
+    assert p.format_write(0, 0x20000000, 0x3FC00000) == "MEMory:WRITE 0,20000000,3FC00000"
     assert p.format_read(0, 0x11AABBCCDD, 4) == "MEMory:READ? 0,11AABBCCDD,4"   # rani's example
-    assert p.format_write(0, 0x100, 0xA, 1) == "MEMory:WRITE 0,00000100,A,1"   # addresses always 8 digits
+    assert p.format_write(0, 0x100, 0xA) == "MEMory:WRITE 0,00000100,A"   # addresses always 8 digits
 
 
 def test_templates_are_user_defined():
-    p = Profile(read="read {mcu},{addr},{len}", write="write {mcu},{addr},{value},{size}")
+    p = Profile(read="read {mcu},{addr},{len}", write="write {mcu},{addr},{value}")
     assert p.format_read(0, 4096, 16) == "read 0,00001000,16"
-    assert p.format_write(2, 4096, 255, 1) == "write 2,00001000,FF,1"
+    assert p.format_write(2, 4096, 255) == "write 2,00001000,FF"
 
 
 def test_a_template_may_not_change_the_base_or_the_padding():
-    p = Profile(read="MEM:RD? {mcu},{addr:08X},{len}", write="MEM:WR {mcu},{addr},{value:X},{size}")
+    p = Profile(read="MEM:RD? {mcu},{addr:08X},{len}", write="MEM:WR {mcu},{addr},{value:X}")
     assert p.format_read(0, 0x100, 8) == "MEM:RD? 0,00000100,8"
-    assert p.format_write(0, 0x100, 0xA, 2) == "MEM:WR 0,00000100,A,2"
+    assert p.format_write(0, 0x100, 0xA) == "MEM:WR 0,00000100,A"
     with pytest.raises(ConfigError, match="unpadded"):          # values are never padded (SCPI-4)
-        Profile(write="MEM:WR {mcu},{addr},{value:04X},{size}")
+        Profile(write="MEM:WR {mcu},{addr},{value:04X}")
     for template in ("MEM:RD? {mcu},{addr:d},{len}", "MEM:RD? {mcu},{addr:#X},{len}", "MEM:RD? {mcu},{addr:x},{len}"):
         with pytest.raises(ConfigError, match="bare hex"):
             Profile(read=template)
@@ -45,7 +45,7 @@ def test_an_address_is_always_8_zero_padded_digits(template):
     with pytest.raises(ConfigError):
         Profile(read=template)
     with pytest.raises(ConfigError, match="zero-padded"):
-        Profile(write="MEM:WR {mcu},{addr},{value:4X},{size}")
+        Profile(write="MEM:WR {mcu},{addr},{value:4X}")
     assert Profile(read="R? {mcu},{addr:08X},{len}").format_read(0, 0x100, 4) == "R? 0,00000100,4"
 
 
@@ -141,3 +141,19 @@ def test_word_replies():
             p.decode_data(reply, 4, "little")
     with pytest.raises(BadReply, match="expected 8 bytes"):
         p.decode_data(b"30303030", 8, "little")
+
+
+def test_max_write_and_align_are_at_most_4_bytes():
+    """The firmware is 32-bit, so 8 was removed for both (rani, 2026-10-21, SCPI-13)."""
+    for n in (1, 2, 4):
+        Profile(max_write=4, align=n)
+    with pytest.raises(ConfigError, match="max_write must be 1, 2 or 4"):
+        Profile(max_write=8)
+    with pytest.raises(ConfigError, match="align must be 1, 2 or 4"):
+        Profile(align=8, max_write=4)
+
+
+def test_write_template_has_no_size():
+    """Every write is one max_write-byte word, so {size} was removed (rani, 2026-10-21, SCPI-13)."""
+    with pytest.raises(ConfigError, match="size.*was removed"):
+        Profile(write="MEM:WR {mcu},{addr},{value},{size}")

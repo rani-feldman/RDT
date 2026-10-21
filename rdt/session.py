@@ -423,7 +423,7 @@ class Session:
 
     def _send_pieces(self, mcu: int, pieces: list[tuple[int, bytes]], byte_order: str) -> None:
         for a, chunk in pieces:
-            self.protocol.write_mem(mcu, a, int.from_bytes(chunk, byte_order), len(chunk))
+            self.protocol.write_mem(mcu, a, int.from_bytes(chunk, byte_order))
 
     def _read_back(self, mcu: int, addr: int, data: bytes, start: int, end: int) -> bytes:
         try:
@@ -466,7 +466,7 @@ class Session:
 
 
 def split_write(addr: int, data: bytes, max_write: int) -> list[tuple[int, bytes]]:
-    """Split a write into naturally aligned pieces of 1, 2, 4 or 8 bytes, none wider than ``max_write``."""
+    """Split a write into naturally aligned pieces of 1, 2 or 4 bytes, none wider than ``max_write``."""
     pieces = []
     pos = 0
     while pos < len(data):

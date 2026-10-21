@@ -4,7 +4,7 @@
 [scpi]
 name         = "RDT simulator"
 read         = "MEMory:READ? {mcu},{addr},{len}"
-write        = "MEMory:WRITE {mcu},{addr},{value},{size}"
+write        = "MEMory:WRITE {mcu},{addr},{value}"
 max_write    = 4
 align        = 4
 byte_order   = "little"

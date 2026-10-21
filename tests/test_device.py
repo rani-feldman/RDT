@@ -29,28 +29,27 @@ def test_large_read_from_secondary_is_split_into_frames(device):
 
 
 def test_write_then_read_back(device):
-    assert q(device, "MEM:WRITE 0,20000000,40490FDB,4") is None
+    assert q(device, "MEM:WRITE 0,20000000,40490FDB") is None
     assert q(device, "MEM:READ? 0,20000000,4") == "40490FDB"
     assert q(device, "SYST:ERR?") == '0,"No error"'
 
 
 def test_write_takes_the_raw_value_in_bare_hex(device):
-    q(device, "MEM:WRITE 1,20000084,FFFF,4")
+    q(device, "MEM:WRITE 1,20000084,FFFF")
     assert q(device, "MEM:READ? 1,20000084,4") == "0000FFFF"
 
 
 @pytest.mark.parametrize("line", [
     "MEM:READ? 0,0x20000000,4",       # prefixed address
-    "MEM:WRITE 0,20000000,0x1,1",     # prefixed value
-    "MEM:WRITE 0,20000000,-1,1",      # signed value
+    "MEM:WRITE 0,20000000,0x1",     # prefixed value
+    "MEM:WRITE 0,20000000,-1",      # signed value
     "MEM:READ? 0,8000000,4",          # address not padded to 8 digits
     "MEM:READ? 0,008000000,4",        # address longer than 8 digits
-    "MEM:WRITE 0,2000000,1,4",
-    "MEM:READ? 0,20000000,0x10",      # length, MCU and size are plain decimal
+    "MEM:WRITE 0,2000000,1",
+    "MEM:READ? 0,20000000,0x10",      # length and MCU are plain decimal
     "MEM:READ? 0,20000000,1_6",
     "MEM:READ? #H0,20000000,4",
     "MEM:READ? +0,20000000,4",
-    "MEM:WRITE 0,20000000,1,0x4",
 ])
 def test_prefixed_or_signed_numbers_are_refused(device, line):
     assert q(device, line) is None
@@ -75,12 +74,10 @@ def test_failed_query_sends_no_reply_and_queues_the_error(device, line, code):
 
 
 @pytest.mark.parametrize("line,code", [
-    ("MEM:WRITE 0,08000050,1,4", -222),     # flash is read-only
-    ("MEM:WRITE 0,20000000,100000000,4", -222),  # does not fit
-    ("MEM:WRITE 0,20000002,1,4", -224),      # address not 4-byte aligned
-    ("MEM:WRITE 0,20000000,1,2", -224),      # size not a multiple of 4
-    ("MEM:WRITE 0,20000000,1,8", -224),      # wider than max_write
-    ("MEM:WRITE 0,20000000,1,3", -224),
+    ("MEM:WRITE 0,08000050,1", -222),     # flash is read-only
+    ("MEM:WRITE 0,20000000,100000000", -222),  # does not fit
+    ("MEM:WRITE 0,20000002,1", -224),      # address not 4-byte aligned
+    ("MEM:WRITE 0,20000000,1,4", -102),      # no size any more (rani, 2026-10-21, SCPI-13)
 ])
 def test_write_errors_only_queue(device, line, code):
     assert q(device, line) is None
@@ -106,7 +103,7 @@ def test_main_mcu_cannot_be_silent(device):
 
 
 def test_reset_restores_memory(device):
-    q(device, "MEM:WRITE 0,20000000,0,4")
+    q(device, "MEM:WRITE 0,20000000,0")
     q(device, "*RST")
     assert q(device, "MEM:READ? 0,20000000,4") == "3FC00000"
 
@@ -124,7 +121,7 @@ def test_error_reply_option():
     d = Device([ram_mcu()], error_reply=True)
     assert q(d, "MEM:READ? 0,30000000,4").startswith("-222,")
     assert q(d, "SYST:ERR?").startswith("-222,")
-    assert d.handle("MEM:WRITE 0,30000000,1,1") is None  # a write never replies
+    assert d.handle("MEM:WRITE 0,30000000,1") is None  # a write never replies
 
 
 def test_read_reply_is_comma_separated_words(two_mcus):
@@ -134,9 +131,9 @@ def test_read_reply_is_comma_separated_words(two_mcus):
 
 def test_user_defined_templates():
     """The commands rani's firmware will have: plain read/write with bare hex values."""
-    profile = Profile(read="read {mcu},{addr},{len}", write="write {mcu},{addr},{value},{size}")
+    profile = Profile(read="read {mcu},{addr},{len}", write="write {mcu},{addr},{value}")
     d = Device([ram_mcu(0), ram_mcu(2)], profile)
-    assert d.handle("write 2,20000010,DEADBEEF,4") is None
+    assert d.handle("write 2,20000010,DEADBEEF") is None
     assert d.handle("read 2,20000010,4") == b"DEADBEEF"
     assert q(d, "SYST:ERR?") == '0,"No error"'
     assert d.handle("read 2,30000000,4") is None
@@ -145,5 +142,5 @@ def test_user_defined_templates():
 
 def test_big_endian_mcu():
     d = Device([ram_mcu(0, byte_order="big")])
-    d.handle("MEM:WRITE 0,20000000,1234,4")
+    d.handle("MEM:WRITE 0,20000000,1234")
     assert d.handle("MEM:READ? 0,20000000,4") == b"00001234"

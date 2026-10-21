@@ -19,7 +19,7 @@ from PySide6.QtWidgets import (
 from ..console import CommandHistory, SessionLog, completions, hex_to_text, text_to_hex
 from ..errors import ConfigError, RdtError, WriteRefused
 from ..memfmt import INT_TYPES, MemFormat
-from ..profile import Profile, align_span, parse_int
+from ..profile import WORD_SIZES, Profile, align_span, parse_int
 from ..target import MCU_COLORS, McuConfig, Target, check_color, check_short, mcu_short
 from ..workspace import Workspace
 from .device import describe_error
@@ -1080,7 +1080,8 @@ class ProfileDialog(QDialog):
         outer.addLayout(form)
         tips = {
             "read": "Placeholders: {mcu} {addr} {len}. {addr} is sent as bare hex, such as 20000000",
-            "write": "Placeholders: {mcu} {addr} {value} {size}. {addr} and {value} are sent as bare hex",
+            "write": "Placeholders: {mcu} {addr} {value}. {addr} and {value} are sent as bare hex; "
+                     "every write is max_write bytes",
             "terminator": "Escapes allowed: \\n, \\r\\n",
             "align": "Every read and write covers whole aligned words of this many bytes; "
                      "a smaller value is read as its word and written by read-modify-write",
@@ -1096,7 +1097,7 @@ class ProfileDialog(QDialog):
                 w.currentTextChanged.connect(self._preview)
             elif f.name in ("max_write", "align"):
                 w = QComboBox()
-                w.addItems(["1", "2", "4", "8"])
+                w.addItems([str(n) for n in WORD_SIZES])
                 w.setCurrentText(str(value))
                 w.currentTextChanged.connect(self._preview)
             else:
@@ -1194,7 +1195,7 @@ class ProfileDialog(QDialog):
         self.ok.setEnabled(True)
         self.test_button.setEnabled(self.device.target is not None)
         self.preview.setText(f"Read 16 bytes:  {p.format_read(0, 0x20000000, 16)}\n"
-                             f"Write {p.align} bytes:  {p.format_write(0, 0x20000000, 0x1234, p.align)}")
+                             f"Write {p.max_write} bytes:  {p.format_write(0, 0x20000000, 0x1234)}")
 
     def test(self) -> None:
         try:
