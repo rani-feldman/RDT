@@ -83,6 +83,7 @@ Each requirement links to its design section.
 | SCPI-10 | Every SCPI read and write covers whole 4-byte aligned words: a 2-byte variable is read as its 4-byte word and the result is trimmed, and a smaller or unaligned write is done as read-modify-write (2026-10-12) | Done | [D-SCPI-10](#d-scpi-10-aligned-words) |
 | SCPI-11 | A read reply is one bare hex value per 4-byte word, comma-separated, lowest address first, the way the firmware prints a `uint32_t`: `30303030,2F30302F,43B40000`. This is the only reply format (2026-10-13); the reply holds nothing else, so there is no reply regex (2026-10-14) | Done | [D-SCPI-11](#d-scpi-11-word-replies) |
 | SCPI-12 | A profile whose `{addr}` field would not give exactly 8 zero-padded hex digits (`{addr:8X}`, `{addr:04X}`, `{addr:010X}`) or whose `{value}` field pads the value is refused when it loads, and a value of the wrong type in a profile is a config error, not a crash (rani asked for every finding of the code review to be fixed, 2026-10-18) | Done | [D-SCPI-12](#d-scpi-12-profile-checks) |
+| SCPI-13 | `{size}` is optional in the write template. With `align` and `max_write` both 4, every write is one aligned 4-byte word and an 8-byte value is two word writes, so a 32-bit firmware that always stores 4 bytes can leave `{size}` out (rani asked why the write needs a size when RDT does read-modify-write, 2026-10-21) | In review | [D-SCPI-13](#d-scpi-13-write-without-size) |
 
 ### 2.4 Multiple MCUs
 
@@ -487,7 +488,7 @@ Placeholders: `{mcu}`, `{addr}`, `{len}`, `{value}` and `{size}`. `{addr}` and `
 
 #### D-SCPI-3 Single-value write
 
-A write sends one value per command. The value is the raw integer of the variable's bytes, in the variable's byte order, written as bare hex. A float is sent as its bit pattern (1.5 becomes `3FC00000`), so the firmware never parses a float. `{size}` is the access width, so the firmware does a single store of the right width. Values wider than `max_write` are split (D-VAL-6). A later firmware may add a buffer write; the profile would then get a second write template.
+A write sends one value per command. The value is the raw integer of the variable's bytes, in the variable's byte order, written as bare hex. A float is sent as its bit pattern (1.5 becomes `3FC00000`), so the firmware never parses a float. `{size}` is the access width, so the firmware does a single store of the right width. `{size}` is optional (SCPI-13): a write template needs only `{addr}` and `{value}`. With `align = max_write = 4` every write is one aligned 4-byte word (smaller values by read-modify-write, D-SCPI-10; wider ones split, D-VAL-6), so a firmware that always stores 32 bits can drop `{size}` (rani, 2026-10-21; D-SCPI-13). Values wider than `max_write` are split (D-VAL-6). A later firmware may add a buffer write; the profile would then get a second write template.
 
 #### D-SCPI-4 Bare hex
 
@@ -561,6 +562,16 @@ rani set this on 2026-10-13, after connecting RDT to the real target on COM3: th
 
 `Profile` in `rdt/profile.py` allows only `{addr}`/`{addr:08X}` and `{value}`/`{value:X}`, so every address sent is exactly 8 zero-padded digits and every value unpadded (SCPI-4). The profile dialog's Test read is one command, so it is refused above `max_response`. `Profile.from_dict` checks each value's type (a bool is never a number) and raises `ConfigError`.
 
+
+#### D-SCPI-13 Write without size
+
+rani's firmware is 32-bit and always stores 4 bytes (rani, 2026-10-21), so `{size}` in the write template carries nothing it needs. `Profile` in `rdt/profile.py` already requires only `{addr}` and `{value}` in the write template; `{size}` was always optional. What makes leaving it out safe is that `Session.write` never sends anything but whole words when `align = max_write = 4`:
+
+- A value smaller than a word is written by read-modify-write of its aligned word (D-SCPI-10).
+- An 8-byte value (`double`, `int64`) is cut by `split_write` into two aligned 4-byte writes, low address first, and confirmed by one read-back of both words (D-VAL-6). The two writes are not atomic.
+- `max_write = 8` would send an 8-byte value as one write, so a profile without `{size}` must keep `max_write = 4` for a firmware that stores 32 bits.
+
+The simulator honours the same rule: with no `{size}` in its write template it writes `max_write` bytes. `test_write_template_without_size_sends_single_words` in `tests/test_host_session.py` checks that an 8-byte write goes out as two size-less word writes and reads back.
 
 ### 4.4 Multiple MCUs
 
@@ -1656,6 +1667,7 @@ The application is built against the simulator. With the firmware's read and wri
 | 2026-10-19 | The simulator's example firmware gets structures, arrays and arrays of structures in their own sections, so the existing variables keep their addresses, plus a Structures tab in the example workspace (SIM-2, PR #142), at rani's request |
 | 2026-10-19 | A narrated walkthrough video and the manual as slides go into the repository under `docs/media/`, linked from the Help menu (INS-16, PR #144), at rani's request. They stay out of the installer; the installed app opens them on GitHub |
 | 2026-10-19 | The scripts that remake the video and the slides move from the project files into `tools/media/`, at rani's request, so a release that changes the GUI can remake them from the same checkout (INS-16) |
+| 2026-10-21 | `{size}` stays optional in the write template (SCPI-13): with `align = max_write = 4` every write is one 4-byte word, so rani's 32-bit firmware can drop it. No code change was needed |
 
 ## 9. Appendix: binary protocol (planned)
 

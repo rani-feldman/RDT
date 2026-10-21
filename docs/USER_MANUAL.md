@@ -147,6 +147,7 @@ retries      = 2
 ```
 
 - `{addr}` and `{value}` are sent as bare upper-case hex with no prefix; an address always has 8 digits (`08000000`). `{mcu}`, `{len}` and `{size}` are decimal.
+- `{size}` is optional. With `align = 4` and `max_write = 4`, every write RDT sends is one aligned 4-byte word: a smaller value is written by read-modify-write of its word, and an 8-byte value (a `double` or `int64`) as two word writes, confirmed together by one read-back. So if your firmware always stores 32 bits, leave `{size}` out, such as `write = "SERV:MEM:WRIT {mcu},{addr},{value}"`, and keep `max_write = 4`.
 - A read reply is the data as comma-separated 32-bit words in hex, lowest address first, such as `3FC00000,43B40000`.
 - A failed command gets no reply at all, so RDT sees it as a timeout. RDT confirms every write by reading it back.
 - RDT sends nothing to the device except your read and write commands and what you type in the console. It sends no `*IDN?` and never reads the error queue (`SYST:ERR?`) on its own.

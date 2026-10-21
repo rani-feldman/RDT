@@ -43,7 +43,7 @@ The read, write and error commands come from the SCPI profile, the same `[scpi]`
 | Command (default profile) | Reply |
 | --- | --- |
 | `MEMory:READ? <mcu>,<addr>,<len>` | `<len>` bytes as comma-separated words: one bare hex value per `align`-byte word, lowest address first, such as `3FC00000,43B40000`. `<addr>` and `<len>` are multiples of `align` |
-| `MEMory:WRITE <mcu>,<addr>,<value>,<size>` | none. `<size>` is 1, 2, 4 or 8 bytes, at least `align` and at most `max_write`; `<addr>` is a multiple of `align` |
+| `MEMory:WRITE <mcu>,<addr>,<value>,<size>` | none. `<size>` is 1, 2, 4 or 8 bytes, at least `align` and at most `max_write`; `<addr>` is a multiple of `align`. A profile whose write template has no `{size}` writes `max_write` bytes |
 | `SYSTem:ERRor?` | oldest error, or `0,"No error"` |
 | `*IDN?`, `*RST`, `*CLS`, `*OPC?` | standard. `*RST` reloads every MCU's memory from its image |
 | `SIMulation:MCU:SILent <mcu>,ON\|OFF` | none. Makes a secondary MCU stop answering |

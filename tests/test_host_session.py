@@ -182,6 +182,23 @@ def test_small_write_is_a_read_modify_write(two_mcus):
                             "MEMory:READ? 0,20000008,4"]                                  # and confirm
 
 
+def test_write_template_without_size_sends_single_words(two_mcus):
+    """A firmware that always stores 32 bits needs no {size}: with max_write = 4 every write is
+    one aligned 4-byte word, and an 8-byte value goes out as two of them (rani, 2026-10-21)."""
+    dev = Device(two_mcus, SimProfile(write="MEMory:WRITE {mcu},{addr},{value}"))
+    with Simulator(dev, TransportConfig(tcp="127.0.0.1:0", udp=None)) as s:
+        profile = Profile(timeout_ms=300, write="MEMory:WRITE {mcu},{addr},{value}")
+        t = make_target("tcp", s.tcp_address, profile)
+        sent = _record(t)
+        with t:
+            sent.clear()
+            data = bytes.fromhex("0102030405060708")
+            t.write("main", 0x20000020, data)
+            assert t.read("main", 0x20000020, 8) == data
+        writes = [c for c in sent if c.startswith("MEMory:WRITE")]
+        assert writes == ["MEMory:WRITE 0,20000020,4030201", "MEMory:WRITE 0,20000024,8070605"]
+
+
 def test_read_modify_write_confirms_only_the_value(two_mcus):
     """A neighbour the firmware changes between the write and the read-back is not a failure."""
     dev = Device(two_mcus)

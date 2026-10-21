@@ -1080,7 +1080,8 @@ class ProfileDialog(QDialog):
         outer.addLayout(form)
         tips = {
             "read": "Placeholders: {mcu} {addr} {len}. {addr} is sent as bare hex, such as 20000000",
-            "write": "Placeholders: {mcu} {addr} {value} {size}. {addr} and {value} are sent as bare hex",
+            "write": "Placeholders: {mcu} {addr} {value} {size}. {addr} and {value} are sent as bare hex; "
+                     "{size} may be left out when the firmware always writes max_write bytes",
             "terminator": "Escapes allowed: \\n, \\r\\n",
             "align": "Every read and write covers whole aligned words of this many bytes; "
                      "a smaller value is read as its word and written by read-modify-write",
