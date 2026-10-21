@@ -112,7 +112,7 @@ def test_write_to_a_value_the_firmware_changes_is_not_confirmed(two_mcus):
             with pytest.raises(WriteNotConfirmed) as e:
                 t.write_value("@main:0x20000010:u32", 0)
             assert e.value.read_back is not None
-            assert "(sent 0 at 20000010)" in str(e.value)    # the word as sent, beside the value
+            assert "(sent 00000000 at 20000010)" in str(e.value)    # the word as sent, beside the value
 
 
 def test_max_response_comes_from_the_profile_only(two_mcus):
@@ -141,7 +141,7 @@ def test_addresses_values_and_replies_are_bare_hex(two_mcus):
             t.write("main", 0x20000024, data)
             assert t.read("main", 0x20000024, 6) == data
             assert t.read_value("@main:0x20000000:f32") == 1.5
-        assert "MEMory:WRITE 0,20000024,230D0A" in sent      # bytes 0A 0D 23 00, little endian
+        assert "MEMory:WRITE 0,20000024,00230D0A" in sent      # bytes 0A 0D 23 00, little endian
         assert "MEMory:READ? 0,20000024,8" in sent             # 6 bytes are read as two whole words
         assert not any("0x" in c for c in sent)
 
@@ -196,7 +196,7 @@ def test_an_8_byte_value_is_two_word_writes(two_mcus):
             t.write("main", 0x20000020, data)
             assert t.read("main", 0x20000020, 8) == data
         writes = [c for c in sent if c.startswith("MEMory:WRITE")]
-        assert writes == ["MEMory:WRITE 0,20000020,4030201", "MEMory:WRITE 0,20000024,8070605"]
+        assert writes == ["MEMory:WRITE 0,20000020,04030201", "MEMory:WRITE 0,20000024,08070605"]
 
 
 def test_read_modify_write_confirms_only_the_value(two_mcus):
