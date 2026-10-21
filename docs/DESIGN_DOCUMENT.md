@@ -83,7 +83,7 @@ Each requirement links to its design section.
 | SCPI-10 | Every SCPI read and write covers whole 4-byte aligned words: a 2-byte variable is read as its 4-byte word and the result is trimmed, and a smaller or unaligned write is done as read-modify-write (2026-10-12) | Done | [D-SCPI-10](#d-scpi-10-aligned-words) |
 | SCPI-11 | A read reply is one bare hex value per 4-byte word, comma-separated, lowest address first, the way the firmware prints a `uint32_t`: `30303030,2F30302F,43B40000`. This is the only reply format (2026-10-13); the reply holds nothing else, so there is no reply regex (2026-10-14) | Done | [D-SCPI-11](#d-scpi-11-word-replies) |
 | SCPI-12 | A profile whose `{addr}` field would not give exactly 8 zero-padded hex digits (`{addr:8X}`, `{addr:04X}`, `{addr:010X}`) or whose `{value}` field pads the value is refused when it loads, and a value of the wrong type in a profile is a config error, not a crash (rani asked for every finding of the code review to be fixed, 2026-10-18) | Done | [D-SCPI-12](#d-scpi-12-profile-checks) |
-| SCPI-13 | The write command has no size: `write mcu,address,value`. Every write is one aligned word of `max_write` bytes (4 by default), smaller values by read-modify-write and an 8-byte value as two word writes. `max_write` and `align` may be 1, 2 or 4; 8 is removed (rani: "My FW is 32bit and it writes in 4 Bytes size", asked to remove the size from the write and 8 from both settings, 2026-10-21) | In review | [D-SCPI-13](#d-scpi-13-write-without-size) |
+| SCPI-13 | The write command has no size: `write mcu,address,value`. Every write is one aligned word of `max_write` bytes (4 by default), smaller values by read-modify-write and an 8-byte value as two word writes. `max_write` and `align` may be 1, 2 or 4; 8 is removed (rani: "My FW is 32bit and it writes in 4 Bytes size", asked to remove the size from the write and 8 from both settings, 2026-10-21) | Done | [D-SCPI-13](#d-scpi-13-write-without-size) |
 
 ### 2.4 Multiple MCUs
 
@@ -1668,7 +1668,7 @@ The application is built against the simulator. With the firmware's read and wri
 | 2026-10-19 | The simulator's example firmware gets structures, arrays and arrays of structures in their own sections, so the existing variables keep their addresses, plus a Structures tab in the example workspace (SIM-2, PR #142), at rani's request |
 | 2026-10-19 | A narrated walkthrough video and the manual as slides go into the repository under `docs/media/`, linked from the Help menu (INS-16, PR #144), at rani's request. They stay out of the installer; the installed app opens them on GitHub |
 | 2026-10-19 | The scripts that remake the video and the slides move from the project files into `tools/media/`, at rani's request, so a release that changes the GUI can remake them from the same checkout (INS-16) |
-| 2026-10-21 | The write command loses its size (SCPI-13): every write is one `max_write`-byte word, so the firmware always stores 4 bytes; a profile whose write template still has `{size}` is refused with a message to remove it. `max_write` and `align` may be 1, 2 or 4; 8 is removed (rani) |
+| 2026-10-21 | The write command loses its size (SCPI-13): every write is one `max_write`-byte word, so the firmware always stores 4 bytes; a profile whose write template still has `{size}` is refused with a message to remove it. `max_write` and `align` may be 1, 2 or 4; 8 is removed (rani; PR #147) |
 
 ## 9. Appendix: binary protocol (planned)
 
