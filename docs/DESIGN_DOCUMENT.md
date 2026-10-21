@@ -84,7 +84,7 @@ Each requirement links to its design section.
 | SCPI-11 | A read reply is one bare hex value per 4-byte word, comma-separated, lowest address first, the way the firmware prints a `uint32_t`: `30303030,2F30302F,43B40000`. This is the only reply format (2026-10-13); the reply holds nothing else, so there is no reply regex (2026-10-14) | Done | [D-SCPI-11](#d-scpi-11-word-replies) |
 | SCPI-12 | A profile whose `{addr}` field would not give exactly 8 zero-padded hex digits (`{addr:8X}`, `{addr:04X}`, `{addr:010X}`) or whose `{value}` field pads the value is refused when it loads, and a value of the wrong type in a profile is a config error, not a crash (rani asked for every finding of the code review to be fixed, 2026-10-18) | Done | [D-SCPI-12](#d-scpi-12-profile-checks) |
 | SCPI-13 | The write command has no size: `write mcu,address,value`. Every write is one aligned word of `max_write` bytes (4 by default), smaller values by read-modify-write and an 8-byte value as two word writes. `max_write` and `align` may be 1, 2 or 4; 8 is removed (rani: "My FW is 32bit and it writes in 4 Bytes size", asked to remove the size from the write and 8 from both settings, 2026-10-21) | Done | [D-SCPI-13](#d-scpi-13-write-without-size) |
-| SCPI-14 | A value in a write command is exactly 8 hex digits, zero-padded, like an address: the word 2FF is sent as `000002FF` (rani: "8 characters like the address", 2026-10-21) | In review | [D-SCPI-14](#d-scpi-14-8-digit-values) |
+| SCPI-14 | A value in a write command is exactly 8 hex digits, zero-padded, like an address: the word 2FF is sent as `000002FF` (rani: "8 characters like the address", 2026-10-21) | Done | [D-SCPI-14](#d-scpi-14-8-digit-values) |
 
 ### 2.4 Multiple MCUs
 
