@@ -391,7 +391,7 @@ class Session:
                 return
             # Name the words actually sent too: the variable's own address can be unaligned, and
             # rani took it for the address in the command (2026-10-21).
-            sent = ", ".join(f"{int.from_bytes(chunk, byte_order):X} at {a:08X}" for a, chunk in pieces)
+            sent = ", ".join(f"{int.from_bytes(chunk, byte_order):08X} at {a:08X}" for a, chunk in pieces)
             raise WriteNotConfirmed(
                 f"write to 0x{addr:08X} on {self._name(mcu)} not confirmed: wrote {data.hex().upper()}, "
                 f"read back {back.hex().upper()} (sent {sent})", data, back)

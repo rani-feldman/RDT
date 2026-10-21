@@ -25,7 +25,7 @@ These come from the owner's real firmware; breaking one breaks the real device e
 simulator and the tests pass.
 
 - Addresses in SCPI commands are bare hex, always 8 digits, zero-padded (`08000000`); values are
-  bare hex, unpadded. No `0x` prefix anywhere.
+  bare hex, also always 8 digits, zero-padded (`000002FF`). No `0x` prefix anywhere.
 - Every read and write covers whole 4-byte aligned words (profile `align`). Small reads are
   trimmed; small writes are read-modify-write.
 - Read replies are only comma-separated 4-byte hex words, such as `30303030,2F30302F`.

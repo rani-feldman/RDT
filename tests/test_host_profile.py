@@ -16,20 +16,20 @@ def test_default_commands_use_bare_hex():
     assert p.format_read(0, 0x08000000, 4) == "MEMory:READ? 0,08000000,4"   # leading zero kept (rani)
     assert p.format_write(0, 0x20000000, 0x3FC00000) == "MEMory:WRITE 0,20000000,3FC00000"
     assert p.format_read(0, 0x11AABBCCDD, 4) == "MEMory:READ? 0,11AABBCCDD,4"   # rani's example
-    assert p.format_write(0, 0x100, 0xA) == "MEMory:WRITE 0,00000100,A"   # addresses always 8 digits
+    assert p.format_write(0, 0x100, 0xA) == "MEMory:WRITE 0,00000100,0000000A"   # addresses always 8 digits
 
 
 def test_templates_are_user_defined():
     p = Profile(read="read {mcu},{addr},{len}", write="write {mcu},{addr},{value}")
     assert p.format_read(0, 4096, 16) == "read 0,00001000,16"
-    assert p.format_write(2, 4096, 255) == "write 2,00001000,FF"
+    assert p.format_write(2, 4096, 255) == "write 2,00001000,000000FF"
 
 
 def test_a_template_may_not_change_the_base_or_the_padding():
-    p = Profile(read="MEM:RD? {mcu},{addr:08X},{len}", write="MEM:WR {mcu},{addr},{value:X}")
+    p = Profile(read="MEM:RD? {mcu},{addr:08X},{len}", write="MEM:WR {mcu},{addr},{value:08X}")
     assert p.format_read(0, 0x100, 8) == "MEM:RD? 0,00000100,8"
-    assert p.format_write(0, 0x100, 0xA) == "MEM:WR 0,00000100,A"
-    with pytest.raises(ConfigError, match="unpadded"):          # values are never padded (SCPI-4)
+    assert p.format_write(0, 0x100, 0xA) == "MEM:WR 0,00000100,0000000A"
+    with pytest.raises(ConfigError, match="8 zero-padded"):    # a value is always 8 digits (SCPI-14)
         Profile(write="MEM:WR {mcu},{addr},{value:04X}")
     for template in ("MEM:RD? {mcu},{addr:d},{len}", "MEM:RD? {mcu},{addr:#X},{len}", "MEM:RD? {mcu},{addr:x},{len}"):
         with pytest.raises(ConfigError, match="bare hex"):
@@ -167,3 +167,11 @@ def test_an_older_profile_still_loads_without_size():
     assert (p.max_write, p.align) == (4, 4)
     assert len(p.notes) == 3 and "size" in p.notes[0]
     assert Profile.from_dict({}).notes == []
+
+
+def test_a_value_is_the_whole_word_zero_padded():
+    """rani, 2026-10-21 (SCPI-14): a value is 8 characters like the address, so 2FF is 000002FF."""
+    assert Profile().format_write(0, 0x24062BC0, 0x2FF) == "MEMory:WRITE 0,24062BC0,000002FF"
+    assert Profile(max_write=2, align=2).format_write(0, 0x100, 0xA) == "MEMory:WRITE 0,00000100,0000000A"
+    old = Profile.from_dict({"write": "W {mcu},{addr},{value:X}"})       # unpadded in an older profile
+    assert old.write == "W {mcu},{addr},{value}" and old.notes

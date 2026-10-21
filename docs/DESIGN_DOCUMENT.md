@@ -84,6 +84,7 @@ Each requirement links to its design section.
 | SCPI-11 | A read reply is one bare hex value per 4-byte word, comma-separated, lowest address first, the way the firmware prints a `uint32_t`: `30303030,2F30302F,43B40000`. This is the only reply format (2026-10-13); the reply holds nothing else, so there is no reply regex (2026-10-14) | Done | [D-SCPI-11](#d-scpi-11-word-replies) |
 | SCPI-12 | A profile whose `{addr}` field would not give exactly 8 zero-padded hex digits (`{addr:8X}`, `{addr:04X}`, `{addr:010X}`) or whose `{value}` field pads the value is refused when it loads, and a value of the wrong type in a profile is a config error, not a crash (rani asked for every finding of the code review to be fixed, 2026-10-18) | Done | [D-SCPI-12](#d-scpi-12-profile-checks) |
 | SCPI-13 | The write command has no size: `write mcu,address,value`. Every write is one aligned word of `max_write` bytes (4 by default), smaller values by read-modify-write and an 8-byte value as two word writes. `max_write` and `align` may be 1, 2 or 4; 8 is removed (rani: "My FW is 32bit and it writes in 4 Bytes size", asked to remove the size from the write and 8 from both settings, 2026-10-21) | Done | [D-SCPI-13](#d-scpi-13-write-without-size) |
+| SCPI-14 | A value in a write command is exactly 8 hex digits, zero-padded, like an address: the word 2FF is sent as `000002FF` (rani: "8 characters like the address", 2026-10-21) | In review | [D-SCPI-14](#d-scpi-14-8-digit-values) |
 
 ### 2.4 Multiple MCUs
 
@@ -494,7 +495,7 @@ A write sends one value per command. The value is the raw integer of the variabl
 
 rani set this on 2026-10-12: addresses and values in commands are hex with no prefix, so address 0x11AABBCCDD is sent as `11AABBCCDD`. On 2026-10-14 rani added that an address is always at least 8 characters, because the firmware checks that every address has 8: 0x08000000 is sent as `08000000`, not `8000000`. Read replies are comma-separated words (D-SCPI-11).
 
-- **Commands:** `fill_template` (`rdt/profile.py`) writes `{addr}` and `{value}` as upper-case hex with no prefix. `{addr}` defaults to `08X`, at least 8 digits with leading zeros, so longer addresses such as `11AABBCCDD` are unchanged; `{value}` defaults to `X`, with no padding. A template may set its own width, as in `{value:08X}`, but any spec that changes the base is a `ConfigError`. A read of 4 bytes at 0x20000000 on MCU 0 is `MEMory:READ? 0,20000000,4`, a read at 0x08000000 is `MEMory:READ? 0,08000000,4`, and a write of 1.5 to a float is `MEMory:WRITE 0,20000004,3FC00000`.
+- **Commands:** `fill_template` (`rdt/profile.py`) writes `{addr}` and `{value}` as upper-case hex with no prefix. `{addr}` defaults to `08X`, at least 8 digits with leading zeros, so longer addresses such as `11AABBCCDD` are unchanged; `{value}` is also exactly 8 digits with leading zeros, so the word 2FF is `000002FF` (SCPI-14). A template may write `{addr:08X}` or `{value:08X}`; any other spec is a `ConfigError`. A read of 4 bytes at 0x20000000 on MCU 0 is `MEMory:READ? 0,20000000,4`, a read at 0x08000000 is `MEMory:READ? 0,08000000,4`, and a write of 1.5 to a float is `MEMory:WRITE 0,20000004,3FC00000`.
 - **Old files:** the earlier `addr_format`, `value_format` and `data_format` keys (with the `bytes_csv`, `decimal` and `ieee_block` reply formats) are gone. A profile or workspace that still has them loads with those keys ignored.
 - **Simulator:** it takes addresses and values only in bare hex. A prefixed or signed number (`0x20000000`, `#H20`, `-1`) fails with `-104,"Data type error"`.
 
@@ -560,7 +561,7 @@ rani set this on 2026-10-13, after connecting RDT to the real target on COM3: th
 
 #### D-SCPI-12 Profile checks
 
-`Profile` in `rdt/profile.py` allows only `{addr}`/`{addr:08X}` and `{value}`/`{value:X}`, so every address sent is exactly 8 zero-padded digits and every value unpadded (SCPI-4). The profile dialog's Test read is one command, so it is refused above `max_response`. `Profile.from_dict` checks each value's type (a bool is never a number) and raises `ConfigError`.
+`Profile` in `rdt/profile.py` allows only `{addr}`/`{addr:08X}` and `{value}`/`{value:08X}`, so every address and every value sent is exactly 8 zero-padded digits (SCPI-4, SCPI-14). An older profile with `{value:X}` opens with it turned into `{value}` and a warning (D-SCPI-13). The profile dialog's Test read is one command, so it is refused above `max_response`. `Profile.from_dict` checks each value's type (a bool is never a number) and raises `ConfigError`.
 
 
 #### D-SCPI-13 Write without size
@@ -573,6 +574,10 @@ rani's firmware is 32-bit and always stores 4 bytes. rani asked why the write ne
 - **Simulator:** its default write template has no size either and it stores `max_write` bytes; it still accepts a `{size}` in its own template for trying other firmware. Its `max_write` and `align` are 1, 2 or 4 too.
 
 Tests: `test_an_8_byte_value_is_two_word_writes` in `tests/test_host_session.py`, `test_write_template_has_no_size`, `test_max_write_and_align_are_at_most_4_bytes` and `test_an_older_profile_still_loads_without_size` in `tests/test_host_profile.py`, `test_a_workspace_with_an_older_profile_still_opens` in `tests/test_workspace.py`.
+
+#### D-SCPI-14 8-digit values
+
+rani's firmware checks that a write value has 8 characters, as it does for an address (rani, 2026-10-21). `fill_template` in `rdt/profile.py` writes `{value}` as `08X`, so `SERV:MEM:WRIT 0,24062BC0,2FF` is now `SERV:MEM:WRIT 0,24062BC0,000002FF`. Every write is one word of at most 4 bytes (SCPI-13), so 8 digits always hold it. The only spec allowed on `{value}` is `08X`; an older profile's `{value:X}` is turned into `{value}` when it loads, with a workspace warning, the same way `{size}` is taken out (D-SCPI-13). The `WriteNotConfirmed` message lists the sent words in the same form. The simulator accepts any number of digits. Tests: `test_a_value_is_the_whole_word_zero_padded` in `tests/test_host_profile.py` and the command checks in `tests/test_host_session.py`.
 
 ### 4.4 Multiple MCUs
 
@@ -1669,6 +1674,7 @@ The application is built against the simulator. With the firmware's read and wri
 | 2026-10-19 | A narrated walkthrough video and the manual as slides go into the repository under `docs/media/`, linked from the Help menu (INS-16, PR #144), at rani's request. They stay out of the installer; the installed app opens them on GitHub |
 | 2026-10-19 | The scripts that remake the video and the slides move from the project files into `tools/media/`, at rani's request, so a release that changes the GUI can remake them from the same checkout (INS-16) |
 | 2026-10-21 | The write command loses its size (SCPI-13): every write is one `max_write`-byte word, so the firmware always stores 4 bytes; an older profile opens with `{size}` taken out of its write template and a warning, and is saved without it. `max_write` and `align` may be 1, 2 or 4; 8 is removed (rani; PR #147) |
+| 2026-10-21 | A write value is 8 zero-padded hex digits like an address, such as `000002FF` (SCPI-14); this replaces the unpadded value of 2026-10-14. An older `{value:X}` is upgraded on load (rani) |
 
 ## 9. Appendix: binary protocol (planned)
 

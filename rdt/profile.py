@@ -87,9 +87,9 @@ def align_span(addr: int, size: int, align: int) -> tuple[int, int]:
 
 def fill_template(template: str, **values) -> str:
     """Fill a command template. ``{addr}`` and ``{value}`` are written as bare upper-case hex with
-    no prefix. ``{addr}`` is exactly 8 digits, with leading zeros (08000000), since the firmware
-    checks that every address has 8 characters, and ``{value}`` is unpadded. The only specs
-    allowed are ``{addr:08X}`` and ``{value:X}``, which say the same thing."""
+    no prefix, each exactly 8 digits with leading zeros (08000000, 000002FF), since the firmware
+    checks that both have 8 characters (rani, 2026-10-14 and 2026-10-21). The only specs allowed
+    are ``{addr:08X}`` and ``{value:08X}``, which say the same thing."""
     out = []
     for literal, name, spec, _ in string.Formatter().parse(template):
         out.append(literal)
@@ -102,15 +102,15 @@ def fill_template(template: str, **values) -> str:
             if spec and not _HEX_SPEC.match(spec):
                 raise ConfigError(f"{{{name}:{spec}}} in {template!r}: addresses and values are always "
                                   f"bare hex; only a zero-padded width such as {{{name}:08X}} is allowed")
-            # The firmware takes an address as exactly 8 zero-padded digits and a value unpadded
-            # (rani, 2026-10-14, SCPI-4), so no other width is allowed for either.
+            # The firmware takes an address (rani, 2026-10-14, SCPI-4) and a value (rani,
+            # 2026-10-21, SCPI-14) as exactly 8 zero-padded digits, so no other width is allowed.
             if name == "addr" and spec not in ("", "08X"):
                 raise ConfigError(f"{{addr:{spec}}} in {template!r}: the firmware needs every address "
                                   f"as exactly 8 zero-padded digits; use plain {{addr}} or {{addr:08X}}")
-            if name == "value" and spec not in ("", "X"):
-                raise ConfigError(f"{{value:{spec}}} in {template!r}: the firmware takes values unpadded; "
-                                  f"use plain {{value}}")
-            out.append(format(value, spec or ("08X" if name == "addr" else "X")))
+            if name == "value" and spec not in ("", "08X"):
+                raise ConfigError(f"{{value:{spec}}} in {template!r}: the firmware needs every value as "
+                                  f"exactly 8 zero-padded digits, like an address; use plain {{value}}")
+            out.append(format(value, "08X"))
         elif spec:
             out.append(format(value, spec))
         else:
@@ -249,6 +249,12 @@ def _upgrade(table: dict) -> tuple[dict, list[str]]:
         table["write"] = _SIZE_FIELD.sub("", write)
         notes.append(f"{{size}} was taken out of the write template, which is now {table['write']!r} "
                      "(every write is max_write bytes); save the workspace to keep it")
+    write = table.get("write")
+    if isinstance(write, str) and "{value:X}" in write:
+        # {value:X} meant unpadded; a value is now 8 zero-padded digits (SCPI-14).
+        table["write"] = write.replace("{value:X}", "{value}")
+        notes.append("{value:X} in the write template is now {value}: a value is sent as 8 zero-padded "
+                     "digits; save the workspace to keep it")
     for key in ("max_write", "align"):
         if table.get(key) == 8:
             table[key] = 4
