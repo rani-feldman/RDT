@@ -12,7 +12,7 @@ section. RDT shows this file in **Help > Release notes**.
 - When a newer RDT is out, a window shows what changed in it, with a Download button.
 - Help > Video walkthrough plays a narrated video of RDT in use, and Help > Presentation opens the user manual as slides.
 - The simulator's example firmware has structures, arrays and arrays of structures, some of them changing, and the example workspace has a Structures tab to try them in.
-- The SCPI write command no longer sends a size: every write is one 4-byte word (or `max_write` bytes), and `max_write` and `align` can no longer be 8. Take `,{size}` out of your profile's write template.
+- The SCPI write command no longer sends a size: every write is one 4-byte word (or `max_write` bytes), and `max_write` and `align` can no longer be 8. A profile saved with `{size}` opens with it taken out, and is saved that way.
 
 ### Bug fixes
 

@@ -157,3 +157,13 @@ def test_write_template_has_no_size():
     """Every write is one max_write-byte word, so {size} was removed (rani, 2026-10-21, SCPI-13)."""
     with pytest.raises(ConfigError, match="size.*was removed"):
         Profile(write="MEM:WR {mcu},{addr},{value},{size}")
+
+
+def test_an_older_profile_still_loads_without_size():
+    """A profile saved before {size} was removed opens with it taken out, so the workspace and its
+    MCUs still load (rani, 2026-10-21: the hard error kept the workspace from opening)."""
+    p = Profile.from_dict({"write": "SERV:MEM:WRIT {mcu},{addr},{value},{size}", "max_write": 8, "align": 8})
+    assert p.write == "SERV:MEM:WRIT {mcu},{addr},{value}"
+    assert (p.max_write, p.align) == (4, 4)
+    assert len(p.notes) == 3 and "size" in p.notes[0]
+    assert Profile.from_dict({}).notes == []

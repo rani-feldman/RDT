@@ -14,6 +14,7 @@ import string
 import tomllib
 from dataclasses import dataclass, field, fields
 from pathlib import Path
+from typing import ClassVar
 
 from .errors import BadReply, ConfigError, DeviceError
 
@@ -130,6 +131,7 @@ class Profile:
     timeout_ms: float = 500
     retries: int = 2                       # extra attempts after a read times out
     ranges: list[Range] = field(default_factory=list)
+    notes: ClassVar[list[str]] = []        # what loading an older profile changed (SCPI-13)
 
     def __post_init__(self) -> None:
         if self.byte_order not in ("little", "big"):
@@ -186,6 +188,7 @@ class Profile:
     def from_dict(cls, table: dict, ranges: list[dict] | None = None) -> Profile:
         known = {f.name for f in fields(cls)} - {"ranges"}
         table = {k: v for k, v in table.items() if k not in RETIRED_KEYS}
+        table, notes = _upgrade(table)
         unknown = set(table) - known
         if unknown:
             raise ConfigError(f"unknown [scpi] keys: {', '.join(sorted(unknown))}")
@@ -196,7 +199,9 @@ class Profile:
                 if isinstance(v, bool) or not isinstance(v, ok):
                     want = "a number" if f.type == "float" else "an integer" if f.type == "int" else "a string"
                     raise ConfigError(f"[scpi] {f.name} must be {want}, not {v!r}")
-        return cls(**table, ranges=[Range.from_dict(r) for r in ranges or []])
+        profile = cls(**table, ranges=[Range.from_dict(r) for r in ranges or []])
+        profile.notes = notes
+        return profile
 
     # --- commands ----------------------------------------------------------------------------
 
@@ -229,6 +234,26 @@ class Profile:
 
 
 _TYPES = {"int": int, "float": (int, float), "str": str}
+
+# {size} in the write template, with the comma or space before it.
+_SIZE_FIELD = re.compile(r"[ ,;]*\{size(?::[^}]*)?\}")
+
+
+def _upgrade(table: dict) -> tuple[dict, list[str]]:
+    """Bring a profile saved before 2026-10-21 up to date, so the workspace still opens: drop
+    {size} from the write template and turn a max_write or align of 8 into 4 (SCPI-13). The
+    notes say what changed; saving the workspace writes the new profile."""
+    table, notes = dict(table), []
+    write = table.get("write")
+    if isinstance(write, str) and _SIZE_FIELD.search(write):
+        table["write"] = _SIZE_FIELD.sub("", write)
+        notes.append(f"{{size}} was taken out of the write template, which is now {table['write']!r} "
+                     "(every write is max_write bytes); save the workspace to keep it")
+    for key in ("max_write", "align"):
+        if table.get(key) == 8:
+            table[key] = 4
+            notes.append(f"{key} 8 is no longer allowed and was set to 4; save the workspace to keep it")
+    return table, notes
 
 _WORD = re.compile(r"^[0-9A-Fa-f]+$")
 

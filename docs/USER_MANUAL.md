@@ -147,7 +147,7 @@ retries      = 2
 ```
 
 - `{addr}` and `{value}` are sent as bare upper-case hex with no prefix; an address always has 8 digits (`08000000`). `{mcu}` and `{len}` are decimal.
-- A write has no size. Every write RDT sends is one aligned word of `max_write` bytes (4 by default): a smaller value is written by read-modify-write of its word, and an 8-byte value (a `double` or `int64`) as two word writes, confirmed together by one read-back. `max_write` and `align` can be 1, 2 or 4. A profile whose write template still has `{size}` won't load until you take `,{size}` out.
+- A write has no size. Every write RDT sends is one aligned word of `max_write` bytes (4 by default): a smaller value is written by read-modify-write of its word, and an 8-byte value (a `double` or `int64`) as two word writes, confirmed together by one read-back. `max_write` and `align` can be 1, 2 or 4. A profile saved by an older RDT still opens: RDT takes `{size}` out of its write template (and turns a `max_write` or `align` of 8 into 4), says so in the status bar, and saves the profile that way the next time you save the workspace.
 - A read reply is the data as comma-separated 32-bit words in hex, lowest address first, such as `3FC00000,43B40000`.
 - A failed command gets no reply at all, so RDT sees it as a timeout. RDT confirms every write by reading it back.
 - RDT sends nothing to the device except your read and write commands and what you type in the console. It sends no `*IDN?` and never reads the error queue (`SYST:ERR?`) on its own.
