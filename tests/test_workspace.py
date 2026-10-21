@@ -539,3 +539,21 @@ def test_mcu_short_names_and_colours():
     for bad in ({"short": "too long name"}, {"color": "red"}):
         with pytest.raises(ConfigError):
             TargetConfig.from_dict({"mcu": [{"id": 0, "name": "main", **bad}]})
+
+
+def test_a_workspace_with_an_older_profile_still_opens(tmp_path):
+    """rani's workspace from before {size} was removed (2026-10-21): it opens with its MCUs, says
+    what changed, and saving writes the profile without {size}."""
+    (tmp_path / "old.profile.toml").write_text(
+        '[scpi]\nname = "RDT GAC"\nread = "SERV:MEM:READ? {mcu},{addr},{len}"\n'
+        'write = "SERV:MEM:WRIT {mcu},{addr},{value},{size}"\n')
+    (tmp_path / "old.rdtw").write_text(
+        'profile = "old.profile.toml"\n[connection]\ntransport = "tcp"\naddress = "127.0.0.1:5025"\n'
+        '[[mcu]]\nid = 0\nname = "Interface"\n[[mcu]]\nid = 1\nname = "Control_CM7"\n')
+    ws = Workspace.load(tmp_path / "old.rdtw")
+    assert [m.name for m in ws.config.mcus] == ["Interface", "Control_CM7"]
+    assert ws.config.profile.write == "SERV:MEM:WRIT {mcu},{addr},{value}"
+    assert any("{size}" in w for w in ws.warnings)
+    ws.save()
+    assert "{size}" not in (tmp_path / "old.profile.toml").read_text()
+    assert Workspace.load(tmp_path / "old.rdtw").warnings == []

@@ -567,12 +567,12 @@ rani set this on 2026-10-13, after connecting RDT to the real target on COM3: th
 
 rani's firmware is 32-bit and always stores 4 bytes. rani asked why the write needs a size when RDT does read-modify-write, then asked to remove the size from the write and the 8-byte choice from `max_write` and `align` (rani, 2026-10-21).
 
-- **No `{size}`:** the write template's placeholders are `{mcu}`, `{addr}` and `{value}` (`TEMPLATE_FIELDS` in `rdt/profile.py`); the default is `MEMory:WRITE {mcu},{addr},{value}`. A template that still has `{size}`, such as an older profile, is a `ConfigError` that says to take `,{size}` out, rather than a silently different command. `Profile.format_write` and `ScpiProtocol.write_mem` lost their size argument.
+- **No `{size}`:** the write template's placeholders are `{mcu}`, `{addr}` and `{value}` (`TEMPLATE_FIELDS` in `rdt/profile.py`); the default is `MEMory:WRITE {mcu},{addr},{value}`. A profile file saved before this change still opens: `Profile.from_dict` takes `{size}` (with the comma or space before it) out of the write template and turns a `max_write` or `align` of 8 into 4, and the notes it leaves (`Profile.notes`) show in the GUI status bar and the CLI as workspace warnings; saving the workspace writes the new profile. A first version refused such a profile, which kept rani's workspace and its MCUs from opening (rani, 2026-10-21). A `{size}` typed into the profile editor is still refused with a message to take it out. `Profile.format_write` and `ScpiProtocol.write_mem` lost their size argument.
 - **Every write is one word:** `Session.write` sends only whole aligned words. A value smaller than a word is written by read-modify-write of its word (D-SCPI-10). An 8-byte value (`double`, `int64`) is cut by `split_write` into two aligned 4-byte writes, low address first, confirmed by one read-back of both words (D-VAL-6); the two writes are not atomic.
 - **1, 2 or 4 only:** `max_write` and `align` may be 1, 2 or 4 (`WORD_SIZES`); 8 is refused when a profile loads and is no longer offered in the profile editor, so an 8-byte value is never one write. The editor's preview says "Write `max_write` bytes".
 - **Simulator:** its default write template has no size either and it stores `max_write` bytes; it still accepts a `{size}` in its own template for trying other firmware. Its `max_write` and `align` are 1, 2 or 4 too.
 
-Tests: `test_an_8_byte_value_is_two_word_writes` in `tests/test_host_session.py`, `test_write_template_has_no_size` and `test_max_write_and_align_are_at_most_4_bytes` in `tests/test_host_profile.py`.
+Tests: `test_an_8_byte_value_is_two_word_writes` in `tests/test_host_session.py`, `test_write_template_has_no_size`, `test_max_write_and_align_are_at_most_4_bytes` and `test_an_older_profile_still_loads_without_size` in `tests/test_host_profile.py`, `test_a_workspace_with_an_older_profile_still_opens` in `tests/test_workspace.py`.
 
 ### 4.4 Multiple MCUs
 
@@ -1668,7 +1668,7 @@ The application is built against the simulator. With the firmware's read and wri
 | 2026-10-19 | The simulator's example firmware gets structures, arrays and arrays of structures in their own sections, so the existing variables keep their addresses, plus a Structures tab in the example workspace (SIM-2, PR #142), at rani's request |
 | 2026-10-19 | A narrated walkthrough video and the manual as slides go into the repository under `docs/media/`, linked from the Help menu (INS-16, PR #144), at rani's request. They stay out of the installer; the installed app opens them on GitHub |
 | 2026-10-19 | The scripts that remake the video and the slides move from the project files into `tools/media/`, at rani's request, so a release that changes the GUI can remake them from the same checkout (INS-16) |
-| 2026-10-21 | The write command loses its size (SCPI-13): every write is one `max_write`-byte word, so the firmware always stores 4 bytes; a profile whose write template still has `{size}` is refused with a message to remove it. `max_write` and `align` may be 1, 2 or 4; 8 is removed (rani; PR #147) |
+| 2026-10-21 | The write command loses its size (SCPI-13): every write is one `max_write`-byte word, so the firmware always stores 4 bytes; an older profile opens with `{size}` taken out of its write template and a warning, and is saved without it. `max_write` and `align` may be 1, 2 or 4; 8 is removed (rani; PR #147) |
 
 ## 9. Appendix: binary protocol (planned)
 

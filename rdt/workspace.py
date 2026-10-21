@@ -225,6 +225,7 @@ class Workspace:
         if not isinstance(read_only, bool):
             raise ConfigError("read_only must be true or false")
         ws = cls(TargetConfig.from_dict(raw, base), tabs, poll, chart, _commands_from(raw), read_only)
+        ws.warnings += ws.config.profile.notes
         if fmt > FORMAT:
             ws.warnings.append(f"the workspace was saved by a newer RDT (file format {fmt}); settings this "
                                "version doesn't know are ignored, and are lost if you save it")
