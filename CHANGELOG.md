@@ -9,12 +9,6 @@ section. RDT shows this file in **Help > Release notes**.
 
 ### New features
 
-### Bug fixes
-
-## 1.1.0 (2026-10-28)
-
-### New features
-
 - When a newer RDT is out, a window shows what changed in it, with a Download button.
 - Help > Video walkthrough plays a narrated video of RDT in use, and Help > Presentation opens the user manual as slides.
 - The simulator's example firmware has structures, arrays and arrays of structures, some of them changing, and the example workspace has a Structures tab to try them in.
