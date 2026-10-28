@@ -168,8 +168,14 @@ def test_video_and_presentation_open_from_help(win, monkeypatch):
     assert opened[1].endswith("docs/media/rdt-presentation.pdf")
 
 
-def test_media_open_on_github_when_installed(monkeypatch):
+def test_media_open_from_the_installed_copy(monkeypatch, tmp_path):
+    """INS-17: the installed app opens the video and the presentation it carries."""
     from rdt import appfiles
+    (tmp_path / "docs" / "media").mkdir(parents=True)
+    (tmp_path / "docs" / "media" / "rdt-walkthrough.mp4").write_bytes(b"video")
     monkeypatch.setattr(appfiles.sys, "frozen", True, raising=False)
-    assert appfiles.media_url("video") == "https://github.com/rani-feldman/rdt/blob/main/docs/media/rdt-walkthrough.mp4"
-    assert appfiles.media_url("presentation").endswith("/blob/main/docs/media/rdt-presentation.pdf")
+    monkeypatch.setattr(appfiles.sys, "_MEIPASS", str(tmp_path), raising=False)
+    assert appfiles.media_url("video") == (tmp_path / "docs" / "media" / "rdt-walkthrough.mp4").as_uri()
+    # a file missing from the install falls back to its page on GitHub
+    assert appfiles.media_url("presentation") == (
+        "https://github.com/rani-feldman/rdt/blob/main/docs/media/rdt-presentation.pdf")

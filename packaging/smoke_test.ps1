@@ -46,6 +46,8 @@ foreach ($exe in "rdt-gui.exe", "rdt.exe", "rdt-sim.exe", "unins000.exe") {
     Check (Test-Path "$App\$exe") "$exe installed"
 }
 Check (Test-Path "$App\_internal\docs\CHANGELOG.md") "release notes installed"
+Check (Test-Path "$App\_internal\docs\media\rdt-walkthrough.mp4") "walkthrough video installed"
+Check (Test-Path "$App\_internal\docs\media\rdt-presentation.pdf") "presentation installed"
 Check (Test-Path "$App\examples\sim_bench.rdtw") "example workspace installed"
 $v = (& "$App\rdt.exe" --version) -join ""
 Check ($v -eq "rdt $Version") "rdt --version says rdt $Version (got '$v')"

@@ -299,6 +299,7 @@ Agreed with rani on 2026-10-17 (thread "Installer and releases plan", milestone 
 | INS-14 | A release starts from the **Run workflow** button (Actions > Release, type the version): it renames `## Unreleased` in CHANGELOG.md to the version and date, commits that to main and builds the draft Release in the same run, with no tag yet: the tag `vX.Y.Z` is created only when rani publishes the draft, so a discarded draft leaves no tag; pushing a `v*` tag by hand still works (2026-10-17, updated 2026-10-17) | Done | [D-INS-14](#d-ins-14-run-workflow-button) |
 | INS-15 | When a newer version is found, an **Update available** window shows what changed in it (the release notes of the versions newer than the running one) with a Download button; it opens by itself once per new version and again from the status-bar link or Help > Check for updates (rani, 2026-10-18) | Done | [D-INS-15](#d-ins-15-update-available-window) |
 | INS-16 | A narrated walkthrough video (GUI and command line, against the simulator) and the user manual as a slide presentation, kept in the repository under `docs/media/` and opened from **Help > Video walkthrough** and **Help > Presentation** (rani, 2026-10-19) | Done (PR #144) | [D-INS-16](#d-ins-16-video-and-presentation) |
+| INS-17 | The walkthrough video and the presentation ship inside the installer and the portable zip, so Help opens them with no internet; GitHub is only the fallback when a file is missing (rani, 2026-10-28: "they should be part of the release") | In review | [D-INS-17](#d-ins-17-video-and-presentation-in-the-release) |
 
 Requirements on the firmware itself (FW-1 to FW-10) are in [section 5](#5-firmware-specification).
 
@@ -1515,7 +1516,11 @@ When the check finds a newer version, `fetch_latest` also reads that tag's `CHAN
 
 #### D-INS-16 Video and presentation
 
-`docs/media/` holds `rdt-walkthrough.mp4` (about 13 minutes, 1080p, burnt-in captions, with `rdt-walkthrough.srt` beside it) and `rdt-presentation.pdf` (the 42 slides made from the user manual). They are not bundled into the installer or the zip, which would grow by about 50 MB: `appfiles.media_url` gives the file in a source checkout and its page on GitHub (`github.com/rani-feldman/rdt/blob/main/docs/media/...`) in the installed app, and `MainWindow.open_media` hands that to the PC's player or browser, showing an error if nothing opens it. The video was recorded by driving the GUI on a virtual screen with a real pointer and narrated with an offline voice; the scripts that remake both are in `tools/media/` (see its README), so they change along with the GUI they drive (rani, 2026-10-19).
+`docs/media/` holds `rdt-walkthrough.mp4` (about 13 minutes, 1080p, burnt-in captions, with `rdt-walkthrough.srt` beside it) and `rdt-presentation.pdf` (the 42 slides made from the user manual). Since INS-17 the installer and the zip carry them too (see D-INS-17). `appfiles.media_url` gives the local file, and `MainWindow.open_media` hands that to the PC's player or browser, showing an error if nothing opens it. The video was recorded by driving the GUI on a virtual screen with a real pointer and narrated with an offline voice; the scripts that remake both are in `tools/media/` (see its README), so they change along with the GUI they drive (rani, 2026-10-19).
+
+#### D-INS-17 Video and presentation in the release
+
+`packaging/rdt.spec` adds `rdt-walkthrough.mp4`, its `.srt` and `rdt-presentation.pdf` to the build's `docs/media` folder, so they land in `_internal\docs\media` beside the user manual. That makes the installer and the zip about 50 MB bigger, which rani accepted to have them work offline (rani, 2026-10-28). `appfiles.media_url` returns the file under `bundle_root()` whenever it exists, in a checkout or an installed app, and the GitHub page only when it is missing. `packaging/smoke_test.ps1` checks both files are installed.
 
 ## 5. Firmware specification
 
@@ -1673,6 +1678,7 @@ The application is built against the simulator. With the firmware's read and wri
 | 2026-10-19 | The simulator's example firmware gets structures, arrays and arrays of structures in their own sections, so the existing variables keep their addresses, plus a Structures tab in the example workspace (SIM-2, PR #142), at rani's request |
 | 2026-10-19 | A narrated walkthrough video and the manual as slides go into the repository under `docs/media/`, linked from the Help menu (INS-16, PR #144), at rani's request. They stay out of the installer; the installed app opens them on GitHub |
 | 2026-10-19 | The scripts that remake the video and the slides move from the project files into `tools/media/`, at rani's request, so a release that changes the GUI can remake them from the same checkout (INS-16) |
+| 2026-10-28 | The video and the presentation ship in the installer and the zip instead of opening on GitHub, at rani's request (INS-17) |
 | 2026-10-21 | The write command loses its size (SCPI-13): every write is one `max_write`-byte word, so the firmware always stores 4 bytes; an older profile opens with `{size}` taken out of its write template and a warning, and is saved without it. `max_write` and `align` may be 1, 2 or 4; 8 is removed (rani; PR #147) |
 | 2026-10-21 | A write value is 8 zero-padded hex digits like an address, such as `000002FF` (SCPI-14); this replaces the unpadded value of 2026-10-14. An older `{value:X}` is upgraded on load (rani) |
 
