@@ -2,4 +2,4 @@
 ``vX.Y.Z`` names the same version; pyproject.toml, the exe file properties, Help > About and
 ``rdt --version`` all read it from here."""
 
-__version__ = "1.0.0"
+__version__ = "1.1.0"
