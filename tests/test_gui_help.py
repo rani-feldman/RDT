@@ -164,18 +164,24 @@ def test_video_and_presentation_open_from_help(win, monkeypatch):
     actions = help_actions(win)
     actions["Video walkthrough"].trigger()
     actions["Presentation"].trigger()
-    assert opened[0].startswith("file://") and opened[0].endswith("docs/media/rdt-walkthrough.mp4")
-    assert opened[1].endswith("docs/media/rdt-presentation.pdf")
+    # the video always opens from the repository (rani, 2026-10-29)
+    assert opened[0] == "https://github.com/rani-feldman/rdt/blob/main/docs/media/rdt-walkthrough.mp4"
+    assert opened[1].startswith("file://") and opened[1].endswith("docs/media/rdt-presentation.pdf")
 
 
 def test_media_open_from_the_installed_copy(monkeypatch, tmp_path):
-    """INS-17: the installed app opens the video and the presentation it carries."""
+    """INS-17: the installed app opens the presentation it carries; the video opens on GitHub
+    even when a copy is there (rani, 2026-10-29)."""
     from rdt import appfiles
-    (tmp_path / "docs" / "media").mkdir(parents=True)
-    (tmp_path / "docs" / "media" / "rdt-walkthrough.mp4").write_bytes(b"video")
+    media = tmp_path / "docs" / "media"
+    media.mkdir(parents=True)
+    (media / "rdt-walkthrough.mp4").write_bytes(b"video")
     monkeypatch.setattr(appfiles.sys, "frozen", True, raising=False)
     monkeypatch.setattr(appfiles.sys, "_MEIPASS", str(tmp_path), raising=False)
-    assert appfiles.media_url("video") == (tmp_path / "docs" / "media" / "rdt-walkthrough.mp4").as_uri()
+    assert appfiles.media_url("video") == (
+        "https://github.com/rani-feldman/rdt/blob/main/docs/media/rdt-walkthrough.mp4")
     # a file missing from the install falls back to its page on GitHub
     assert appfiles.media_url("presentation") == (
         "https://github.com/rani-feldman/rdt/blob/main/docs/media/rdt-presentation.pdf")
+    (media / "rdt-presentation.pdf").write_bytes(b"pdf")
+    assert appfiles.media_url("presentation") == (media / "rdt-presentation.pdf").as_uri()

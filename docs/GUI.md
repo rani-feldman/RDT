@@ -8,7 +8,7 @@ python -m sim &                          # the simulated device
 rdt-gui examples/sim_bench.rdtw          # or: python -m rdt.gui examples/sim_bench.rdtw
 ```
 
-Started with no file, `rdt-gui` reopens the workspace you last opened or saved. If there is none (or that file is gone), it opens `rdt.toml` from the current folder, or else from `%LOCALAPPDATA%\rdt`, the same default target file as the CLI (see [Default files](CLI.md#default-files)); otherwise it starts with a new workspace. File > Open and Save as start in `%LOCALAPPDATA%\rdt` (beside `ui.toml`), and a workspace's `.profile.toml`, `.memory.toml`, `.watch.toml` and `.commands.toml` are always saved beside its `.rdtw`.
+Started with no file, `rdt-gui` reopens the workspace you last opened or saved. If there is none (or that file is gone), it opens `rdt.toml` from the current folder, or else from `%LOCALAPPDATA%\rdt`, the same default target file as the CLI (see [Default files](CLI.md#default-files)). Otherwise it opens the default workspace `bench.rdtw` from `%LOCALAPPDATA%\rdt`, copying it there from the installed `examples` folder the first time (with its profile, memory map, watch list and commands; a file already there is never overwritten). Its MCUs look for their ELF files in `Firmware\` beside it; set them in **Target > MCUs** if they are elsewhere. File > Open and Save as start in `%LOCALAPPDATA%\rdt` (beside `ui.toml`), and a workspace's `.profile.toml`, `.memory.toml`, `.watch.toml` and `.commands.toml` are always saved beside its `.rdtw`.
 
 ![RDT main window connected to the simulator](images/gui-main.png)
 
@@ -173,7 +173,7 @@ The console is a terminal in the theme's colours: dark in the dark themes, white
 
 **Help > Keyboard shortcuts** (F1) lists every shortcut in the menus and the console in one table.
 
-The rest of the **Help** menu: **User manual** and **Release notes** (what each version added or fixed), **Video walkthrough** (a narrated 13-minute video of RDT in use, GUI and command line) and **Presentation** (the user manual as 42 slides, PDF), both installed with RDT, **Check for updates** (asks GitHub now) and **Check for updates at start** (once a day, on unless turned off; a newer release shows as a link in the status bar, and a window lists what changed since the running version: on its own once per new version, and whenever the link or Check for updates is clicked), **Licence**, **Third-party notices** and **About RDT** (the version). An unexpected error is shown in a window and written to `%LOCALAPPDATA%\rdt\logs\rdt.log`.
+The rest of the **Help** menu: **User manual** and **Release notes** (what each version added or fixed), **Video walkthrough** (a narrated 13-minute video of RDT in use, GUI and command line, opened from its page in the repository on GitHub) and **Presentation** (the user manual as 42 slides, PDF, installed with RDT), **Check for updates** (asks GitHub now) and **Check for updates at start** (once a day, on unless turned off; a newer release shows as a link in the status bar, and a window lists what changed since the running version: on its own once per new version, and whenever the link or Check for updates is clicked), **Licence**, **Third-party notices** and **About RDT** (the version). An unexpected error is shown in a window and written to `%LOCALAPPDATA%\rdt\logs\rdt.log`.
 
 ## SCPI profile editor
 

@@ -445,3 +445,33 @@ def test_memory_map_from_a_workspace_and_the_cli(tmp_path):
     exported = tmp_path / "x.memory.toml"
     assert main(["-w", str(tmp_path / "dst.rdtw"), "memory", "export", str(exported)], io.StringIO()) == 0
     assert tomllib.loads(exported.read_text())["ranges"][0]["name"] == "SRAM"
+
+
+def test_default_workspace_ships_in_examples():
+    # rani's bench files are the default workspace (WSP-9, rani 2026-10-29)
+    from rdt.appfiles import DEFAULT_WORKSPACE, examples_dir
+    assert all((examples_dir() / name).is_file() for name in DEFAULT_WORKSPACE)
+    ws = Workspace.load(examples_dir() / "bench.rdtw")
+    assert [m.name for m in ws.config.mcus] == ["Interface", "Control_CM7", "Control_CM4"]
+    assert ws.commands and ws.tabs and ws.config.profile.ranges and not ws.warnings
+
+
+def test_default_workspace_is_copied_once_and_never_overwritten(tmp_path):
+    from rdt.appfiles import DEFAULT_WORKSPACE, install_default_workspace
+    folder = tmp_path / "rdt"
+    assert install_default_workspace(folder) == folder / "bench.rdtw"
+    assert sorted(p.name for p in folder.iterdir()) == sorted(DEFAULT_WORKSPACE)
+    (folder / "bench.rdtw").write_text("# mine")
+    install_default_workspace(folder)
+    assert (folder / "bench.rdtw").read_text() == "# mine"
+
+
+def test_default_workspace_comes_after_rdt_toml(tmp_path, monkeypatch):
+    from rdt.workspace import default_target
+    monkeypatch.setenv("RDT_UI_FILE", str(tmp_path / "rdt" / "ui.toml"))
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / "rdt").mkdir()
+    (tmp_path / "rdt" / "bench.rdtw").write_text("")
+    assert default_target() == tmp_path / "rdt" / "bench.rdtw"
+    (tmp_path / "rdt" / "rdt.toml").write_text("")
+    assert default_target() == tmp_path / "rdt" / "rdt.toml"

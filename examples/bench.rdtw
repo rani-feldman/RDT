@@ -1,0 +1,28 @@
+# RDT workspace. Saved by RDT, so comments are not kept.
+# The SCPI profile, the watch tabs and the known commands are in the files it names.
+format        = 1
+profile       = "bench.profile.toml"
+poll_ms       = 200
+memory_file   = "bench.memory.toml"
+watch_file    = "bench.watch.toml"
+commands_file = "bench.commands.toml"
+
+[connection]
+transport = "serial"
+port      = "COM30"
+baud      = 115200
+
+[[mcu]]
+id   = 0
+name = "Interface"
+elf  = "Firmware/GAC_INTERFACE_M7.axf"
+
+[[mcu]]
+id   = 1
+name = "Control_CM7"
+elf  = "Firmware/GAC_CONTROL_M7.axf"
+
+[[mcu]]
+id   = 2
+name = "Control_CM4"
+elf  = "Firmware/GAC_CONTROL_M4.axf"

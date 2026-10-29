@@ -931,9 +931,10 @@ def _profile_dict(p: Profile) -> dict:
 
 def default_target() -> Path | None:
     """The target file used when none is given: rdt.toml in the current folder, else rdt.toml in
-    the workspace folder (%LOCALAPPDATA%\\rdt). None when neither exists."""
+    the workspace folder (%LOCALAPPDATA%\\rdt), else the default workspace bench.rdtw there
+    (WSP-9). None when none of them exists."""
     from .ui_settings import workspace_dir
-    for path in (Path("rdt.toml"), workspace_dir() / "rdt.toml"):
+    for path in (Path("rdt.toml"), workspace_dir() / "rdt.toml", workspace_dir() / "bench.rdtw"):
         if path.is_file():
             return path
     return None

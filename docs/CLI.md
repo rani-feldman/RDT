@@ -176,7 +176,7 @@ A target file is also a workspace with no watch tabs; see [Workspace](#workspace
 
 ### Default files
 
-Without `-t` or `-w`, `rdt` uses `rdt.toml` from the current folder when there is one, else `rdt.toml` from the workspace folder (`%LOCALAPPDATA%\rdt`, beside `ui.toml`), so with your own bench in it, `rdt info` and `rdt read main:motor` need no options. Command-line options still override it. It can be a target file or a workspace; `add`, `remove` and `tab` save their changes into it, as for any workspace. `rdt-gui` opens it too when there is no last workspace to reopen. To start one for an STM32H7, from the repository root:
+Without `-t` or `-w`, `rdt` uses `rdt.toml` from the current folder when there is one, else `rdt.toml` from the workspace folder (`%LOCALAPPDATA%\rdt`, beside `ui.toml`), else the default workspace `bench.rdtw` there (which `rdt-gui` copies from `examples` the first time it starts with nothing else to open), so with your own bench in it, `rdt info` and `rdt read main:motor` need no options. Command-line options still override it. It can be a target file or a workspace; `add`, `remove` and `tab` save their changes into it, as for any workspace. `rdt-gui` opens it too when there is no last workspace to reopen. To start one for an STM32H7, from the repository root:
 
 ```
 copy examples\stm32h7_interface.rdtw rdt.toml

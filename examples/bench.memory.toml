@@ -1,0 +1,145 @@
+# RDT memory map: the memory regions RDT may access beyond the ELF's sections.
+# Each range may name an mcu. Saved by RDT, so comments are not kept.
+
+[[ranges]]
+name  = "ITCM"
+start = 0x0
+size  = 0x10000
+mcu   = "Interface"
+kind  = "memory"
+
+[[ranges]]
+name     = "FLASH"
+start    = 0x8000000
+size     = 0x200000
+writable = false
+mcu      = "Interface"
+kind     = "memory"
+
+[[ranges]]
+name  = "DTCM"
+start = 0x20000000
+size  = 0x20000
+mcu   = "Interface"
+kind  = "memory"
+
+[[ranges]]
+name  = "AXI_SRAM"
+start = 0x24000000
+size  = 0x80000
+mcu   = "Interface"
+kind  = "memory"
+
+[[ranges]]
+name  = "SRAM1_3"
+start = 0x30000000
+size  = 0x48000
+mcu   = "Interface"
+kind  = "memory"
+
+[[ranges]]
+name  = "SRAM4"
+start = 0x38000000
+size  = 0x10000
+mcu   = "Interface"
+kind  = "memory"
+
+[[ranges]]
+name  = "BKPSRAM"
+start = 0x38800000
+size  = 0x1000
+mcu   = "Interface"
+kind  = "memory"
+
+[[ranges]]
+name     = "FLASH"
+start    = 0x8000000
+size     = 0x200000
+writable = false
+mcu      = "Control_CM7"
+kind     = "memory"
+
+[[ranges]]
+name  = "ITCM"
+start = 0x0
+size  = 0x10000
+mcu   = "Control_CM7"
+kind  = "memory"
+
+[[ranges]]
+name  = "DTCM"
+start = 0x20000000
+size  = 0x20000
+mcu   = "Control_CM7"
+kind  = "memory"
+
+[[ranges]]
+name  = "AXI_SRAM"
+start = 0x24000000
+size  = 0x80000
+mcu   = "Control_CM7"
+kind  = "memory"
+
+[[ranges]]
+name  = "SRAM1_3"
+start = 0x30000000
+size  = 0x48000
+mcu   = "Control_CM7"
+kind  = "memory"
+
+[[ranges]]
+name  = "SRAM4"
+start = 0x38000000
+size  = 0x10000
+mcu   = "Control_CM7"
+kind  = "memory"
+
+[[ranges]]
+name  = "BKPSRAM"
+start = 0x38800000
+size  = 0x1000
+mcu   = "Control_CM7"
+kind  = "memory"
+
+[[ranges]]
+name     = "FLASH"
+start    = 0x8000000
+size     = 0x200000
+writable = false
+mcu      = "Control_CM4"
+kind     = "memory"
+
+[[ranges]]
+name  = "SRAM1_3_ALIAS"
+start = 0x10000000
+size  = 0x48000
+mcu   = "Control_CM4"
+kind  = "memory"
+
+[[ranges]]
+name  = "AXI_SRAM"
+start = 0x24000000
+size  = 0x80000
+mcu   = "Control_CM4"
+kind  = "memory"
+
+[[ranges]]
+name  = "SRAM1_3"
+start = 0x30000000
+size  = 0x48000
+mcu   = "Control_CM4"
+kind  = "memory"
+
+[[ranges]]
+name  = "SRAM4"
+start = 0x38000000
+size  = 0x10000
+mcu   = "Control_CM4"
+kind  = "memory"
+
+[[ranges]]
+name  = "BKPSRAM"
+start = 0x38800000
+size  = 0x1000
+mcu   = "Control_CM4"
+kind  = "memory"

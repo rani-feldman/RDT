@@ -1571,8 +1571,12 @@ def main(argv: list[str] | None = None) -> int:
     win = MainWindow()
     if argv:
         win.open_path(argv[0])
-    elif not win.reopen_last() and (local := default_target()) is not None:
-        win.open_path(local)              # the CLI's default target file, as a starting point
+    elif not win.reopen_last():
+        # the CLI's default target file, else the default workspace from examples, copied into
+        # the workspace folder the first time (WSP-9, rani 2026-10-29)
+        local = default_target() or appfiles.install_default_workspace(workspace_dir())
+        if local is not None:
+            win.open_path(local)
     win.show()
     QTimer.singleShot(2000, win.start_update_check)
     return app.exec()
