@@ -223,6 +223,7 @@ Each requirement links to its design section.
 | WSP-5 | The interface settings are kept in their own file, per user, not in the workspace (2026-10-14) | Done | [D-WSP-5](#d-wsp-5-interface-settings-file) |
 | WSP-6 | The watch list, the commands and the interface settings can each be imported and exported (2026-10-14) | Done | [D-WSP-6](#d-wsp-6-import-and-export) |
 | WSP-7 | The SCPI profile is kept in its own file beside the `.rdtw`, which points to it, with every field written, defaults included (2026-10-15) | Done | [D-WSP-4](#d-wsp-4-split-files) |
+| WSP-9 | rani's bench workspace (`bench.rdtw` with its profile, memory map, watch list and commands files) ships in `examples/` and in the installer and zip, and is the default workspace: the GUI starts with it when there is nothing else to open, and `rdt` uses it with no `-t` or `-w` (rani, 2026-10-29: "They should be also the default files") | In review | [D-WSP-9](#d-wsp-9-default-workspace) |
 | WSP-8 | The memory map (the memory regions) is kept in its own file beside the `.rdtw`, which points to it with `memory_file`; a memory map can be loaded from a file, from the GUI (File > Import > Memory map) or the CLI (`rdt memory import`) (2026-10-15) | Done | [D-WSP-8](#d-wsp-8-memory-map-file) |
 
 ### 2.15 Command line and API
@@ -299,7 +300,7 @@ Agreed with rani on 2026-10-17 (thread "Installer and releases plan", milestone 
 | INS-14 | A release starts from the **Run workflow** button (Actions > Release, type the version): it renames `## Unreleased` in CHANGELOG.md to the version and date, commits that to main and builds the draft Release in the same run, with no tag yet: the tag `vX.Y.Z` is created only when rani publishes the draft, so a discarded draft leaves no tag; pushing a `v*` tag by hand still works (2026-10-17, updated 2026-10-17) | Done | [D-INS-14](#d-ins-14-run-workflow-button) |
 | INS-15 | When a newer version is found, an **Update available** window shows what changed in it (the release notes of the versions newer than the running one) with a Download button; it opens by itself once per new version and again from the status-bar link or Help > Check for updates (rani, 2026-10-18) | Done | [D-INS-15](#d-ins-15-update-available-window) |
 | INS-16 | A narrated walkthrough video (GUI and command line, against the simulator) and the user manual as a slide presentation, kept in the repository under `docs/media/` and opened from **Help > Video walkthrough** and **Help > Presentation** (rani, 2026-10-19) | Done (PR #144) | [D-INS-16](#d-ins-16-video-and-presentation) |
-| INS-17 | The walkthrough video and the presentation ship inside the installer and the portable zip, so Help opens them with no internet; GitHub is only the fallback when a file is missing (rani, 2026-10-28: "they should be part of the release") | In review | [D-INS-17](#d-ins-17-video-and-presentation-in-the-release) |
+| INS-17 | The presentation ships inside the installer and the portable zip, so Help opens it with no internet; GitHub is only the fallback when the file is missing (rani, 2026-10-28: "they should be part of the release"). The video is not shipped: Help opens it from its page in the repository (rani, 2026-10-29: "Remove the video from the installer and return as a link to the place in the repo") | In review | [D-INS-17](#d-ins-17-video-and-presentation-in-the-release) |
 
 Requirements on the firmware itself (FW-1 to FW-10) are in [section 5](#5-firmware-specification).
 
@@ -1247,6 +1248,14 @@ rani asked on 2026-10-15 for the memory regions to be in a file of their own bes
 - **Opening:** `TargetConfig.from_dict` reads `memory_file` (also in a plain target file) and adds the ranges to the profile's shared list, where the `mcu` key picks the MCU as before (D-MEM-2). A missing or broken memory file is a `ConfigError`. Older workspaces with inline `[[ranges]]`, `[[mcu.ranges]]` or ranges in the profile file still open; the next save moves them to the memory file.
 - **Loading a map:** `Workspace.import_memory(path, replace_all)` takes the ranges of a memory file, or of a profile, target file or workspace (`load_memory_file` in `rdt/profile.py`, which follows a workspace's `memory_file` and `profile`). Ranges already present are skipped; with replace the workspace's ranges are dropped first. A map whose ranges overlap each other is refused with a `ConfigError` and nothing changes. **File > Import > Memory map...** asks Add or Replace when the workspace already has ranges, then reconnects; **File > Export > Memory map...** and `rdt memory export FILE` write the whole map; `rdt memory import FILE [--replace]` loads one into the workspace file.
 
+#### D-WSP-9 Default workspace
+
+rani asked on 2026-10-29 for their bench files to be in the examples, installed with RDT, and to be the default files. `examples/` holds `bench.rdtw`, `bench.profile.toml`, `bench.memory.toml`, `bench.watch.toml` and `bench.commands.toml` (the RDT GAC profile, the three MCUs Interface, Control_CM7 and Control_CM4 with their memory map, the watch tabs and the known commands). `tools/build_release.ps1` copies them into the installed `examples` folder beside the exes, and `packaging/smoke_test.ps1` checks they are there.
+
+- **GUI start:** a file named on the command line, else the last workspace (D-WSP-3), else the default target, else the default workspace. For the last one the GUI copies the five files from `examples` into the workspace folder (`%LOCALAPPDATA%\rdt`) and opens the copy, so saves go to the user's own files and a new install or an uninstall never touches them. A file already in that folder is never overwritten (`appfiles.install_default_workspace`, `appfiles.examples_dir`).
+- **Default target:** `default_target` in `rdt/workspace.py` tries `./rdt.toml`, then `%LOCALAPPDATA%\rdt\rdt.toml`, then `%LOCALAPPDATA%\rdt\bench.rdtw`, so `rdt` with no `-t` or `-w` uses the default workspace once the GUI has copied it. The CLI never copies files itself.
+- **ELF files:** the MCUs name their `.axf` files as `Firmware/GAC_*.axf`, relative to the `.rdtw`. In the copy they point into `%LOCALAPPDATA%\rdt\Firmware`; until the files are there, or set in **Target > MCUs**, those MCUs have no symbols.
+
 #### D-WSP-5 Interface settings file
 
 Interface settings are per user, not per workspace. They are in `ui.toml` next to the console history (`%LOCALAPPDATA%\rdt\ui.toml` on Windows; `RDT_UI_FILE` overrides it), handled by `UiSettings` in `rdt/ui_settings.py`:
@@ -1516,11 +1525,11 @@ When the check finds a newer version, `fetch_latest` also reads that tag's `CHAN
 
 #### D-INS-16 Video and presentation
 
-`docs/media/` holds `rdt-walkthrough.mp4` (about 13 minutes, 1080p, burnt-in captions, with `rdt-walkthrough.srt` beside it) and `rdt-presentation.pdf` (the 42 slides made from the user manual). Since INS-17 the installer and the zip carry them too (see D-INS-17). `appfiles.media_url` gives the local file, and `MainWindow.open_media` hands that to the PC's player or browser, showing an error if nothing opens it. The video was recorded by driving the GUI on a virtual screen with a real pointer and narrated with an offline voice; the scripts that remake both are in `tools/media/` (see its README), so they change along with the GUI they drive (rani, 2026-10-19).
+`docs/media/` holds `rdt-walkthrough.mp4` (about 13 minutes, 1080p, burnt-in captions, with `rdt-walkthrough.srt` beside it) and `rdt-presentation.pdf` (the 42 slides made from the user manual). Since INS-17 the installer and the zip carry the presentation; the video opens on GitHub (see D-INS-17). `appfiles.media_url` gives the local file or the GitHub page, and `MainWindow.open_media` hands that to the PC's player or browser, showing an error if nothing opens it. The video was recorded by driving the GUI on a virtual screen with a real pointer and narrated with an offline voice; the scripts that remake both are in `tools/media/` (see its README), so they change along with the GUI they drive (rani, 2026-10-19).
 
 #### D-INS-17 Video and presentation in the release
 
-`packaging/rdt.spec` adds `rdt-walkthrough.mp4`, its `.srt` and `rdt-presentation.pdf` to the build's `docs/media` folder, so they land in `_internal\docs\media` beside the user manual. That makes the installer and the zip about 50 MB bigger, which rani accepted to have them work offline (rani, 2026-10-28). `appfiles.media_url` returns the file under `bundle_root()` whenever it exists, in a checkout or an installed app, and the GitHub page only when it is missing. `packaging/smoke_test.ps1` checks both files are installed.
+`packaging/rdt.spec` adds `rdt-presentation.pdf` to the build's `docs/media` folder, so it lands in `_internal\docs\media` beside the user manual (rani, 2026-10-28). `appfiles.media_url` returns the presentation under `bundle_root()` whenever it exists, in a checkout or an installed app, and its GitHub page only when it is missing. The video and its captions were shipped too at first; rani asked on 2026-10-29 to take the video out of the installer and link to it in the repository, so `media_url("video")` always returns its GitHub page (`ONLINE_ONLY`), even in a checkout. `packaging/smoke_test.ps1` checks the presentation is installed and the video is not.
 
 ## 5. Firmware specification
 
@@ -1679,6 +1688,8 @@ The application is built against the simulator. With the firmware's read and wri
 | 2026-10-19 | A narrated walkthrough video and the manual as slides go into the repository under `docs/media/`, linked from the Help menu (INS-16, PR #144), at rani's request. They stay out of the installer; the installed app opens them on GitHub |
 | 2026-10-19 | The scripts that remake the video and the slides move from the project files into `tools/media/`, at rani's request, so a release that changes the GUI can remake them from the same checkout (INS-16) |
 | 2026-10-28 | The video and the presentation ship in the installer and the zip instead of opening on GitHub, at rani's request (INS-17) |
+| 2026-10-29 | The video comes out of the installer and the zip again; Help opens it from the repository on GitHub. The presentation stays in them (INS-17, rani) |
+| 2026-10-29 | rani's bench workspace (bench.rdtw and its four files) ships in examples and is the default workspace: the GUI copies it into `%LOCALAPPDATA%\rdt` and opens it when there is nothing else to open (WSP-9, rani) |
 | 2026-10-21 | The write command loses its size (SCPI-13): every write is one `max_write`-byte word, so the firmware always stores 4 bytes; an older profile opens with `{size}` taken out of its write template and a warning, and is saved without it. `max_write` and `align` may be 1, 2 or 4; 8 is removed (rani; PR #147) |
 | 2026-10-21 | A write value is 8 zero-padded hex digits like an address, such as `000002FF` (SCPI-14); this replaces the unpadded value of 2026-10-14. An older `{value:X}` is upgraded on load (rani) |
 

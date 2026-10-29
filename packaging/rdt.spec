@@ -22,9 +22,7 @@ datas = [
     (str(ROOT / "THIRD_PARTY_NOTICES.md"), "docs"),
     (str(ROOT / "docs" / "USER_MANUAL.md"), "docs"),
     (str(ROOT / "docs" / "images"), "docs/images"),
-    # the walkthrough video (with its captions) and the presentation, about 50 MB (INS-17)
-    (str(ROOT / "docs" / "media" / "rdt-walkthrough.mp4"), "docs/media"),
-    (str(ROOT / "docs" / "media" / "rdt-walkthrough.srt"), "docs/media"),
+    # the presentation (INS-17); the video stays in the repository, Help links to it (rani, 2026-10-29)
     (str(ROOT / "docs" / "media" / "rdt-presentation.pdf"), "docs/media"),
 ]
 # each package's licence files, as THIRD_PARTY_NOTICES.md promises

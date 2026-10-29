@@ -64,10 +64,11 @@ Run $Python @("packaging\version_info.py", $Version, "build\version_info.txt")
 Run $Python @("-m", "PyInstaller", "--noconfirm", "--clean", "--log-level", "WARN",
               "--distpath", "dist", "--workpath", "build\pyinstaller", "packaging\rdt.spec")
 
-# the example workspace and the simulator's files, beside the exes (both the installer and the zip)
+# the example workspaces and the simulator's files, beside the exes (both the installer and the zip);
+# the bench.* files are the default workspace the GUI starts with (WSP-9)
 $App = Join-Path $Root "dist\RDT"
 New-Item -ItemType Directory -Force "$App\examples", "$App\sim" | Out-Null
-Copy-Item examples\sim_bench.rdtw, examples\sim_bench.watch.toml, examples\sim_target.toml "$App\examples"
+Copy-Item examples\sim_bench.rdtw, examples\sim_bench.watch.toml, examples\sim_target.toml, examples\bench.* "$App\examples"
 Copy-Item -Recurse sim\examples "$App\sim\examples"
 Sign-Files (Get-ChildItem "$App\*.exe").FullName
 
