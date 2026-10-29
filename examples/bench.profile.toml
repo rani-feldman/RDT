@@ -1,0 +1,14 @@
+# RDT SCPI profile: the memory read and write commands and the reply format.
+# Saved by RDT, so comments are not kept.
+
+[scpi]
+name         = "RDT GAC"
+read         = "SERV:MEM:READ? {mcu},{addr},{len}"
+write        = "SERV:MEM:WRIT {mcu},{addr},{value}"
+max_write    = 4
+align        = 4
+byte_order   = "little"
+max_response = 500
+terminator   = "\n"
+timeout_ms   = 500
+retries      = 2

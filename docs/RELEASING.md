@@ -12,8 +12,8 @@ a developer. Small changes (tweaks, refactors, documentation, tests) get no line
 
 ## Before a release: the video and the presentation
 
-The Help menu opens a walkthrough video and a slide presentation from `docs/media/`, and the
-installer and the zip carry them. When the release adds or changes something a user would see,
+The Help menu opens a walkthrough video and a slide presentation from `docs/media/`. The
+installer and the zip carry the presentation; the video is opened from its page in the repository. When the release adds or changes something a user would see,
 remake them with the scripts in
 [tools/media](../tools/media/README.md) (on Linux, against the simulator) and merge that before
 running the release.
@@ -65,8 +65,8 @@ Defined in [packaging/rdt.iss](../packaging/rdt.iss) (Inno Setup) and
 [packaging/rdt.spec](../packaging/rdt.spec) (PyInstaller):
 
 - Installs per user in `%LOCALAPPDATA%\Programs\RDT`, no admin rights. Python and every package
-  are inside; nothing else is needed on the PC. The user manual, the walkthrough video and the
-  presentation are inside too.
+  are inside; nothing else is needed on the PC. The user manual and the presentation are inside
+  too; the walkthrough video is not (Help opens it on GitHub).
 - A new setup closes RDT, uninstalls the old version silently, and installs; user files in
   `%LOCALAPPDATA%\rdt` are never touched. Installing an older version warns first.
 - Optional `rdt` on the user's PATH (ticked), `.rdtw` association, Start menu shortcuts for RDT

@@ -1,0 +1,98 @@
+# RDT watch list: watch tabs, their items and the chart.
+# Saved by RDT, so comments are not kept.
+
+[[tab]]
+name = "Interface"
+
+[[tab]]
+name = "Control-CM4"
+
+[[tab.watch]]
+expr = "Control_CM4:gCanParallelRuntimeData"
+
+[[tab.watch]]
+expr = "Control_CM4:gSentOutputReadyTimestamp"
+
+[[tab.watch]]
+expr = "Control_CM4:gSentOutputReadyDelayedTimestamp"
+
+[[tab.watch]]
+expr = "Control_CM4:gStartUpFaultCounters"
+
+[[tab.watch]]
+expr = "Control_CM4:gReceivedOutputOnTimestamp"
+
+[[tab.watch]]
+expr = "Control_CM4:gMainStructure"
+
+[[tab.watch]]
+expr = "Control_CM4:*gpSharedStructCm7RdCm4Wr"
+
+[[tab.watch]]
+expr = "Control_CM4:*gpSharedStructCm4RdCm7Wr"
+
+[[tab.watch]]
+expr = "Control_CM4:gCanParallelRuntimeData.txFrameTracking.acksStillMissing"
+
+[[tab.watch]]
+expr = "Control_CM4:gOutputCommandLog"
+
+[[tab.watch]]
+expr = "Control_CM4:gOutputCommandLogCount"
+
+[[tab.watch]]
+expr = "Control_CM4:gParallelInternalBarExternalFbSwitchAfterOutputOn"
+
+[[tab.watch]]
+expr = "Control_CM4:gFbSelectExternalInternalBarAfterOutputOn"
+
+[[tab]]
+name = "Control-CM7"
+
+[[tab.watch]]
+expr = "Control_CM7:gLastOvpVmeasBits"
+
+[[tab.watch]]
+expr = "Control_CM7:gLastVoltageReferenceValue"
+
+[[tab.watch]]
+expr = "Control_CM7:gReferenceDataStructure"
+
+[[tab.watch]]
+expr = "Control_CM7:gParallelInternalBarExternaFbSwitchAtOVP"
+
+[[tab.watch]]
+expr = "Control_CM7:gFbSelectExternalInternalBarAtOVP"
+
+[[tab.watch]]
+expr = "Control_CM7:gFeedbackGainAtOVP"
+
+[[tab.watch]]
+expr = "Control_CM7:gParallelInternalBarExternaFbSwitchAfterRelayOn"
+
+[[tab.watch]]
+expr = "Control_CM7:gFbSelectExternalInternalBarAfterRelayOn"
+
+[[tab.watch]]
+expr = "Control_CM7:gFeedbackGainAfterRelayOn"
+
+[[tab.watch]]
+expr = "Control_CM7:gOnWithOutputSlew"
+
+[[tab.watch]]
+expr = "Control_CM7:gMaximalVmeasBits"
+
+[[tab.watch]]
+expr = "Control_CM7:gOvpSettingAtOVP"
+
+[[tab.watch]]
+expr = "Control_CM7:gBuffersIndexResetCount"
+
+[[tab.watch]]
+expr = "Control_CM7:gCm4StartupStageAtPeakOvpFault"
+
+[[tab.watch]]
+expr = "Control_CM7:gCm7StartupStageAtPeakOvpFault"
+
+[[tab.watch]]
+expr = "Control_CM7:gOutputOnTraceStageAtPeakOvpFault"
