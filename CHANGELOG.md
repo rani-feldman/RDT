@@ -9,6 +9,9 @@ section. RDT shows this file in **Help > Release notes**.
 
 ### New features
 
+- RDT starts with the bench workspace (the RDT GAC profile, the Interface, Control_CM7 and Control_CM4 MCUs, their memory map, watch tabs and commands), which now ships in the examples folder.
+- Help > Video walkthrough opens the video on GitHub; the installer no longer carries it, so it is about 50 MB smaller.
+
 ### Bug fixes
 
 ## 1.1.0 (2026-10-28)

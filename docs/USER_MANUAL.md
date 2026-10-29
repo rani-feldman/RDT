@@ -167,7 +167,7 @@ rdt-gui bench.rdtw
 rdt-gui
 ```
 
-With no file, it reopens the workspace you last opened or saved. If there is none, it opens `rdt.toml` from the current folder or from `%LOCALAPPDATA%\rdt`, or starts a new workspace.
+With no file, it reopens the workspace you last opened or saved. If there is none, it opens `rdt.toml` from the current folder or from `%LOCALAPPDATA%\rdt`, or else the default bench workspace, `bench.rdtw` in `%LOCALAPPDATA%\rdt`, which RDT copies there from its `examples` folder the first time. Point its MCUs at your ELF files in **Target > MCUs**.
 
 ### The main window
 
@@ -346,7 +346,7 @@ The theme, density, console text size, memory view format and layout are kept pe
 
 ### Keyboard shortcuts
 
-**Help > Keyboard shortcuts** (F1) lists all of them. **Help > Video walkthrough** plays a narrated video of RDT in use, and **Help > Presentation** opens this manual as slides. The main ones:
+**Help > Keyboard shortcuts** (F1) lists all of them. **Help > Video walkthrough** opens a narrated video of RDT in use on GitHub, and **Help > Presentation** opens this manual as slides. The main ones:
 
 | Keys | Action |
 | --- | --- |
@@ -578,6 +578,7 @@ Some memory, such as registers, or a core's tightly coupled memory reached throu
 | --- | --- | --- |
 | `bench.rdtw` and its `.profile.toml`, `.memory.toml`, `.watch.toml`, `.commands.toml` | Side by side, by default in `%LOCALAPPDATA%\rdt` | The workspace |
 | `rdt.toml` | The current folder, else `%LOCALAPPDATA%\rdt` | The default target or workspace when none is given |
+| `bench.rdtw` and its `bench.*.toml` files | `%LOCALAPPDATA%\rdt`, copied from the `examples` folder | The default workspace when there is no `rdt.toml` |
 | `ui.toml` | `%LOCALAPPDATA%\rdt` (`RDT_UI_FILE` overrides) | The GUI's per-user settings and layout |
 | `console_history.txt` | `%LOCALAPPDATA%\rdt` (`RDT_HISTORY_FILE` overrides) | The console history, shared by the GUI and CLI |
 | Symbol cache | `%LOCALAPPDATA%\rdt\cache` (`RDT_CACHE_DIR` overrides) | Parsed ELF files, so a large ELF loads fast; safe to delete |
