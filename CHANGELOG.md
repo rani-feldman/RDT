@@ -9,6 +9,12 @@ section. RDT shows this file in **Help > Release notes**.
 
 ### New features
 
+### Bug fixes
+
+## 1.1.1 (2026-11-02)
+
+### New features
+
 - RDT starts with the bench workspace (the RDT GAC profile, the Interface, Control_CM7 and Control_CM4 MCUs, their memory map, watch tabs and commands), which now ships in the examples folder.
 - Help > Video walkthrough opens the video on GitHub; the installer no longer carries it, so it is about 50 MB smaller.
 - Target > Memory access (Ctrl+M, or `--no-memory` on the command line) turns memory access off for firmware without the memory commands: RDT then sends only what you type in the console, and a Memory: Off chip shows next to the connect button.
