@@ -217,21 +217,23 @@ Click the connect button, or press F5. It shows the state and the link:
 | Blue `Disconnected · COM3` | Not connected | Connects |
 | Amber `Connecting · COM3` | Opening the port or socket | Cancels |
 | Green `Connected · COM3` | The port or socket is open | Disconnects |
-| Red `Link down · COM3` | The port broke (RDT reconnects by itself), or the device answered none of the last three reads | Disconnects |
+| Red `Link down · COM3` | The port broke (RDT reconnects by itself) | Disconnects |
 
-Connected means the COM port or socket opened; RDT sends nothing to check the device. An unplugged USB COM port shows as link down within a second. A board that hangs with its port still open is noticed by the next reads; with polling stopped, press **Poll now** (F6). While the link is down, writes are refused and the last values stay on screen in grey.
+Connected means the COM port or socket opened; RDT sends nothing to check the device. An unplugged USB COM port shows as link down within a second. Reads that get no reply never turn the link red: the MCU's card says `memory: no reply` instead (see below). A board that hangs with its port still open is noticed by the next reads; with polling stopped, press **Poll now** (F6). While the link is down, writes are refused and the last values stay on screen in grey.
 
 **The MCU cards.** Once connected, each card in the **Target** panel shows:
 
 - A dot: green when the MCU answers and its ELF matches; amber when it is slow or a read timed out in the last minute; red when its ELF does not match or the link is down; grey when not connected, silent or not checked.
-- **Link:** the MCU's reply time (`✓ 38 ms`), timeouts in the last minute, `silent: not answering`, `link down` or `not connected`.
+- **Link:** the MCU's reply time (`✓ 38 ms`), timeouts in the last minute, `⚠ memory: no reply · retried every 10 s`, `silent: not answering`, `port open · memory off (console only)`, `link down` or `not connected`.
 - **ELF:** `✓ main.elf` when the ELF matches the firmware, `✗ main.elf does not match`, `? main.elf: not read` or `main.elf: not checked`.
 
 Right-click a card for **Check ELF again**, **MCUs and ELF files...** and **Open in the memory view**.
 
 **When the ELF does not match,** the red error bar names the MCU and every read and write to it is refused. Load the ELF that matches the firmware (**Load ELF...** on the bar), or flash the firmware that matches the ELF, then press **Check again** (or **Target > Check ELF identity**). There is no way around this in the GUI. If you flash the device while the COM port stays open, use **Target > Check ELF identity** afterwards, since RDT can't tell the firmware changed.
 
-**A secondary MCU that stops answering** is marked silent on its own card; its items show `MCU silent` in grey, and the other MCUs keep working. RDT tries it again every 2 seconds.
+**An MCU that stops answering** is marked silent on its own card; its items show `MCU silent` in grey, and the other MCUs keep working. After three reads in a row with no reply the card says amber `memory: no reply` and the status bar turns amber; RDT tries one read every 10 seconds. A secondary MCU that the main MCU reports with a `-240` error is tried every 2 seconds. The console keeps working either way.
+
+**Firmware without the memory commands,** such as operational firmware: turn off **Target > Memory access** (Ctrl+M). RDT then sends only what you type in the console, with no polling, no writes and no ELF check, so the firmware's error queue stays clean. An amber **Memory: Off** chip shows next to the connect button; click it to turn memory access on again. The setting is saved in the workspace.
 
 ### Watch variables
 
@@ -356,6 +358,7 @@ The theme, density, console text size, memory view format and layout are kept pe
 | Ctrl+E | Add expression |
 | Ctrl+G | Add selected to chart |
 | Ctrl+L | Log to CSV |
+| Ctrl+M | Memory access on or off |
 | Ctrl+T | Statistics columns |
 | Ctrl+1 to Ctrl+4 | Show or hide Watch, Scope, Memory, Console |
 | Ctrl+Shift+T | New watch tab |
@@ -392,6 +395,7 @@ Options override what the file says:
 | `--timeout MS` | Reply timeout for every MCU |
 | `--mcu NAME=ID[:ELF]` | Define the MCUs (repeat for each); replaces the file's |
 | `--allow-mismatch` | Let this command read and write an MCU whose ELF does not match its firmware |
+| `--no-memory` | Send no memory reads, writes or ELF check, only `send` and `console` commands (for firmware without the memory commands); `--memory` turns it on for a workspace saved with it off |
 | `-v`, `-vv` | Log link events; log every command and reply |
 
 With no file at all, give the link, profile and MCUs on the command line:
@@ -559,13 +563,14 @@ Turn on `-vv` on the command line to see every command RDT sends and every reply
 | What you see | Why | What to do |
 | --- | --- | --- |
 | Every read times out | The firmware does not answer the read command as written, or the link settings are wrong | Check the profile's read template and terminator; try the command by hand in the console; use **Test read** in the profile editor; type `SYST:ERR?` to read the firmware's error |
-| `Link down`, and the port is still open | The device answered none of the last three reads | Check the board is running; reset it if it hung. The link comes back with the first reply |
+| Amber `memory: no reply` on an MCU card | Three reads in a row got no reply: the firmware has no memory commands, or the board hung | With operational firmware, turn off **Target > Memory access**; otherwise check the board is running. RDT tries one read every 10 seconds |
 | `Link down` after unplugging | The COM port disappeared | Plug it back; RDT reconnects by itself |
 | `ELF does not match the firmware` | The device runs another build than the ELF | Load the matching ELF or flash the matching firmware, then **Check again** |
 | `outside the MCU's known memory` | The address is in no ELF section or listed range | Add the bank or register block to the memory map, if the firmware allows reading it |
 | `read-only` | The item, the workspace default or the section (code, constants) is read-only | Change the item's settings, or turn off **All items read-only** |
 | `not confirmed: wrote ..., read back ...` | The value read back differs from the one written | The firmware may have changed it, or refused the write; check with `SYST:ERR?` |
-| `MCU silent` | A secondary MCU stopped answering (three timeouts in a row, or a `-240` error) | Check that MCU; RDT tries it again every 2 seconds |
+| `MCU silent` | An MCU stopped answering (three reads in a row with no reply, or a `-240` error) | Check that MCU; RDT tries it again every 10 seconds (2 after a `-240`) |
+| `memory off` | Memory access is off (Target > Memory access, or `--no-memory`) | Turn it on, or click the Memory: Off chip |
 | A reply is refused (`BadReply`) | The reply is not comma-separated hex words, or has the wrong number of words | Check the firmware's reply format and the profile's `align` |
 
 Some memory, such as registers, or a core's tightly coupled memory reached through another MCU, can upset the firmware when read. Add only regions the firmware can read safely to the memory map, and keep register blocks as `kind = "peripheral"` so they are read alone at their exact size.

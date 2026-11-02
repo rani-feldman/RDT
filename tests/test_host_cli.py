@@ -376,3 +376,16 @@ def test_commands(sim, tmp_path, monkeypatch):
     assert main(["-w", str(ws), "--tcp", address, "console"], out=out) == 0
     assert out.getvalue().splitlines()[1:3] == ["[no group]", "  CONF:MODE 1"]
     assert run("commands", "clear") == (0, f"removed 2 commands in {ws}\n")
+
+
+def test_no_memory_sends_only_the_console_command(sim):
+    """LNK-12: --no-memory sends no ELF check and refuses reads, for firmware without the
+    memory commands, yet send works."""
+    sent = []
+    handle = sim.device.handle
+    sim.device.handle = lambda line, client="": (sent.append(line), handle(line, client))[1]
+    assert rdt(sim, "--no-memory", "send", "*IDN?")[1].startswith("RDT,Simulator")
+    assert sent == ["*IDN?"]
+    code, out = rdt(sim, "--no-memory", "read", "@main:0x20000010:u32")
+    assert code == 1 and "memory access is off" in out
+    assert sent == ["*IDN?"]

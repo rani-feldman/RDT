@@ -133,13 +133,16 @@ def _read_block(t: Target, block: Block, locs: list[Location | None], samples: l
         # One at a time, so a bad item fails alone. A failed command gets no reply, so each item
         # gets one try: the block already spent its retries, and with full retries per item a
         # hung MCU made one poll take seconds (M2, rani, 2026-10-18, code review).
-        missed = 0
+        missed, error = 0, e
         for i in block.items:
             if missed >= SPLIT_GIVE_UP:
-                samples[i].error, samples[i].time = e, time.time()
+                samples[i].error, samples[i].time = error, time.time()
                 continue
             _read_block(t, Block(block.mcu, locs[i].addr, locs[i].size, [i]), locs, samples, retries=0)
-            missed = missed + 1 if isinstance(samples[i].error, CommandTimeout) else 0
+            if isinstance(samples[i].error, McuSilent):   # the MCU went silent on this item (LNK-12)
+                missed, error = SPLIT_GIVE_UP, samples[i].error
+            else:
+                missed = missed + 1 if isinstance(samples[i].error, CommandTimeout) else 0
         return
     now = time.time()
     for i in block.items:

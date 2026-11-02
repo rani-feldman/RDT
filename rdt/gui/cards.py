@@ -29,7 +29,11 @@ def link_health(t: Target | None, cfg: McuConfig, state) -> tuple[str, str]:
         return GREY, "not connected"
     if state != LinkState.UP:
         return RED, "link down"
+    if not t.memory_access:
+        return GREY, "port open · memory off (console only)"
     st = t.session.mcu_status(cfg.id)
+    if st.silent and st.no_reply:   # such as firmware without the memory commands (LNK-12)
+        return AMBER, f"⚠ memory: no reply · retried every {st.probe_s:g} s"
     if st.silent:
         return GREY, "silent: not answering"
     misses = st.recent_timeouts()

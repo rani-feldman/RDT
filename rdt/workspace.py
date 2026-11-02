@@ -262,6 +262,8 @@ class Workspace:
         d["poll_ms"] = self.poll_ms
         if self.read_only:
             d["read_only"] = True
+        if not cfg.memory_access:
+            d["memory_access"] = False
         c = cfg.connection
         conn: dict = {"transport": c.transport}
         if c.transport == "serial":
