@@ -16,7 +16,7 @@ from PySide6.QtWidgets import (
     QStyledItemDelegate, QTabWidget, QToolButton, QToolTip, QTreeWidget, QTreeWidgetItem, QVBoxLayout, QWidget,
 )
 
-from ..errors import ConfigError, LinkDown, McuSilent, RdtError
+from ..errors import ConfigError, LinkDown, McuSilent, MemoryOff, RdtError
 from ..scaling import FORMATS, Display
 from ..stats import StatsBook, numeric
 from ..symbols import Location, load_symbols
@@ -461,13 +461,13 @@ class WatchTree(DragTree):
         if self.states.get(st.watch.expr) is not st:
             return
         self.blockSignals(True)
-        text = "link down" if isinstance(e, LinkDown) else ("MCU silent" if isinstance(e, McuSilent)
-                                                           else describe_error(e))
+        text = "link down" if isinstance(e, LinkDown) else "MCU silent" if isinstance(e, McuSilent) \
+            else "memory off" if isinstance(e, MemoryOff) else describe_error(e)
         for node in st.nodes.values():
             node.setForeground(COL_VALUE, GREY)
         if not self._is_editing(st.watch.expr):
             st.item.setText(COL_VALUE, text)
-        st.item.setForeground(COL_VALUE, GREY if isinstance(e, (LinkDown, McuSilent)) else ERROR)
+        st.item.setForeground(COL_VALUE, GREY if isinstance(e, (LinkDown, McuSilent, MemoryOff)) else ERROR)
         st.item.setToolTip(COL_VALUE, describe_error(e))
         self.blockSignals(False)
 

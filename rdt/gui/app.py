@@ -174,6 +174,15 @@ class ConnectionBar(QToolBar):
         self.connect_button = QPushButton("Disconnected")
         self.connect_button.setFont(mono())
         self.connect_button.clicked.connect(main.toggle_connection)
+        # Shown only while memory access is off (LNK-12); a click turns it back on.
+        self.memory_chip = QPushButton("Memory: Off")
+        self.memory_chip.setObjectName("memorychip")
+        self.memory_chip.setToolTip("Memory access is off: RDT sends no reads, writes or ELF check, only "
+                                    "the console's commands. Click to turn it on (Ctrl+M)")
+        self.memory_chip.setStyleSheet("QPushButton#memorychip { color: #7a5600; background: #fff3cd; "
+                                       "border: 1px solid #d4a017; border-radius: 4px; padding: 3px 10px; "
+                                       "font-weight: bold }")
+        self.memory_chip.clicked.connect(lambda: main.set_memory_access(True))
         self.poll = QSpinBox()
         self.poll.setRange(0, 3_600_000)
         self.poll.setSingleStep(100)
@@ -203,6 +212,8 @@ class ConnectionBar(QToolBar):
         self.addSeparator()
         self.addWidget(self.profile)
         self.addWidget(self.connect_button)
+        self._memory_chip = self.addWidget(self.memory_chip)
+        self._memory_chip.setVisible(False)
         self.addSeparator()
         self.addWidget(self.polling)
         self.addWidget(self.poll)
@@ -221,6 +232,8 @@ class ConnectionBar(QToolBar):
         self.polling.setToolTip(("Polling the watched items; click to stop all polling, including items with their "
                                  "own interval" if on else "Polling is stopped; click to poll again") + " (F7)")
         fg, bg = ("#ffffff", "#1f8a4c") if on else ("#ffffff", "#c62828")
+        if not self.polling.isEnabled():   # memory access is off (LNK-12)
+            fg, bg = "#9a9a9a", "#e4e4e4"
         self.polling.setStyleSheet(f"QPushButton#runstop {{ color: {fg}; background: {bg}; border: none;"
                                    " border-radius: 3px; padding: 4px 12px; font-weight: bold; letter-spacing: 1px; }")
 
@@ -267,6 +280,15 @@ class ConnectionBar(QToolBar):
             w.blockSignals(False)
         self._kind(c.transport)
         self.show_profile(ws)
+        self.show_memory_access(ws.config.memory_access)
+
+    def show_memory_access(self, on: bool) -> None:
+        """With memory access off the chip shows and polling can't be started (LNK-12)."""
+        self._memory_chip.setVisible(not on)
+        for w in (self.polling, self.poll_now):
+            w.setEnabled(on)
+        self.poll.setEnabled(on and self.polling.isChecked())
+        self.show_polling()
 
     def show_profile(self, ws: Workspace) -> None:
         cfg = ws.config
@@ -442,8 +464,6 @@ def plug_icon(color: str) -> QIcon:
 LINK_TIPS = {   # the connect button's tooltip for each link state (LNK-9)
     LinkState.UP: "The port is open",
     LinkState.DOWN: "The port broke, such as a USB COM port unplugged; RDT reconnects by itself",
-    LinkState.NO_REPLY: "The port is open but the device answered none of the last reads; "
-                        "writes are refused until it answers again",
     LinkState.CLOSED: "Not connected",
 }
 
@@ -591,6 +611,10 @@ class MainWindow(QMainWindow):
         action(m, "SCPI &profile...", self.edit_profile)
         action(m, "&MCUs and ELF files...", self.edit_mcus)
         m.addSeparator()
+        self.memory_action = action(m, "&Memory access", lambda: self.set_memory_access(self.memory_action.isChecked()),
+                                    "Ctrl+M")
+        self.memory_action.setCheckable(True)
+        self.memory_action.setChecked(True)
         action(m, "Check ELF &identity", lambda: self.check_identity())
         m = self.menu_bar.addMenu("&Watch")
         action(m, "&Add expression...", self.add_expression, "Ctrl+E")
@@ -782,6 +806,7 @@ class MainWindow(QMainWindow):
         self.memory.set_workspace(self.ws)
         self.console.set_workspace(self.ws)
         self.read_only_action.setChecked(self.ws.read_only)
+        self.memory_action.setChecked(self.ws.config.memory_access)
         self.set_dirty(False)
 
     @property
@@ -1178,6 +1203,29 @@ class MainWindow(QMainWindow):
             self.status("Every item is read-only unless its settings allow writes" if on
                         else "Items are writable unless their settings make them read-only")
 
+    def set_memory_access(self, on: bool) -> None:
+        """Memory access on or off (LNK-12, rani, 2026-11-02). Off is for firmware without the
+        memory commands, such as operational firmware: only console commands are sent, so the
+        device's error queue fills with nothing of RDT's. Saved in the workspace."""
+        self.memory_action.setChecked(on)
+        self.bar.show_memory_access(on)
+        if on == self.ws.config.memory_access and (self.device.target is None
+                                                   or self.device.target.memory_access == on):
+            return
+        self.ws.config.memory_access = on
+        self.set_dirty()
+        self.device.submit(lambda t: t.set_memory_access(on), lambda _: self._memory_access_set(on))
+        if self.device.target is None:
+            self._memory_access_set(on)
+
+    def _memory_access_set(self, on: bool) -> None:
+        self.status("Memory access on: watched items are read again" if on else
+                    "Memory access off: RDT sends only the console's commands; no reads, writes or ELF check")
+        self.console.log("Memory access " + ("on" if on else "off: only console commands are sent"), "note")
+        self._show_state()
+        if on and self.device.target is not None:
+            self.read_all()
+
     def set_poll_ms(self, ms: int) -> None:
         if ms != self.ws.poll_ms:
             self.ws.poll_ms = ms
@@ -1227,6 +1275,12 @@ class MainWindow(QMainWindow):
 
     def _opened(self, t) -> None:
         self._connecting = False
+        if not t.memory_access:
+            self.status(f"Connected to {self.ws.config.connection.describe()}; memory access is off, "
+                        "so only console commands are sent")
+            self.console.log("Memory access off: no reads, writes or ELF check are sent", "note")
+            self._show_state()
+            return
         results = [m.identity for m in t.mcus.values() if m.identity is not None]
         self.status(f"Connected to {self.ws.config.connection.describe()}; " + identity_summary(results))
         self.show_identity(results)
@@ -1269,7 +1323,7 @@ class MainWindow(QMainWindow):
             word, look, click = "Connecting", "busy", "Click to cancel"
         elif state == LinkState.UP:
             word, look, click = "Connected", "up", "Click to disconnect"
-        elif state in (LinkState.DOWN, LinkState.NO_REPLY):
+        elif state == LinkState.DOWN:
             word, look, click = "Link down", "down", "Click to disconnect"
         else:
             word, look, click = "Disconnected", "off", "Click to connect"
@@ -1298,10 +1352,10 @@ class MainWindow(QMainWindow):
         self._show_strip(look, text)
         self._show_mismatch(up)
         self.symbols.show_health(t, state if t is not None else None)
-        self.memory.setEnabled(up)
-        # With no reply the port is still open, so the console can send, such as to see whether
-        # the device answers anything.
-        self.console.set_link_up(up or state == LinkState.NO_REPLY)
+        self.memory.setEnabled(up and self.ws.config.memory_access)
+        # The console needs only the open port: an MCU whose memory reads get no reply, or memory
+        # access turned off, leaves it working (LNK-12).
+        self.console.set_link_up(up)
         for w in (self.bar.transport, self.bar.host, self.bar.port, self.bar.com, self.bar.baud):
             w.setEnabled(self.device.target is None and not self._connecting)
 
@@ -1312,8 +1366,14 @@ class MainWindow(QMainWindow):
         if t is not None and self.device.state == LinkState.UP:
             for m in self.ws.config.mcus:
                 st = t.session.mcu_status(m.id)
-                parts.append(f"\u25cf {m.name} " + ("silent" if st.silent else
-                                                     f"{st.reply_ms:.0f} ms" if st.reply_ms is not None else "\u2013"))
+                if not t.memory_access:
+                    shown = "memory off"
+                elif st.silent:
+                    shown = "no reply" if st.no_reply else "silent"
+                    look = "busy" if look == "up" else look   # amber: the port is open, reads go unanswered
+                else:
+                    shown = f"{st.reply_ms:.0f} ms" if st.reply_ms is not None else "\u2013"
+                parts.append(f"\u25cf {m.name} {shown}")
         self.link_label.setText("   ".join(parts) + " ")
         colors = (theme().strip or {}).get(look)
         if colors == self._strip:

@@ -8,7 +8,7 @@ import pytest
 
 from rdt import Profile
 from rdt.csvlog import CsvLog, cell
-from rdt.errors import CommandTimeout, SymbolError
+from rdt.errors import CommandTimeout, McuSilent, SymbolError
 from rdt.scheduler import plan, read_many
 from rdt.stats import StatsBook
 from rdt.symbols import EnumValue
@@ -132,7 +132,9 @@ def test_a_hung_mcu_costs_a_poll_a_few_timeouts(sim):
         started = time.monotonic()
         samples = read_many(t, exprs)
         took = time.monotonic() - started
-        assert all(isinstance(s.error, CommandTimeout) for s in samples[:-1])
+        # The third read with no reply makes MCU 0 silent (LNK-12); the rest are not sent.
+        assert all(isinstance(s.error, (CommandTimeout, McuSilent)) for s in samples[:-1])
+        assert isinstance(samples[-2].error, McuSilent)
         assert samples[-1].error is None and samples[-1].data is not None   # MCU 1 is still read
         # the block with its retries, then two items tried once each, then MCU 1
         assert [(m, r) for m, _, r in reads] == [(0, None), (0, 0), (0, 0), (1, None)] and reads[0][1] == 0x24

@@ -746,8 +746,9 @@ class Console(QWidget):
 
     def send(self, text: str) -> None:
         self.log(text, "tx")
+        # Ahead of any waiting poll, so the console answers at once (LNK-12).
         self.main.device.submit(lambda t: run_command(t, text), self._reply,
-                                lambda e: self.log(f"error: {describe_error(e)}", "error"))
+                                lambda e: self.log(f"error: {describe_error(e)}", "error"), urgent=True)
 
     def _reply(self, reply: str | None) -> None:
         if reply is None:

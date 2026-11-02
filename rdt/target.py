@@ -23,7 +23,7 @@ import tomllib
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from .errors import AccessRefused, ConfigError, ImageMismatch, RdtError, SymbolError, WriteRefused
+from .errors import AccessRefused, ConfigError, ImageMismatch, MemoryOff, RdtError, SymbolError, WriteRefused
 from .memmap import ElfInfo, MemoryMap, build_id_note, elf_bytes, flash_samples, load_elf_sections
 from .profile import Profile, Range, load_memory_file
 from .session import LinkState, Session
@@ -106,6 +106,9 @@ class TargetConfig:
     mcus: list[McuConfig] = field(default_factory=list)
     profile_path: Path | None = None   # where the profile came from, if it is a file of its own
     memory_path: Path | None = None    # the memory file (bench.memory.toml) holding the ranges, if any
+    # False for firmware without the memory commands, such as operational firmware: RDT then sends
+    # no reads, writes or ELF check, only what is typed in the console (LNK-12, rani, 2026-11-02).
+    memory_access: bool = True
 
     @classmethod
     def load(cls, path: str | Path) -> TargetConfig:
@@ -161,7 +164,10 @@ class TargetConfig:
                 short=check_short(str(t["short"])) if t.get("short") else None,
                 color=check_color(str(t["color"])) if t.get("color") else None,
             ))
-        return cls(connection, profile, mcus, profile_path, memory_path)
+        memory_access = raw.get("memory_access", True)
+        if not isinstance(memory_access, bool):
+            raise ConfigError("memory_access must be true or false")
+        return cls(connection, profile, mcus, profile_path, memory_path, memory_access)
 
 
 class Mcu:
@@ -300,8 +306,23 @@ class Target:
 
     # --- link --------------------------------------------------------------------------------
 
+    @property
+    def memory_access(self) -> bool:
+        """False when memory access is off: reads and writes are refused before anything is sent,
+        and the ELFs are not checked (LNK-12)."""
+        return self.config.memory_access
+
+    def set_memory_access(self, on: bool) -> None:
+        """Turn memory access on or off. Turned on, each ELF is checked against its firmware
+        before the next read or write, since none was checked while it was off."""
+        self.config.memory_access = on
+        for m in self.mcus.values():
+            m.identity, m.allow_mismatch = None, False
+            m.identity_stale = on and m.elf is not None
+
     def connect(self, check_identity: bool = True) -> Target:
-        """Open the link, then check each MCU's ELF against its firmware (SYM-8)."""
+        """Open the link, then check each MCU's ELF against its firmware (SYM-8), unless memory
+        access is off."""
         self.session.connect()
         if check_identity:
             self.check_identity()
@@ -321,10 +342,10 @@ class Target:
     # --- ELF identity (SYM-8) -----------------------------------------------------------------
 
     def _link_event(self, event: str, info: dict) -> None:
-        """The firmware may have been flashed while the link was down, the device gave no reply,
-        or the MCU was silent (a reset drops a USB COM port), so its identity is checked again before the next write. An
+        """The firmware may have been flashed while the link was down or the MCU was silent (a
+        reset drops a USB COM port), so its identity is checked again before the next write. An
         MCU with nothing to compare is left alone."""
-        if event == "link" and info["state"] in (LinkState.DOWN, LinkState.NO_REPLY):
+        if event == "link" and info["state"] is LinkState.DOWN:
             gone = list(self.mcus.values())
         elif event == "mcu" and info["silent"]:
             gone = [m for m in self.mcus.values() if m.id == info["mcu"]]
@@ -347,9 +368,15 @@ class Target:
         ``allow_mismatch`` is called. A silent MCU is marked ``unread`` and is not blocked.
 
         ``keep_allowed`` keeps an ``allow_mismatch`` in force: the automatic check after the link
-        or the MCU comes back uses it, so ``--allow-mismatch`` lasts the whole command (M1)."""
+        or the MCU comes back uses it, so ``--allow-mismatch`` lasts the whole command (M1).
+
+        With memory access off nothing is read, and each MCU is ``unchecked``."""
         out = []
         for m in [self.mcu(mcu)] if mcu is not None else self.mcus.values():
+            if not self.memory_access:
+                m.identity, m.identity_stale = Identity(m.name, "unchecked", "memory access is off"), False
+                out.append(m.identity)
+                continue
             m.identity = self._identity(m)
             m.identity_stale = m.identity.status == "unread"   # try again when it answers
             if not keep_allowed:
@@ -481,6 +508,9 @@ class Target:
                                 f"the firmware ({m.identity.detail}); load the right ELF, or allow access anyway")
 
     def _check(self, m: Mcu, addr: int, size: int, write: bool) -> list:
+        if not self.memory_access:
+            raise MemoryOff(f"MCU {m.name}: memory access is off; only console commands are sent "
+                            "(turn it on in Target > Memory access)")
         try:
             return m.memory.check_aligned(addr, size, self.align, write)
         except AccessRefused as e:

@@ -119,3 +119,16 @@ def test_garbage_is_collected_on_the_gui_thread(qtbot, dev):
         x.append(x)
     assert gc.get_count()[0] > before
     qtbot.waitUntil(lambda: gc.get_count()[0] < gc.get_threshold()[0], timeout=3000)
+
+
+def test_urgent_jobs_go_ahead_of_waiting_jobs(qtbot, dev):
+    """LNK-12: a console command is not kept behind polls that time out."""
+    ran = []
+    dev.submit(lambda w: time.sleep(0.2) or ran.append("running"), needs_target=False)
+    qtbot.wait(50)                 # the first job is running
+    for name in ("poll 1", "poll 2"):
+        dev.submit(lambda w, n=name: ran.append(n), needs_target=False)
+    for name in ("console 1", "console 2"):
+        dev.submit(lambda w, n=name: ran.append(n), needs_target=False, urgent=True)
+    settle(qtbot, dev)
+    assert ran == ["running", "console 1", "console 2", "poll 1", "poll 2"]
