@@ -36,6 +36,11 @@ class AccessRefused(RdtError):
     """The address range is outside the MCU's ELF memory and the listed ranges, or is read-only."""
 
 
+class MemoryOff(RdtError):
+    """Memory access is turned off for this target, such as for operational firmware without the
+    memory commands: nothing but console commands is sent (LNK-12)."""
+
+
 class McuSilent(RdtError):
     """A secondary MCU stopped answering. Only that MCU's accesses fail; the others keep working."""
 

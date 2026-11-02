@@ -88,8 +88,8 @@ def test_allowed_mismatch_lasts_through_the_automatic_check_again(sim, tmp_path)
     three missed replies; only a check the user asks for (connect, reconnect) resets it."""
     with make_target("tcp", sim.tcp_address, mcus=mcus(other_build(tmp_path))) as t:
         t.allow_mismatch("main")
-        t.session._set_state(LinkState.NO_REPLY, "test")   # as after 3 reads with no reply
-        t.session._set_state(LinkState.UP)
+        t.session._mark_silent(0, "test", no_reply=True)   # as after 3 reads with no reply
+        t.session._mcu_answered(0)
         assert t.mcus["main"].identity_stale
         assert t.read_value("main:gains[0]") == 10           # checked again, still allowed
         m = t.mcus["main"]

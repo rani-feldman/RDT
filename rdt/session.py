@@ -10,15 +10,17 @@ The session is where the firmware's habits are handled:
   (read-modify-write). A neighbouring value the firmware changes in between is overwritten.
   The words are read twice and used only when both reads agree, since replies carry no tag and
   a late reply to an earlier read could otherwise be patched and written back.
-- A secondary MCU that stops answering is marked silent: on a -240 error reply, or after three
-  timeouts in a row. Only that MCU's accesses fail, and it is tried again every few seconds.
+- An MCU that stops answering is marked silent: a secondary MCU on a -240 error reply, and any
+  MCU, the main one too, after three reads in a row with no reply (after their retries). Only that MCU's reads and
+  writes fail at once, without being sent; one read is let through every few seconds to see
+  whether it answers again (every 10 s after timeouts, since each costs a whole timeout).
 - When the port or socket breaks, the session goes down, refuses accesses, and reconnects in the
   background with a growing delay. A watcher checks the port or socket every second while the
   session is idle, without sending anything, so an unplugged USB COM port is noticed with polling
   off too.
-- When the device as a whole stops answering (the last three reads to any MCU got no reply at
-  all) while the port stays open, the link is "no reply": writes are refused, reads still go out,
-  and the first reply brings the link back up.
+- Reads that get no reply never take the link down: the link is down only when the port or
+  socket breaks. Firmware without the memory commands (operational firmware) answers no read,
+  yet its console commands work, so the console must stay usable (LNK-12, rani, 2026-11-02).
 
 One lock serialises every exchange, so the GUI's poller and its console can share a session.
 """
@@ -48,7 +50,6 @@ class LinkState(Enum):
     CLOSED = "closed"
     UP = "up"
     DOWN = "down"            # the port or socket broke; reconnecting
-    NO_REPLY = "no reply"    # the port is open but the device answers nothing
 
 
 @dataclass
@@ -56,6 +57,8 @@ class McuStatus:
     silent: bool = False
     timeouts_in_row: int = 0
     last_probe: float = 0.0
+    probe_s: float = 2.0              # how often a silent MCU is tried again
+    no_reply: bool = False            # silent because reads got no reply, not by a -240 error
     reply_ms: float | None = None     # how long the MCU takes to answer a read, smoothed (GUI-14)
     timeouts: list[float] = field(default_factory=list)   # when reads timed out, the last minute
     # The session's thread adds timeouts while the GUI thread counts and prunes them (L13).
@@ -78,9 +81,9 @@ Listener = Callable[[str, dict], None]
 
 
 class Session:
-    SILENT_AFTER = 3            # timeouts in a row that mark a secondary MCU silent
-    SILENT_PROBE_S = 2.0        # how often a silent MCU is tried again
-    NO_REPLY_AFTER = 3          # reads in a row with no reply from any MCU before the link is "no reply"
+    SILENT_AFTER = 3            # reads in a row with no reply that mark an MCU silent (LNK-12)
+    SILENT_PROBE_S = 2.0        # how often an MCU silent by a -240 reply is tried again
+    NO_REPLY_PROBE_S = 10.0     # how often an MCU whose reads got no reply is tried again (LNK-12)
     WATCH_S = 1.0               # how often an idle port or socket is checked
     RECONNECT_DELAYS = (0.25, 0.5, 1.0, 2.0, 4.0, 5.0)
     RETRY_DELAY_S = 0.05        # first delay before re-sending a timed-out read; doubles each time
@@ -111,7 +114,6 @@ class Session:
         self._stop = threading.Event()
         self._reconnector: threading.Thread | None = None
         self._watcher: threading.Thread | None = None
-        self._unanswered = 0     # reads in a row that got no reply from the device at all
 
     # --- events ------------------------------------------------------------------------------
 
@@ -152,7 +154,6 @@ class Session:
     def _open(self) -> None:
         self.transport.open()
         self.max_response = self.profile.max_response
-        self._unanswered = 0
         for st in self._mcus.values():
             st.timeouts_in_row = 0
 
@@ -160,12 +161,12 @@ class Session:
         """Check the port or socket while nothing else uses it, sending nothing (LNK-7), so a COM
         port that disappears takes the link down even with polling off."""
         while not self._stop.wait(self.WATCH_S):
-            if self.state not in (LinkState.UP, LinkState.NO_REPLY):
+            if self.state is not LinkState.UP:
                 continue
             if not self._lock.acquire(blocking=False):
                 continue      # an exchange is running; it notices a broken port by itself
             try:
-                if self.state in (LinkState.UP, LinkState.NO_REPLY):
+                if self.state is LinkState.UP:
                     self.transport.check()
             except LinkError as e:
                 self._link_lost(str(e))
@@ -223,19 +224,6 @@ class Session:
         if self.state is LinkState.DOWN:
             raise LinkDown(f"link down: {self.down_reason}")
 
-    def _device_answered(self) -> None:
-        self._unanswered = 0
-        if self.state is LinkState.NO_REPLY:
-            self._set_state(LinkState.UP)
-
-    def _device_unanswered(self) -> None:
-        """A read got no reply at all. After a few in a row from any MCU the device is not
-        answering, though the port is still open: a hung or reset board."""
-        self._unanswered += 1
-        if self._unanswered >= self.NO_REPLY_AFTER and self.state is LinkState.UP:
-            self._set_state(LinkState.NO_REPLY,
-                            f"the device did not answer the last {self._unanswered} reads; the port is still open")
-
     # --- MCUs --------------------------------------------------------------------------------
 
     def timeout_s(self, mcu: int) -> float:
@@ -250,8 +238,10 @@ class Session:
     def is_silent(self, mcu: int) -> bool:
         return self.mcu_status(mcu).silent
 
-    def _mark_silent(self, mcu: int, why: str) -> McuSilent:
+    def _mark_silent(self, mcu: int, why: str, no_reply: bool = False) -> McuSilent:
         st = self.mcu_status(mcu)
+        st.no_reply = no_reply
+        st.probe_s = self.NO_REPLY_PROBE_S if no_reply else self.SILENT_PROBE_S
         if not st.silent:
             st.silent = True
             log.info("MCU %d silent: %s", mcu, why)
@@ -263,7 +253,7 @@ class Session:
         st = self.mcu_status(mcu)
         st.timeouts_in_row = 0
         if st.silent:
-            st.silent = False
+            st.silent = st.no_reply = False
             log.info("MCU %d answers again", mcu)
             self._emit("mcu", mcu=mcu, silent=False, reason="")
 
@@ -288,13 +278,14 @@ class Session:
         self._require_up()
         st = self.mcu_status(mcu)
         if st.silent:
-            if time.monotonic() - st.last_probe < self.SILENT_PROBE_S:
-                raise McuSilent(f"{self._name(mcu)} is not responding; retried every {self.SILENT_PROBE_S:g} s")
+            if time.monotonic() - st.last_probe < st.probe_s:
+                raise McuSilent(f"{self._name(mcu)} is not responding; retried every {st.probe_s:g} s")
             st.last_probe = time.monotonic()
             attempts = 1
-        elif self.state is LinkState.NO_REPLY:
-            # The device answered none of the last reads: retrying each read would only multiply
-            # the wait; the first reply brings the link back up anyway (M2).
+        elif st.timeouts_in_row:
+            # The last read got no reply even with its retries, so this one is tried once: an
+            # MCU that does not answer at all, such as firmware without the memory commands,
+            # goes silent after a few timeouts, not three times as many (LNK-12).
             attempts = 1
         else:
             attempts = 1 + (self.profile.retries if retries is None else retries)
@@ -314,31 +305,28 @@ class Session:
                     # Perhaps a late reply meant for an earlier command; the next send flushes it.
                     log.debug("%s: %s", what, e)
                     bad = e
-                    self._device_answered()
                     continue
                 except CommandRejected as e:
-                    self._device_answered()
                     if mcu != 0 and e.error.code == MCU_NOT_RESPONDING:
                         raise self._mark_silent(mcu, str(e.error)) from None
                     raise
                 if data is not None:
                     ms = (time.monotonic() - sent) * 1000.0
                     st.reply_ms = ms if st.reply_ms is None else 0.8 * st.reply_ms + 0.2 * ms
-                    self._device_answered()
                     self._mcu_answered(mcu)
                     return data
                 st.add_timeout()
-                if mcu != 0:
-                    st.timeouts_in_row += 1
-                    if st.timeouts_in_row >= self.SILENT_AFTER:
-                        if bad is None:
-                            self._device_unanswered()
-                        raise self._mark_silent(mcu, f"{st.timeouts_in_row} timeouts in a row")
         except LinkError as e:
             raise self._link_lost(str(e)) from None
         if bad is not None:
             raise BadReply(f"{what}: {bad}")
-        self._device_unanswered()
+        # Three reads in a row with no reply, after their retries, make the MCU silent, the main
+        # MCU too, so its polling pauses and the console is not kept waiting behind reads that
+        # time out, such as on firmware without the memory commands. The link stays up (LNK-12).
+        # Counted per read, not per try, so datagrams lost over UDP don't silence an MCU.
+        st.timeouts_in_row += 1
+        if st.timeouts_in_row >= self.SILENT_AFTER:
+            raise self._mark_silent(mcu, f"no reply to {st.timeouts_in_row} reads in a row", no_reply=True)
         raise CommandTimeout(f"no reply to {what}")
 
     # --- writes ------------------------------------------------------------------------------
@@ -357,8 +345,6 @@ class Session:
         off = addr - start
         with self._lock:
             self._require_up()
-            if self.state is LinkState.NO_REPLY:
-                raise LinkDown(f"link down: {self.down_reason}; write refused")
             if self.is_silent(mcu):
                 raise McuSilent(f"{self._name(mcu)} is not responding; write refused")
             if (start, end) == (addr, addr + len(data)):
@@ -458,10 +444,7 @@ class Session:
             self._require_up()
             try:
                 if expect_reply:
-                    reply = self.protocol.query(text, timeout)
-                    if reply is not None:
-                        self._device_answered()
-                    return reply
+                    return self.protocol.query(text, timeout)
                 self.protocol.send(text)
                 return None
             except LinkError as e:
