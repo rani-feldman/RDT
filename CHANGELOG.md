@@ -15,6 +15,7 @@ section. RDT shows this file in **Help > Release notes**.
 
 ### Bug fixes
 
+- With the Watch panel turned off, the other panels no longer keep shrinking.
 - The console keeps working when memory reads get no reply, such as with operational firmware: the link no longer turns red, that MCU's card shows "memory: no reply" and its polling pauses (tried again every 10 s), and console commands no longer wait behind polls.
 
 ## 1.1.0 (2026-10-28)

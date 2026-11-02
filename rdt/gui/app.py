@@ -24,6 +24,8 @@ from PySide6.QtWidgets import (
 )
 from shiboken6 import Shiboken
 
+QWIDGETSIZE_MAX = (1 << 24) - 1   # Qt's largest widget size, as QWIDGETSIZE_MAX in C++
+
 from ..console import history_path
 from ..csvlog import CsvLog
 from ..errors import ConfigError, LinkDown
@@ -508,7 +510,15 @@ class MainWindow(QMainWindow):
         self.watch_tabs.sampled.connect(lambda _: self._chart_dropped())
         for w in (self.chart.plot.viewport(), self.chart.list.viewport()):
             DropTarget(w, self.drop_on_chart)
-        self.setCentralWidget(self.watch_tabs)
+        # The watch tabs sit in a holder that stays in the window when the Watch panel is hidden.
+        # Hiding the central widget itself makes Qt widen the left dock area by a few pixels on
+        # every relayout (the 250 ms state update is one), so the other panels kept shrinking
+        # (rani, 2026-11-02). A holder of zero height (or width) keeps the docks still.
+        self.watch_holder = QWidget()
+        holder = QVBoxLayout(self.watch_holder)
+        holder.setContentsMargins(0, 0, 0, 0)
+        holder.addWidget(self.watch_tabs)
+        self.setCentralWidget(self.watch_holder)
         self.symbols = McuCards(self)
         self.symbols.add_requested.connect(lambda expr: self.watch_tabs.add_watch(expr))
         self.console = Console(self)
@@ -538,6 +548,8 @@ class MainWindow(QMainWindow):
         self.resizeDocks([self.docks["Target"]], [300], Qt.Horizontal)
         for dock in self.docks.values():   # a tab brought to the front or a panel shown or hidden by hand
             dock.visibilityChanged.connect(lambda _=False: QTimer.singleShot(0, self.sync_panel_buttons))
+            dock.visibilityChanged.connect(lambda _=False: QTimer.singleShot(0, self._fit_watch_holder))
+            dock.dockLocationChanged.connect(lambda _=None: QTimer.singleShot(0, self._fit_watch_holder))
         self.tabifiedDockWidgetActivated.connect(lambda _=None: QTimer.singleShot(0, self.sync_panel_buttons))
         self.menu_bar = titlebar.install(self)
         self._menus()
@@ -863,8 +875,8 @@ class MainWindow(QMainWindow):
         """Show or hide one panel: the watch tabs, the chart (Scope), the memory view or the
         console. A panel behind another tab is brought to the front instead of hidden."""
         if name == "watch":
-            on = self.centralWidget().isHidden() if on is None else on
-            self.centralWidget().setVisible(on)
+            on = self.watch_tabs.isHidden() if on is None else on
+            self.show_watch(on)
             self.modes.show_panel("watch", on)
         else:
             dock = self.docks[PANEL_DOCK[name]]
@@ -874,21 +886,57 @@ class MainWindow(QMainWindow):
                 dock.raise_()
         self.save_layout()
 
+    def show_watch(self, on: bool) -> None:
+        """Show or hide the watch tabs. The holder around them stays, squeezed to nothing (see
+        __init__), so the docks fill the window without creeping."""
+        if on == (not self.watch_tabs.isHidden()):
+            return
+        if not on:   # the panels' sizes, given back when the watch tabs come back
+            self._sizes_before_watch_off = {d: (d.width(), d.height()) for d in self.docks.values()
+                                            if self._in_front(d) and not d.isFloating()}
+        self.watch_tabs.setVisible(on)
+        self._fit_watch_holder()
+        sizes = getattr(self, "_sizes_before_watch_off", None)
+        if on and sizes:
+            self._sizes_before_watch_off = None
+            QTimer.singleShot(0, lambda: self._give_back_sizes(sizes))
+
+    def _give_back_sizes(self, sizes: dict) -> None:
+        docks = [d for d in sizes if not d.isHidden() and not d.isFloating() and Shiboken.isValid(d)]
+        tall = [d for d in docks if self.dockWidgetArea(d) in (Qt.TopDockWidgetArea, Qt.BottomDockWidgetArea)]
+        if tall:
+            self.resizeDocks(tall, [sizes[d][1] for d in tall], Qt.Vertical)
+
+    def _fit_watch_holder(self) -> None:
+        """With the watch tabs hidden, the holder gets zero height when a panel is docked above
+        or below it, so those panels take the full height, and zero width otherwise."""
+        h = self.watch_holder
+        if not self.watch_tabs.isHidden():
+            h.setMaximumSize(QWIDGETSIZE_MAX, QWIDGETSIZE_MAX)
+            return
+        stacked = any(not d.isHidden() and not d.isFloating()
+                      and self.dockWidgetArea(d) in (Qt.TopDockWidgetArea, Qt.BottomDockWidgetArea)
+                      for d in self.docks.values())
+        if stacked:
+            h.setMaximumSize(QWIDGETSIZE_MAX, 0)
+        else:
+            h.setMaximumSize(0, QWIDGETSIZE_MAX)
+
     def save_layout(self) -> None:
         """Remember which panels are shown and where they sit and how big they are."""
         self.ui.set_value("session/layout", bytes(self.saveState().toBase64()).decode())
-        self.ui.set_value("session/watch_shown", not self.centralWidget().isHidden())
+        self.ui.set_value("session/watch_shown", not self.watch_tabs.isHidden())
 
     def restore_layout(self) -> None:
         saved = self.ui.value("session/layout", "")
         if saved:
             self.restoreState(QByteArray.fromBase64(saved.encode()))
-        self.centralWidget().setVisible(bool(self.ui.value("session/watch_shown", True)))
+        self.show_watch(bool(self.ui.value("session/watch_shown", True)))
         self.modes.restyle(self, QApplication.palette().text().color().name())   # where the theme puts them
         self.sync_panel_buttons()
 
     def sync_panel_buttons(self) -> None:
-        self.modes.show_panel("watch", not self.centralWidget().isHidden())
+        self.modes.show_panel("watch", not self.watch_tabs.isHidden())
         for name, title in PANEL_DOCK.items():
             self.modes.show_panel(name, self._in_front(self.docks[title]))
 
@@ -918,7 +966,7 @@ class MainWindow(QMainWindow):
         self.tabifyDockWidget(d["Console"], d["Memory"])
         for dock in d.values():
             dock.setVisible(True)
-        self.centralWidget().setVisible(True)
+        self.show_watch(True)
         d["Chart"].raise_()
         self.resizeDocks([d["Target"], d["Chart"]], [300, 300], Qt.Horizontal)
         self.resizeDocks([d["Chart"]], [300], Qt.Vertical)

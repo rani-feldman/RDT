@@ -1215,11 +1215,11 @@ def test_panel_buttons(qtbot, win):
     assert btn["watch"].isChecked()
     btn["scope"].click()                       # the chart is in front of the console and memory tabs: hides
     assert win.docks["Chart"].isHidden() and not btn["scope"].isChecked()
-    assert win.docks["Target"].isVisible() and win.centralWidget().isVisible()
+    assert win.docks["Target"].isVisible() and win.watch_tabs.isVisible()
     btn["scope"].click()
     qtbot.waitUntil(lambda: not win.docks["Chart"].isHidden() and btn["scope"].isChecked())
     btn["watch"].click()
-    assert win.centralWidget().isHidden() and not btn["watch"].isChecked()
+    assert win.watch_tabs.isHidden() and not btn["watch"].isChecked()
     shortcut = next(a for a in win.findChildren(QAction) if a.shortcut().toString() == "Ctrl+4")
     shortcut.trigger()                         # Console is behind the chart: comes to the front
     qtbot.waitUntil(lambda: btn["console"].isChecked() and not win.docks["Console"].visibleRegion().isEmpty())
@@ -1227,7 +1227,25 @@ def test_panel_buttons(qtbot, win):
     qtbot.waitUntil(lambda: win.docks["Console"].isHidden() and not btn["console"].isChecked())
     assert win.ui.value("session/layout") and win.ui.value("session/watch_shown") is False
     win.reset_layout()
-    assert win.centralWidget().isVisible() and btn["watch"].isChecked() and btn["scope"].isChecked()
+    assert win.watch_tabs.isVisible() and btn["watch"].isChecked() and btn["scope"].isChecked()
+
+
+def test_hidden_watch_tabs_keep_the_panels_still(qtbot, win):
+    """With the Watch panel off the other panels must not creep: hiding Qt's central widget
+    widened the left dock a few pixels on every relayout (rani, 2026-11-02). The watch tabs'
+    holder stays, at zero height while the chart is docked below it."""
+    win.show()
+    qtbot.wait(100)
+    target = win.docks["Target"].width()
+    win.modes.buttons["watch"].click()
+    assert win.watch_tabs.isHidden() and not win.watch_holder.isHidden()
+    assert win.watch_holder.maximumHeight() == 0
+    for _ in range(5):
+        win.layout().invalidate()
+        qtbot.wait(50)
+    assert win.docks["Target"].width() == target
+    win.modes.buttons["watch"].click()
+    assert win.watch_tabs.isVisible() and win.watch_holder.maximumHeight() > 10000
 
 
 # --- look and feel (LNF-1..8) --------------------------------------------------------------------
