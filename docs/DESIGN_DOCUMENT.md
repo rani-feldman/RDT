@@ -64,9 +64,10 @@ Each requirement links to its design section.
 | LNK-6 | Other tools may use the firmware's SCPI port over LAN at the same time as RDT (2026-10-05) | Done | [D-LNK-6](#d-lnk-6-sharing-the-link-with-other-tools) |
 | LNK-7 | Connected means the COM port or socket opened; RDT sends nothing to the device on connect or reconnect (no `*IDN?`) and sends no probe; when the link shows as down is LNK-9 (2026-10-14) | Done | [D-LNK-7](#d-lnk-7-connect-without-a-probe) |
 | LNK-8 | The GUI lists each COM port with its description, such as `COM3 - GAC serial port (COM3)` (2026-10-13) | Done | [D-LNK-1](#d-lnk-1-com-port) |
-| LNK-9 | The link shows as down (red `Link down · COM3`) when the port or socket breaks, noticed within a second even with polling off, or when the device answers none of 3 reads in a row from any MCU while the port stays open ("no reply"). While the link is down the MCU cards show `link down` (GUI-14) and writes are refused, and the ELFs are checked again when it comes back (2026-10-14; the default chosen in the thread "Status box on lost connection", not yet confirmed by rani) | Done | [D-LNK-9](#d-lnk-9-noticing-a-lost-link) |
+| LNK-9 | The link shows as down (red `Link down · COM3`) when the port or socket breaks, noticed within a second even with polling off, (the "no reply" state for unanswered reads was replaced by LNK-12 on 2026-11-02). While the link is down the MCU cards show `link down` (GUI-14) and writes are refused, and the ELFs are checked again when it comes back (2026-10-14; the default chosen in the thread "Status box on lost connection", not yet confirmed by rani) | Done | [D-LNK-9](#d-lnk-9-noticing-a-lost-link) |
 | LNK-10 | The COM port list in the toolbar is rescanned each time it opens, so unplugged ports disappear and newly plugged ports appear; the port already picked or typed stays shown (rani, 2026-10-18) | Done | [D-LNK-10](#d-lnk-10-com-port-list-rescanned-on-open) |
 | LNK-11 | A late reply to a read that timed out is dropped, never taken as the reply to the next command; a read-modify-write uses the words around the value only when two reads in a row agree, except in a peripheral range, which is read once (rani asked for every finding of the code review to be fixed, 2026-10-18) | Done | [D-LNK-11](#d-lnk-11-late-replies) |
+| LNK-12 | The console keeps working when the firmware has no memory commands, such as operational firmware, or when they fail: reads that get no reply never take the link down, they make that MCU silent (`memory: no reply`, polling paused, tried again every 10 s), and console commands go ahead of waiting polls. A Memory access switch (Target > Memory access, Ctrl+M, the `Memory: Off` chip, CLI `--no-memory`, saved in the workspace) turns memory access off so only console commands are sent (rani, 2026-11-02; rani picked both from a mockup) | In review | [D-LNK-12](#d-lnk-12-console-without-memory-access) |
 
 ### 2.3 SCPI commands
 
@@ -415,7 +416,7 @@ Every transport subclasses `Transport` in `rdt/transport/base.py`: `open()`, `cl
 
 #### D-LNK-5 Auto-reconnect
 
-The session (`rdt/session.py`) has four link states: up, down, no reply and closed. The link goes down when the COM port or socket breaks, and is "no reply" when the device answers none of 3 reads in a row while the port stays open (D-LNK-9).
+The session (`rdt/session.py`) has three link states: up, down and closed. The link goes down only when the COM port or socket breaks (D-LNK-9). Reads that get no reply make that MCU silent instead and leave the link up (D-LNK-12).
 
 - **While the link is down:** every access fails at once with `LinkDown`, so writes are refused. The GUI shows `link down` in grey with the last values kept, and the CSV log and the chart mark the gap.
 - **Reconnecting:** a background thread reconnects with growing delays of 0.25, 0.5, 1, 2, 4 and then 5 s, until the port or socket opens again (D-LNK-7).
@@ -438,7 +439,7 @@ A simulator test runs a second SCPI client against the device while RDT polls.
 
 rani set this on 2026-10-14: RDT sends nothing to the device to check it. Connect and every reconnect only open the COM port or socket, and the link is up once it is open. Over UDP that means the socket opened, since nothing is received until a command is sent.
 
-- **Link down:** when the port or socket breaks, or the device stops answering reads (D-LNK-9). Neither check sends anything of its own: the idle check sends no bytes, and the reads that detect "no reply" are the normal poll and user reads.
+- **Link down:** only when the port or socket breaks (D-LNK-9). The idle check sends no bytes. A device that stops answering reads makes its MCUs silent, not the link down (D-LNK-12).
 - **Removed:** the profile's `probe` key (default `*IDN?`), `Target.idn`, the device identity after "Connected" in the GUI, and the Device line of `rdt info` (RM-8). A profile that still has `probe` loads with it ignored.
 
 #### D-LNK-9 Noticing a lost link
@@ -446,10 +447,10 @@ rani set this on 2026-10-14: RDT sends nothing to the device to check it. Connec
 rani reported on 2026-10-14 that the status box stayed green `Connected · COM3` after the connection was lost. The thread "Status box on lost connection" chose this behaviour as the default; rani has not confirmed it yet.
 
 - **Idle check:** `Session._watch_loop` (thread `rdt-linkwatch`) calls `Transport.check()` every `WATCH_S` = 1 s while the session lock is free. Serial reads `in_waiting`, which fails once a USB COM port is unplugged (`ClearCommError` on Windows, `EIO` on Linux). TCP does a non-blocking `recv(1, MSG_PEEK)`, where EOF or a reset means broken. UDP has nothing to check. A failure goes through the usual link-down and auto-reconnect path (D-LNK-5). No bytes are sent.
-- **No reply:** `LinkState.NO_REPLY` in `rdt/session.py`. `_device_unanswered` counts read pieces that got no reply at all (`NO_REPLY_AFTER` = 3), and `_device_answered` resets the count and goes back to up. Reads still go out, since they act as the probe. Writes raise `LinkDown(... write refused)`. The port stays open and nothing reconnects.
-- **GUI:** both cases show the red `Link down` connect button (GUI-9, GUI-11), with the tooltip saying which. Each MCU card shows `link down` (`link_health` in `rdt/gui/cards.py`, D-GUI-14).
-- **ELF check:** `Target._link_event` marks every identity stale on down and on no reply, so the GUI runs the image check again when the link comes back up (D-SYM-8).
-- **Known limits:** with its port open and polling off, a hung board is noticed only at the next read (Poll now, F6), because RDT sends no probe. Three bad-address reads in a row also count as no reply, because the firmware does not reply on errors (D-SCPI-5).
+- **No reply (replaced 2026-11-02):** the `LinkState.NO_REPLY` state, which turned the button red after 3 unanswered reads, is gone. It made the console look dead on firmware without the memory commands. A board that stops answering now makes its MCUs silent one by one, with the link still up (D-LNK-12).
+- **GUI:** a broken port shows the red `Link down` connect button (GUI-9, GUI-11). Each MCU card shows `link down` (`link_health` in `rdt/gui/cards.py`, D-GUI-14).
+- **ELF check:** `Target._link_event` marks every identity stale when the link goes down and when an MCU goes silent, so the GUI runs the image check again when it answers again (D-SYM-8).
+- **Known limits:** with its port open and polling off, a hung board is noticed only at the next read (Poll now, F6), because RDT sends no probe.
 - **Simulator:** `Device.frozen` and `SIMulation:FREEze <seconds>` make the simulated board stop answering with the port open ([SIMULATOR.md](SIMULATOR.md)).
 
 #### D-LNK-10 COM port list rescanned on open
@@ -462,6 +463,25 @@ Replies carry no tag, so a reply that arrives just after its read timed out woul
 
 A reply later than that wait can still fool one read, so `Session._read_words` in `rdt/session.py` reads the words around a sub-word value twice and uses them only when both reads agree on the bytes it keeps; otherwise the write is refused unsent. A word whose other bytes change on every read (a fast counter beside the value) is refused rather than overwritten. In a peripheral range the register is read once, since a read can clear a flag or pop a FIFO (`Target.write` passes `read_twice=False`).
 
+
+#### D-LNK-12 Console without memory access
+
+rani asked on 2026-11-02 for the console to keep working when the memory commands don't, such as with operational firmware, where they are not built in. Before, every poll read timed out, the link turned red after three of them (the old "no reply" state of D-LNK-9), and console commands waited on the one worker thread behind polls whose reads each took a whole timeout. rani picked both parts below from a mockup.
+
+**Automatic: no reply pauses memory access, not the link.**
+- **Silent on no reply:** `Session._read_piece` counts reads of an MCU that got no reply after all their tries (`McuStatus.timeouts_in_row`, per read, not per try, so lost UDP datagrams don't count). At `SILENT_AFTER` = 3 the MCU is marked silent with `no_reply` set, the main MCU too; until then only secondary MCUs could go silent (D-MCU-6). After one read with no reply, the next reads of that MCU are tried once, without retries, so an MCU that never answers goes silent after a few timeouts. Its reads and writes then fail at once with `McuSilent`, unsent.
+- **Tried again:** one read is let through every `NO_REPLY_PROBE_S` = 10 s, since each costs a whole timeout; an MCU made silent by a `-240` reply is still tried every 2 s. The first reply clears it.
+- **Link:** stays up; only a broken port or socket takes it down (D-LNK-9). The poll scheduler stops splitting a failed block once its MCU goes silent (`rdt/scheduler.py`).
+- **GUI:** the MCU card's Link line shows amber `⚠ memory: no reply · retried every 10 s`, the status strip turns amber with `● main no reply`, and the connect button stays green `Connected`.
+- **Console first:** the GUI's device worker (`rdt/gui/device.py`) takes jobs from two queues, and `submit(..., urgent=True)` puts a job in the first one. The console's commands are urgent, so they run right after the job in progress, never behind waiting polls.
+
+**The Memory access switch.**
+- **What it does:** `TargetConfig.memory_access` (default true). Off, `Target._check` raises `MemoryOff` before anything is sent, for every read and write, and `Target.check_identity` marks each MCU `unchecked` without reading. Only console commands reach the device, so the firmware's error queue gets nothing from RDT (each failed read would otherwise leave an error there, D-SCPI-5). `Target.set_memory_access(True)` marks the ELFs stale, so they are checked before the next read.
+- **Saved:** `memory_access = false` at the top of the `.rdtw` (or a target file); written only when off.
+- **GUI:** Target > Memory access (Ctrl+M, checkable). Off, an amber `Memory: Off` chip shows next to the connect button (click it to turn memory access on), RUN/STOP and Poll now are disabled, the memory view is disabled, the cards say `port open · memory off (console only)`, watch values show grey `memory off`, and the status strip shows `● main memory off`.
+- **CLI:** `--no-memory` (and `--memory`) overrides the workspace's setting for one run (D-CLI-4), such as `rdt --no-memory console`.
+
+Tests: `test_firmware_without_memory_commands_keeps_the_console`, `test_memory_access_off_sends_nothing_but_console_commands` and the silent-MCU tests in `tests/test_host_session.py`; `test_urgent_jobs_go_ahead_of_waiting_jobs` in `tests/test_gui_device.py`; the GUI tests `test_device_that_stops_answering_keeps_the_link_and_the_console` and `test_memory_access_off_keeps_only_the_console`; `test_no_memory_sends_only_the_console_command` in `tests/test_host_cli.py`.
 
 ### 4.3 SCPI commands
 
@@ -636,9 +656,9 @@ The profile's `timeout_ms` applies to every MCU, and an MCU's own `timeout_ms` o
 
 When a secondary MCU stops answering, the main MCU sends no reply and puts `-240,"MCU not responding"` in the error queue (FW-5).
 
-- **Marking it silent:** the session marks a secondary MCU silent on a `-240` error reply, or after three timeouts in a row. RDT does not read the error queue (D-SCPI-5).
+- **Marking it silent:** the session marks a secondary MCU silent on a `-240` error reply, and any MCU, the main one too, after three reads in a row with no reply (D-LNK-12). RDT does not read the error queue (D-SCPI-5).
 - **While silent:** its reads fail at once with `McuSilent` and its writes are refused, so the GUI greys out only that MCU's values. The other MCUs keep working.
-- **Recovery:** the silent MCU is tried again every 2 s, and the first answer clears the state.
+- **Recovery:** the silent MCU is tried again every 2 s after a `-240`, every 10 s after reads with no reply (D-LNK-12), and the first answer clears the state.
 
 #### D-MCU-7 MCU name prefix
 
@@ -1692,6 +1712,8 @@ The application is built against the simulator. With the firmware's read and wri
 | 2026-10-29 | rani's bench workspace (bench.rdtw and its four files) ships in examples and is the default workspace: the GUI copies it into `%LOCALAPPDATA%\rdt` and opens it when there is nothing else to open (WSP-9, rani) |
 | 2026-10-21 | The write command loses its size (SCPI-13): every write is one `max_write`-byte word, so the firmware always stores 4 bytes; an older profile opens with `{size}` taken out of its write template and a warning, and is saved without it. `max_write` and `align` may be 1, 2 or 4; 8 is removed (rani; PR #147) |
 | 2026-10-21 | A write value is 8 zero-padded hex digits like an address, such as `000002FF` (SCPI-14); this replaces the unpadded value of 2026-10-14. An older `{value:X}` is upgraded on load (rani) |
+
+| 2026-11-02 | Reads that get no reply no longer turn the link red: they make that MCU silent, the main MCU too, and its polling pauses, tried again every 10 s; console commands go ahead of waiting polls; and a Memory access switch, saved in the workspace, sends nothing but console commands (LNK-12). rani asked for the console to work with operational firmware, which has no memory commands, and picked both parts from a mockup |
 
 ## 9. Appendix: binary protocol (planned)
 

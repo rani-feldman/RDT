@@ -94,6 +94,9 @@ def build_parser() -> argparse.ArgumentParser:
     g.add_argument("--timeout", type=float, metavar="MS", help="reply timeout in ms, for every MCU")
     g.add_argument("--allow-mismatch", action="store_true",
                    help="write even to an MCU whose ELF does not match its firmware")
+    g.add_argument("--memory", dest="memory_access", action=argparse.BooleanOptionalAction, default=None,
+                   help="--no-memory: send no memory reads, writes or ELF check, only console commands, "
+                        "such as for firmware without the memory commands (default: the workspace's setting)")
     ap.add_argument("-v", "--verbose", action="count", default=0,
                     help="-v: link events, -vv: every command and reply")
 
@@ -235,8 +238,8 @@ def load_workspace(args: argparse.Namespace) -> Workspace:
 
 
 def run_config(args: argparse.Namespace, ws: Workspace) -> TargetConfig:
-    """The target for this run: the workspace's, with --profile, --timeout, --mcu and the link
-    options applied to a copy. They are for this run only and never saved into the workspace
+    """The target for this run: the workspace's, with --profile, --timeout, --mcu, --no-memory and
+    the link options applied to a copy. They are for this run only and never saved into the workspace
     (H6, M8, rani, 2026-10-18, code review); rdt init is the one command that saves them, as
     the new workspace's target."""
     cfg = copy.deepcopy(ws.config)
@@ -261,6 +264,8 @@ def run_config(args: argparse.Namespace, ws: Workspace) -> TargetConfig:
             m.timeout_ms = None
     if args.mcu:
         cfg.mcus = [McuConfig(m.id, m.name, m.elf.resolve() if m.elf else None) for m in args.mcu]
+    if getattr(args, "memory_access", None) is not None:   # LNK-12
+        cfg.memory_access = args.memory_access
     if not cfg.mcus:
         raise ConfigError("no MCUs: give a workspace (-w), put an rdt.toml in the current folder or %LOCALAPPDATA%\\rdt, "
                           "or give --mcu NAME=ID[:ELF], such as --mcu main=0:main.elf")

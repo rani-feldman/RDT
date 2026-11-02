@@ -1081,22 +1081,56 @@ def test_old_ini_settings_move_to_ui_toml(qtbot, tmp_path):
     assert (tmp_path / "ui.toml").is_file() and w.console.font_size() == 13
 
 
-def test_link_down_when_the_device_stops_answering(qtbot, win, sim):
-    """A hung board keeps its COM port open: after a few reads with no reply the box turns red
-    and the MCU cards say link down, and the first reply brings both back (LNK-9)."""
+def test_device_that_stops_answering_keeps_the_link_and_the_console(qtbot, win, sim):
+    """A board whose memory reads get no reply, such as operational firmware without the memory
+    commands, keeps the link up: the MCU cards say "memory: no reply", the status strip turns
+    amber, and the console still works (LNK-12, rani, 2026-11-02)."""
     connect(qtbot, win)
     qtbot.waitUntil(lambda: "✓ main.elf" in card(win, "main").elf.text(), timeout=3000)
-    sim.device.frozen = True
-    win.read_all()
+    win.device.target.session.NO_REPLY_PROBE_S = 0.3
+    handle = sim.device.handle
+    sim.device.handle = lambda line, client="": None if line.startswith("MEMory:") else handle(line, client)
     where = win.ws.config.connection.address
-    qtbot.waitUntil(lambda: win.bar.connect_button.text() == "Link down · " + where, timeout=8000)
-    assert "answered none" in win.bar.connect_button.toolTip()
-    assert "link down" in card(win, "main").link.text()
-    assert "did not answer the last" in win.console.output.toPlainText()
-    sim.device.frozen = False
-    win.read_all()
-    qtbot.waitUntil(lambda: win.bar.connect_button.text() == "Connected · " + where, timeout=8000)
+    for _ in range(3):
+        win.read_all()
+        qtbot.wait(300)
+    qtbot.waitUntil(lambda: "memory: no reply" in card(win, "main").link.text(), timeout=8000)
+    assert win.bar.connect_button.text() == "Connected · " + where
+    assert "main no reply" in win.link_label.text()
+    win.console.send("*IDN?")
+    # At most behind the poll running now: the first one spends a few timeouts before the
+    # MCUs go silent, later ones send nothing to them.
+    qtbot.waitUntil(lambda: "SIM" in win.console.output.toPlainText().upper(), timeout=10000)
+    sim.device.handle = handle
+    qtbot.waitUntil(lambda: "memory: no reply" not in card(win, "main").link.text(), timeout=8000)
     qtbot.waitUntil(lambda: "✓ main.elf" in card(win, "main").elf.text(), timeout=5000)
+
+
+def test_memory_access_off_keeps_only_the_console(qtbot, win, sim, tmp_path):
+    """LNK-12: Target > Memory access off sends nothing but console commands, shows the
+    Memory: Off chip, and is saved in the workspace."""
+    sent = []
+    handle = sim.device.handle
+    sim.device.handle = lambda line, client="": (sent.append(line), handle(line, client))[1]
+    win.memory_action.trigger()
+    assert not win.ws.config.memory_access and win.dirty
+    assert win.bar._memory_chip.isVisible() and not win.bar.polling.isEnabled()
+    connect(qtbot, win)
+    qtbot.waitUntil(lambda: "memory off" in card(win, "main").link.text(), timeout=3000)
+    win.read_all()
+    win.console.send("*IDN?")
+    qtbot.waitUntil(lambda: "SIM" in win.console.output.toPlainText().upper(), timeout=3000)
+    qtbot.wait(300)
+    assert sent == ["*IDN?"]
+    assert not win.memory.isEnabled()
+    path = win.ws.save(tmp_path / "off.rdtw")
+    assert "memory_access = false" in path.read_text()
+    assert Workspace.load(path).config.memory_access is False
+    win.bar.memory_chip.click()                     # on again: the ELF is checked, polling reads
+    assert win.ws.config.memory_access and win.memory_action.isChecked()
+    qtbot.waitUntil(lambda: "✓ main.elf" in card(win, "main").elf.text(), timeout=5000)
+    qtbot.waitUntil(lambda: any(line.startswith("MEMory:READ?") for line in sent), timeout=3000)
+    assert not win.bar._memory_chip.isVisible()
 
 
 def test_dark_theme_is_remembered(qtbot, win):

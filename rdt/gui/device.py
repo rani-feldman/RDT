@@ -3,6 +3,8 @@
 Panels call ``submit(fn, on_done, on_error)``; ``fn(target)`` runs on the worker and the
 callbacks run back on the GUI thread. A job with a ``key`` is dropped while an earlier job with
 the same key is still waiting, so a poll that can't keep up falls behind instead of queueing.
+An ``urgent`` job, such as a console command, goes ahead of every job still waiting, so typing
+in the console is not kept behind poll reads that time out (LNK-12).
 """
 
 from __future__ import annotations
@@ -11,6 +13,8 @@ import atexit
 import gc
 import itertools
 import logging
+import threading
+from collections import deque
 from typing import Any, Callable
 
 from PySide6.QtCore import QCoreApplication, QObject, QThread, QTimer, Signal, Slot
@@ -53,13 +57,15 @@ def _collect() -> None:
 class _Worker(QObject):
     done = Signal(int, object, object)   # job id, result, exception
 
-    def __init__(self):
+    def __init__(self, take: Callable[[], tuple[int, Any]]):
         super().__init__()
         self.target: Target | None = None
         self.stopping = False   # set by Device.shutdown: jobs still queued are skipped
+        self._take = take       # the next job from the Device's queue, urgent ones first
 
-    @Slot(int, object)
-    def run(self, job_id: int, fn) -> None:
+    @Slot()
+    def run(self) -> None:
+        job_id, fn = self._take()
         if self.stopping and job_id != 0:   # job 0 is shutdown's own close (M7)
             return
         try:
@@ -73,13 +79,16 @@ class _Worker(QObject):
 class Device(QObject):
     opened = Signal(object)          # the Target, once connected
     closed = Signal()
-    _run = Signal(int, object)
+    _run = Signal()   # one per job put in the queue; the worker takes the next job
 
     def __init__(self, parent=None):
         super().__init__(parent)
         self._thread = QThread()
         self._thread.setObjectName("rdt-device")
-        self._worker = _Worker()
+        self._queue: deque[tuple[int, Any]] = deque()
+        self._urgent: deque[tuple[int, Any]] = deque()   # taken first, in the order sent
+        self._queue_lock = threading.Lock()
+        self._worker = _Worker(self._take)
         self._worker.moveToThread(self._thread)
         self._run.connect(self._worker.run)
         self._worker.done.connect(self._finished)
@@ -96,11 +105,21 @@ class Device(QObject):
 
     # --- jobs --------------------------------------------------------------------------------
 
+    def _put(self, job_id: int, fn, urgent: bool = False) -> None:
+        with self._queue_lock:
+            (self._urgent if urgent else self._queue).append((job_id, fn))
+        self._run.emit()
+
+    def _take(self) -> tuple[int, Any]:
+        with self._queue_lock:
+            return (self._urgent or self._queue).popleft()
+
     def submit(self, fn: Callable[[Target], Any], on_done: Callable[[Any], None] | None = None,
                on_error: Callable[[Exception], None] | None = None, key: str | None = None,
-               needs_target: bool = True) -> int | None:
+               needs_target: bool = True, urgent: bool = False) -> int | None:
         """Run ``fn(target)`` on the worker. Returns the job id, or None if dropped (busy key, or no
-        link). Without ``needs_target``, ``fn`` gets the worker itself."""
+        link). Without ``needs_target``, ``fn`` gets the worker itself. An ``urgent`` job runs
+        before every job still waiting (after the one running)."""
         if key is not None and key in self._keys:
             return None
         if needs_target and self.target is None:
@@ -119,7 +138,7 @@ class Device(QObject):
         self._jobs[job_id] = (key, on_done, on_error)
         if key is not None:
             self._keys.add(key)
-        self._run.emit(job_id, job)
+        self._put(job_id, job, urgent)
         return job_id
 
     def busy(self, key: str) -> bool:
@@ -212,7 +231,7 @@ class Device(QObject):
         self._link_gen += 1
         if self._thread.isRunning():
             self._worker.stopping = True
-            self._run.emit(0, lambda worker: QThread.currentThread().quit())
+            self._put(0, lambda worker: QThread.currentThread().quit())
             if not self._thread.wait(wait_ms):
                 # A job that still hasn't ended (each access has its own timeout, so this is a
                 # long job, not a hang). Qt aborts the whole process if a running QThread is

@@ -10,7 +10,7 @@ import time
 import pytest
 
 from rdt import (
-    AccessRefused, CommandRejected, CommandTimeout, LinkDown, LinkState, McuSilent, Profile, Range,
+    AccessRefused, CommandRejected, CommandTimeout, LinkDown, LinkState, McuSilent, MemoryOff, Profile, Range,
     WriteNotConfirmed,
 )
 from sim import Device, Profile as SimProfile, Signal, Simulator, TransportConfig
@@ -318,9 +318,12 @@ def test_firmware_that_replies_with_its_error(two_mcus):
 
 def test_silent_mcu_is_greyed_out_alone(sim, device):
     with make_target("tcp", sim.tcp_address) as t:
-        t.session.SILENT_PROBE_S = 0.2
+        t.session.SILENT_PROBE_S = t.session.NO_REPLY_PROBE_S = 0.2
         device.mcus[1].silent = True
-        with pytest.raises(McuSilent, match="3 timeouts in a row"):
+        for _ in range(2):
+            with pytest.raises(CommandTimeout):
+                t.read_value("@motorctl:0x20000084:u32")
+        with pytest.raises(McuSilent, match="no reply to 3 reads in a row"):
             t.read_value("@motorctl:0x20000084:u32")
         assert t.is_silent("motorctl") and not t.is_silent("main")
         # Further accesses fail at once, without waiting for a timeout; writes are refused.
@@ -339,10 +342,13 @@ def test_silent_mcu_is_greyed_out_alone(sim, device):
 
 
 def test_silent_mcu_after_three_timeouts_while_mcu0_answers(sim, device):
-    profile = Profile(timeout_ms=100, retries=2)
+    profile = Profile(timeout_ms=50, retries=2)
     with make_target("tcp", sim.tcp_address, profile) as t:
         device.mcus[1].silent = True
-        with pytest.raises(McuSilent, match="3 timeouts in a row"):
+        for _ in range(2):
+            with pytest.raises(CommandTimeout):   # counted per read, not per try (LNK-12)
+                t.read_value("@motorctl:0x20000084:u32")
+        with pytest.raises(McuSilent, match="no reply to 3 reads in a row"):
             t.read_value("@motorctl:0x20000084:u32")
         assert t.read_value("@main:0x20000010:u32") == 0x12345678
 
@@ -396,9 +402,9 @@ def test_udp_device_that_never_answers_times_out(sim):
         t = make_target("udp", s.getsockname(), Profile(timeout_ms=50, retries=1), auto_reconnect=False)
         with t:
             assert t.link_state is LinkState.UP   # RDT sends nothing on connect, so the socket is enough
-            with pytest.raises(CommandTimeout):
+            with pytest.raises((CommandTimeout, McuSilent)):   # the ELF check's read counts too
                 t.read_value("@main:0x20000010:u32")
-            assert t.link_state is LinkState.NO_REPLY   # no reply, but the socket stays open (LNK-9)
+            assert t.link_state is LinkState.UP   # no reply never takes the link down (LNK-12)
 
 
 # --- UDP --------------------------------------------------------------------------------------
@@ -472,11 +478,13 @@ def test_another_scpi_client_on_the_same_device(sim):
     assert other["replies"] > 0 and other["wrong"] == 0
 
 
-# --- a device that stops answering, or a port that breaks while idle (LNK-9) -----------------
+# --- a device that stops answering, or a port that breaks while idle (LNK-9, LNK-12) -----------
 
-def test_device_that_stops_answering_shows_no_reply(sim, device):
+def test_device_that_stops_answering_keeps_the_link_up(sim, device):
+    """A hung board keeps its port open: its MCUs go silent one by one, the link stays up."""
     profile = Profile(timeout_ms=50, retries=0)
     with make_target("tcp", sim.tcp_address, profile) as t:
+        t.session.NO_REPLY_PROBE_S = 0.2
         states = []
         t.session.add_listener(lambda ev, info: ev == "link" and states.append(info["state"]))
         assert t.read_value("@main:0x20000010:u32") == 0x12345678
@@ -484,37 +492,78 @@ def test_device_that_stops_answering_shows_no_reply(sim, device):
         for _ in range(2):
             with pytest.raises(CommandTimeout):
                 t.read_value("@main:0x20000010:u32")
-        assert t.link_state is LinkState.UP          # one or two failed reads can be a bad command
-        with pytest.raises(CommandTimeout):
-            t.read_value("@motorctl:0x20000084:u32")  # no reply from any MCU counts
-        assert t.link_state is LinkState.NO_REPLY
-        assert "did not answer the last 3 reads" in t.session.down_reason
-        with pytest.raises(LinkDown, match="write refused"):
+        with pytest.raises(McuSilent, match="no reply to 3 reads in a row"):
+            t.read_value("@main:0x20000010:u32")
+        assert t.is_silent("main") and t.session.mcu_status(0).no_reply
+        assert t.link_state is LinkState.UP and states == []
+        with pytest.raises(McuSilent, match="write refused"):
             t.write_value("@main:0x20000024:u32", 1)
         device.frozen = False
-        assert t.read_value("@main:0x20000010:u32") == 0x12345678   # the first reply brings it back
-        assert t.link_state is LinkState.UP
-        assert states == [LinkState.NO_REPLY, LinkState.UP]
+        time.sleep(0.25)
+        assert t.read_value("@main:0x20000010:u32") == 0x12345678   # the next try brings it back
+        assert not t.is_silent("main")
 
 
-def test_an_answer_from_any_mcu_keeps_the_link_up(sim, device):
+def test_bad_addresses_between_good_reads_never_silence_the_mcu(sim, device):
     profile = Profile(timeout_ms=50, retries=0, ranges=[Range("ghost", 0x30000000, 16)])
     with make_target("tcp", sim.tcp_address, profile) as t:
         for _ in range(5):
             with pytest.raises(CommandTimeout):
                 t.read("main", 0x30000000, 4)          # a bad address: no reply, as for any error
-            assert t.read_value("@motorctl:0x20000084:u32") == 500
-        assert t.link_state is LinkState.UP
+            assert t.read_value("@main:0x20000010:u32") == 0x12345678
+        assert t.link_state is LinkState.UP and not t.is_silent("main")
+
+
+def test_firmware_without_memory_commands_keeps_the_console(sim, device):
+    """Operational firmware has no memory commands: reads get no reply, yet console commands
+    still work and soon go out without waiting behind timed-out reads (LNK-12, rani, 2026-11-02)."""
+    handle = device.handle
+    device.handle = lambda line, client="": None if line.startswith("MEMory:") else handle(line, client)
+    profile = Profile(timeout_ms=100, retries=1)
+    with make_target("tcp", sim.tcp_address, profile) as t:
+        for _ in range(3):
+            with pytest.raises((CommandTimeout, McuSilent)):
+                t.read_value("@main:0x20000010:u32")
+        assert t.is_silent("main") and t.link_state is LinkState.UP
+        started = time.monotonic()
+        with pytest.raises(McuSilent):
+            t.read_value("@main:0x20000010:u32")   # refused at once, nothing sent
+        assert time.monotonic() - started < 0.05
+        assert t.command("*IDN?") is not None    # the console works
+
+
+def test_memory_access_off_sends_nothing_but_console_commands(sim, device):
+    """LNK-12: with memory access off, reads, writes and the ELF check are refused before
+    anything is sent; turning it on again checks the ELF before the next read."""
+    sent = []
+    handle = device.handle
+    device.handle = lambda line, client="": (sent.append(line), handle(line, client))[1]
+    t = make_target("tcp", sim.tcp_address)
+    t.config.memory_access = False
+    with t:
+        assert all(m.identity.status == "unchecked" for m in t.mcus.values())
+        with pytest.raises(MemoryOff, match="memory access is off"):
+            t.read_value("@main:0x20000010:u32")
+        with pytest.raises(MemoryOff):
+            t.write_value("@main:0x20000024:u32", 1)
+        assert t.command("*IDN?") is not None
+        assert sent == ["*IDN?"]
+        t.set_memory_access(True)
+        assert t.read_value("@main:0x20000010:u32") == 0x12345678
+        assert any(line.startswith("MEMory:READ?") for line in sent)
 
 
 def test_freeze_command_in_the_simulator(sim, device):
     profile = Profile(timeout_ms=50, retries=0)
     with make_target("tcp", sim.tcp_address, profile) as t:
+        t.session.NO_REPLY_PROBE_S = 0.1
         t.command("SIM:FREE 0.5")
-        for _ in range(3):
+        for _ in range(2):
             with pytest.raises(CommandTimeout):
                 t.read_value("@main:0x20000010:u32")
-        assert t.link_state is LinkState.NO_REPLY
+        with pytest.raises(McuSilent):
+            t.read_value("@main:0x20000010:u32")
+        assert t.link_state is LinkState.UP
         time.sleep(0.5)
         assert t.read_value("@main:0x20000010:u32") == 0x12345678
         assert t.link_state is LinkState.UP

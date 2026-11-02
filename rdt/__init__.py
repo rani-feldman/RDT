@@ -5,7 +5,7 @@ The CLI and the GUI both sit on ``Target``; see ``rdt.target``.
 
 from .errors import (
     AccessRefused, BadReply, CommandRejected, CommandTimeout, ConfigError, DeviceError, LinkDown, LinkError,
-    ImageMismatch, McuSilent, RdtError, SymbolError, WriteNotConfirmed, WriteRefused,
+    ImageMismatch, McuSilent, MemoryOff, RdtError, SymbolError, WriteNotConfirmed, WriteRefused,
 )
 from .profile import Profile, Range
 from .session import LinkState, Session
@@ -16,7 +16,7 @@ from ._version import __version__
 
 __all__ = [
     "AccessRefused", "BadReply", "CommandRejected", "CommandTimeout", "ConfigError", "ConnectionConfig",
-    "DeviceError", "ImageMismatch", "LinkDown", "LinkError", "LinkState", "McuConfig", "McuSilent", "Profile", "Range",
+    "DeviceError", "ImageMismatch", "LinkDown", "LinkError", "LinkState", "McuConfig", "McuSilent", "MemoryOff", "Profile", "Range",
     "RdtError", "Session", "SymbolError", "Target", "TargetConfig", "WriteNotConfirmed", "EnumValue", "Location",
     "WriteRefused", "Tab", "Watch", "Workspace",
 ]
