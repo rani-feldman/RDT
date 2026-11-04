@@ -264,7 +264,7 @@ Console features taken from ComPort-Zone (an open serial terminal); rani approve
 | CON-13 | The GUI console looks like a terminal in the theme's colours (dark in the dark themes, light in the light ones), each line with its time and a TX, RX, ERR or SYS tag, and the prompt as its last line, with no separate line or button for sending (2026-10-12, updated 2026-10-17) | Done | [D-CON-13](#d-con-13-terminal-look) |
 | CON-14 | Commands are typed on the console's next free line, inside the transcript, and the best suggestion from the history or the known commands shows while typing, without pressing Tab (2026-10-12) | Done | [D-CON-14](#d-con-14-typing-in-the-transcript) |
 | CON-15 | The list of matching commands opens as soon as something is typed, without Tab; Tab or Enter takes the highlighted command (2026-10-13) | Done | [D-CON-2](#d-con-2-autocomplete) |
-| CON-16 | A command sent with no reply expected shows only its `TX` line, which carries the time it was sent; no extra `SYS (sent)` line (rani, 2026-11-04) | In review | [D-CON-16](#d-con-16-no-sent-line) |
+| CON-16 | A command sent with no reply expected shows only its `TX` line, which carries the time it was sent; no extra `SYS (sent)` line (rani, 2026-11-04) | Done | [D-CON-16](#d-con-16-no-sent-line) |
 
 ### 2.18 Removed and not in v1
 
