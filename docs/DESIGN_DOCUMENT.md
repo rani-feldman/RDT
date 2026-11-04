@@ -1271,7 +1271,7 @@ rani asked on 2026-10-15 for the memory regions to be in a file of their own bes
 
 #### D-WSP-9 Default workspace
 
-rani asked on 2026-10-29 for their bench files to be in the examples, installed with RDT, and to be the default files. `examples/` holds `bench.rdtw`, `bench.profile.toml`, `bench.memory.toml`, `bench.watch.toml` and `bench.commands.toml` (the RDT GAC profile, the three MCUs Interface, Control_CM7 and Control_CM4 with their memory map, the watch tabs and the known commands). `tools/build_release.ps1` copies them into the installed `examples` folder beside the exes, and `packaging/smoke_test.ps1` checks they are there.
+rani asked on 2026-10-29 for their bench files to be in the examples, installed with RDT, and to be the default files. `examples/` holds `bench.rdtw`, `bench.profile.toml`, `bench.memory.toml`, `bench.watch.toml` and `bench.commands.toml` (the RDT GAC profile, the three MCUs Interface, Control_CM7 and Control_CM4 with their memory map, an empty watch list and the known commands). rani asked on 2026-11-04 for the shipped `bench.watch.toml` to be empty, so a new user starts with no watched variables; it holds only its header comment and opens as one empty Watch tab. `tools/build_release.ps1` copies them into the installed `examples` folder beside the exes, and `packaging/smoke_test.ps1` checks they are there.
 
 - **GUI start:** a file named on the command line, else the last workspace (D-WSP-3), else the default target, else the default workspace. For the last one the GUI copies the five files from `examples` into the workspace folder (`%LOCALAPPDATA%\rdt`) and opens the copy, so saves go to the user's own files and a new install or an uninstall never touches them. A file already in that folder is never overwritten (`appfiles.install_default_workspace`, `appfiles.examples_dir`).
 - **Default target:** `default_target` in `rdt/workspace.py` tries `./rdt.toml`, then `%LOCALAPPDATA%\rdt\rdt.toml`, then `%LOCALAPPDATA%\rdt\bench.rdtw`, so `rdt` with no `-t` or `-w` uses the default workspace once the GUI has copied it. The CLI never copies files itself.
@@ -1719,6 +1719,7 @@ The application is built against the simulator. With the firmware's read and wri
 | 2026-10-21 | A write value is 8 zero-padded hex digits like an address, such as `000002FF` (SCPI-14); this replaces the unpadded value of 2026-10-14. An older `{value:X}` is upgraded on load (rani) |
 | 2026-11-02 | Reads that get no reply no longer turn the link red: they make that MCU silent, the main MCU too, and its polling pauses, tried again every 10 s; console commands go ahead of waiting polls; and a Memory access switch, saved in the workspace, sends nothing but console commands (LNK-12). rani asked for the console to work with operational firmware, which has no memory commands, and picked both parts from a mockup |
 | 2026-11-04 | The console no longer adds a `SYS (sent)` line after a command that expects no reply; its `TX` line and time are enough (CON-16), at rani's request |
+| 2026-11-04 | The shipped default watch list `examples/bench.watch.toml` is empty, and its earlier content is removed from the git history (WSP-9, rani) |
 
 ## 9. Appendix: binary protocol (planned)
 
