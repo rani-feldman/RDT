@@ -264,6 +264,7 @@ Console features taken from ComPort-Zone (an open serial terminal); rani approve
 | CON-13 | The GUI console looks like a terminal in the theme's colours (dark in the dark themes, light in the light ones), each line with its time and a TX, RX, ERR or SYS tag, and the prompt as its last line, with no separate line or button for sending (2026-10-12, updated 2026-10-17) | Done | [D-CON-13](#d-con-13-terminal-look) |
 | CON-14 | Commands are typed on the console's next free line, inside the transcript, and the best suggestion from the history or the known commands shows while typing, without pressing Tab (2026-10-12) | Done | [D-CON-14](#d-con-14-typing-in-the-transcript) |
 | CON-15 | The list of matching commands opens as soon as something is typed, without Tab; Tab or Enter takes the highlighted command (2026-10-13) | Done | [D-CON-2](#d-con-2-autocomplete) |
+| CON-16 | A command sent with no reply expected shows only its `TX` line, which carries the time it was sent; no extra `SYS (sent)` line (rani, 2026-11-04) | In review | [D-CON-16](#d-con-16-no-sent-line) |
 
 ### 2.18 Removed and not in v1
 
@@ -1407,7 +1408,7 @@ Suggestions come from the history and the workspace's known commands (D-CON-7) o
 
 #### D-CON-3 Timestamps and colours
 
-- **GUI:** the console keeps its last 5000 lines as entries of (time, kind, text), the kind being `tx` (sent), `rx` (reply), `error` (no reply, the link going down, any failure) or `note` (RDT's own: the other link state changes from `MainWindow._show_state`, a command sent with no reply expected, log start and stop). How they are drawn is D-CON-13. The **Timestamps** check box redraws the transcript from the entries with or without times.
+- **GUI:** the console keeps its last 5000 lines as entries of (time, kind, text), the kind being `tx` (sent), `rx` (reply), `error` (no reply, the link going down, any failure) or `note` (RDT's own: the other link state changes from `MainWindow._show_state`, log start and stop; a command sent with no reply expected adds no line after its `TX` line, CON-16). How they are drawn is D-CON-13. The **Timestamps** check box redraws the transcript from the entries with or without times.
 - **CLI:** `rdt console --timestamps` wraps the output in a writer that starts every line with the time, and echoes each command as `> COMMAND` so the command has a time too. The CLI has no colours.
 
 #### D-CON-4 Transcript search
@@ -1468,6 +1469,10 @@ The transcript and the prompt are one editable `QPlainTextEdit`, `Terminal` in `
 - **New lines:** a reply or note is inserted above the prompt line, so what you are typing stays, and the view follows the prompt while the cursor is on it. Enter turns the typed line into a `TX` line above, and the prompt is free again on the next line.
 - **Suggestion while typing:** after every edit the console takes the first suggestion (D-CON-2, history newest first, then known commands) that starts with the typed text, ignoring case, and the terminal paints the rest of it in grey after the cursor. Right (or End) at the end of the line takes it; the list of matches is open at the same time (D-CON-2), and Tab or Enter takes the command highlighted there instead; Esc closes the list, or hides the suggestion when no list is open. On an empty prompt the grey text is a hint ("type a command — ↑ recalls history, → takes the suggestion, Tab lists matches", or "not connected").
 - **Keys:** Up and Down walk the history (D-CON-1); Ctrl+C copies a selection; the console's Ctrl+F, Ctrl+K and zoom shortcuts work as before.
+
+#### D-CON-16 No sent line
+
+A command whose header does not end in `?` expects no reply, so `run_command` returns `None` once it is written. `Console._reply` in `rdt/gui/panels.py` then logs nothing: the command's `TX` line, with its time, already shows that it was sent (rani, 2026-11-04). A failed send still logs an `ERR` line, and a query still logs its `RX` reply or `(no reply)`.
 
 #### D-CON-12 Keyboard shortcuts
 
@@ -1712,8 +1717,8 @@ The application is built against the simulator. With the firmware's read and wri
 | 2026-10-29 | rani's bench workspace (bench.rdtw and its four files) ships in examples and is the default workspace: the GUI copies it into `%LOCALAPPDATA%\rdt` and opens it when there is nothing else to open (WSP-9, rani) |
 | 2026-10-21 | The write command loses its size (SCPI-13): every write is one `max_write`-byte word, so the firmware always stores 4 bytes; an older profile opens with `{size}` taken out of its write template and a warning, and is saved without it. `max_write` and `align` may be 1, 2 or 4; 8 is removed (rani; PR #147) |
 | 2026-10-21 | A write value is 8 zero-padded hex digits like an address, such as `000002FF` (SCPI-14); this replaces the unpadded value of 2026-10-14. An older `{value:X}` is upgraded on load (rani) |
-
 | 2026-11-02 | Reads that get no reply no longer turn the link red: they make that MCU silent, the main MCU too, and its polling pauses, tried again every 10 s; console commands go ahead of waiting polls; and a Memory access switch, saved in the workspace, sends nothing but console commands (LNK-12). rani asked for the console to work with operational firmware, which has no memory commands, and picked both parts from a mockup |
+| 2026-11-04 | The console no longer adds a `SYS (sent)` line after a command that expects no reply; its `TX` line and time are enough (CON-16), at rani's request |
 
 ## 9. Appendix: binary protocol (planned)
 
