@@ -453,7 +453,8 @@ def test_default_workspace_ships_in_examples():
     assert all((examples_dir() / name).is_file() for name in DEFAULT_WORKSPACE)
     ws = Workspace.load(examples_dir() / "bench.rdtw")
     assert [m.name for m in ws.config.mcus] == ["Interface", "Control_CM7", "Control_CM4"]
-    assert ws.commands and ws.tabs and ws.config.profile.ranges and not ws.warnings
+    assert ws.commands and ws.config.profile.ranges and not ws.warnings
+    assert not any(t.watches for t in ws.tabs)   # the default watch list is empty (rani, 2026-11-04)
 
 
 def test_default_workspace_is_copied_once_and_never_overwritten(tmp_path):
