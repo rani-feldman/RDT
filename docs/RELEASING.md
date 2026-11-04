@@ -54,6 +54,11 @@ history, run **release** with the version box empty and **Rebuild** set to its t
 zip, the checksums and the video on the published release. Nothing is committed and the tag is
 not moved.
 
+If the tag no longer builds as it is (its tests fail on files changed since), put the tag plus
+the fix on a branch and give that branch in **Source**. The release files then come from that
+branch, and the tag stays where it was. 1.1.1 was rebuilt this way, with the test that expected
+the old watch list fixed (rani, 2026-11-04).
+
 ## By hand
 
 - Pushing a tag `v1.2.0` also builds a draft release, once `rdt/_version.py` and CHANGELOG.md

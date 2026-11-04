@@ -8,6 +8,8 @@ name: release
 # - Pushing a vX.Y.Z tag by hand does the same from the tag (its version must already be set).
 # - Run workflow with "rebuild" set to a published tag, such as v1.1.1, builds from that tag and
 #   replaces the files on that published release; nothing is committed or tagged (INS-18).
+#   "source" builds from a branch instead, when the tag itself no longer builds (its version must
+#   still match the tag).
 # Every release carries the walkthrough video as a file; Help opens the latest one (INS-18).
 # - A pull request that touches the packaging builds and smoke-tests, with no release.
 on:
@@ -18,6 +20,9 @@ on:
         required: false
       rebuild:
         description: "Or a published tag to rebuild, such as v1.1.1 (replaces its files)"
+        required: false
+      source:
+        description: "With rebuild: build from this branch instead of the tag (the tag plus a fix)"
         required: false
   push:
     tags: ["v*.*.*"]
@@ -46,15 +51,17 @@ jobs:
         env:
           VERSION: ${{ inputs.version }}
           REBUILD: ${{ inputs.rebuild }}
+          SOURCE: ${{ inputs.source }}
         run: |
           if ("${{ github.ref }}" -ne "refs/heads/main") { throw "Run the release workflow on main" }
           if ([bool]$env:VERSION -eq [bool]$env:REBUILD) { throw "Give either a version or a tag to rebuild" }
+          if ($env:SOURCE -and -not $env:REBUILD) { throw "Source goes with rebuild" }
           if ($env:REBUILD -and $env:REBUILD -notmatch '^v\d+\.\d+\.\d+$') { throw "Rebuild takes a tag like v1.1.1" }
 
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
-          ref: ${{ inputs.rebuild || github.ref }}
+          ref: ${{ inputs.source || inputs.rebuild || github.ref }}
 
       # The video comes from main, since a rebuilt tag may be older than it.
       - name: Walkthrough video (rebuild)
