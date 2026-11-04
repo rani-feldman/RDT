@@ -324,6 +324,9 @@ def test_console_history_and_completion(qtbot, win):
 
     # as you type, the best suggestion shows in grey after the cursor; Right takes it
     con.input.setText("")
+    n = len(con.entries)
+    con._reply(None)                                   # a command with no reply expected (CON-16)
+    assert len(con.entries) == n                       # adds no SYS "(sent)" line after its TX
     QTest.keyClicks(con.output, "sy")
     assert con.input.text() == "sy" and con.output.ghost() == "STem:ERRor?"
     key(Qt.Key_Right)
