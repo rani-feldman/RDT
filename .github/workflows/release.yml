@@ -6,13 +6,19 @@ name: release
 #   GitHub release. Press Publish on it after trying the installer: GitHub creates the vX.Y.Z tag
 #   only then, so a draft you discard leaves no tag behind.
 # - Pushing a vX.Y.Z tag by hand does the same from the tag (its version must already be set).
+# - Run workflow with "rebuild" set to a published tag, such as v1.1.1, builds from that tag and
+#   replaces the files on that published release; nothing is committed or tagged (INS-18).
+# Every release carries the walkthrough video as a file; Help opens the latest one (INS-18).
 # - A pull request that touches the packaging builds and smoke-tests, with no release.
 on:
   workflow_dispatch:
     inputs:
       version:
-        description: "Version to release, such as 1.2.0"
-        required: true
+        description: "Version to release, such as 1.2.0 (leave empty with rebuild)"
+        required: false
+      rebuild:
+        description: "Or a published tag to rebuild, such as v1.1.1 (replaces its files)"
+        required: false
   push:
     tags: ["v*.*.*"]
   pull_request:
@@ -34,21 +40,42 @@ jobs:
     runs-on: windows-latest
     timeout-minutes: 45
     steps:
+      - name: Check the inputs (Run workflow)
+        if: github.event_name == 'workflow_dispatch'
+        shell: pwsh
+        env:
+          VERSION: ${{ inputs.version }}
+          REBUILD: ${{ inputs.rebuild }}
+        run: |
+          if ("${{ github.ref }}" -ne "refs/heads/main") { throw "Run the release workflow on main" }
+          if ([bool]$env:VERSION -eq [bool]$env:REBUILD) { throw "Give either a version or a tag to rebuild" }
+          if ($env:REBUILD -and $env:REBUILD -notmatch '^v\d+\.\d+\.\d+$') { throw "Rebuild takes a tag like v1.1.1" }
+
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
+          ref: ${{ inputs.rebuild || github.ref }}
+
+      # The video comes from main, since a rebuilt tag may be older than it.
+      - name: Walkthrough video (rebuild)
+        if: inputs.rebuild
+        shell: pwsh
+        run: |
+          git fetch origin main
+          New-Item -ItemType Directory -Force release-media | Out-Null
+          cmd /c "git show origin/main:docs/media/rdt-walkthrough.mp4 > release-media\rdt-walkthrough.mp4"
+          if ($LASTEXITCODE) { exit 1 }
 
       - uses: actions/setup-python@v5
         with:
           python-version: "3.13"
 
       - name: Prepare the version (Run workflow)
-        if: github.event_name == 'workflow_dispatch'
+        if: github.event_name == 'workflow_dispatch' && !inputs.rebuild
         shell: pwsh
         env:
           VERSION: ${{ inputs.version }}
         run: |
-          if ("${{ github.ref }}" -ne "refs/heads/main") { throw "Run the release workflow on main" }
           python tools/release.py prepare $env:VERSION
           if ($LASTEXITCODE) { exit 1 }
           git config user.name "github-actions[bot]"
@@ -62,6 +89,8 @@ jobs:
         run: |
           if ("${{ github.event_name }}" -eq "push") {
             $v = python tools/release.py check "${{ github.ref_name }}"
+          } elseif ("${{ inputs.rebuild }}") {
+            $v = python tools/release.py check "${{ inputs.rebuild }}"
           } else {
             $v = python tools/release.py version
           }
@@ -86,14 +115,14 @@ jobs:
       # No tag here: the draft release below names the commit, and GitHub creates the tag when
       # the draft is published.
       - name: Push the release commit (Run workflow)
-        if: github.event_name == 'workflow_dispatch'
+        if: github.event_name == 'workflow_dispatch' && !inputs.rebuild
         shell: pwsh
         run: |
           git push origin HEAD:main
           if ($LASTEXITCODE) { exit 1 }
 
       - name: Draft release
-        if: github.event_name != 'pull_request'
+        if: github.event_name != 'pull_request' && !inputs.rebuild
         shell: pwsh
         env:
           GH_TOKEN: ${{ github.token }}
@@ -101,4 +130,18 @@ jobs:
           $v = "${{ steps.version.outputs.version }}"
           python tools/release.py notes $v | Out-File -Encoding utf8 release-notes.md
           gh release create "v$v" --draft --target (git rev-parse HEAD) --title "RDT $v" --notes-file release-notes.md `
-            "release/RDT-Setup-$v.exe" "release/RDT-$v-portable.zip" "release/SHA256SUMS.txt"
+            "release/RDT-Setup-$v.exe" "release/RDT-$v-portable.zip" "release/SHA256SUMS.txt" `
+            "docs/media/rdt-walkthrough.mp4"
+
+      # Replaces the files of the published release; its tag, notes and state stay as they are.
+      - name: Replace the release files (rebuild)
+        if: inputs.rebuild
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $v = "${{ steps.version.outputs.version }}"
+          gh release upload "${{ inputs.rebuild }}" --clobber `
+            "release/RDT-Setup-$v.exe" "release/RDT-$v-portable.zip" "release/SHA256SUMS.txt" `
+            "release-media/rdt-walkthrough.mp4"
+          if ($LASTEXITCODE) { exit 1 }

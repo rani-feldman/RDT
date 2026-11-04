@@ -9,6 +9,8 @@ section. RDT shows this file in **Help > Release notes**.
 
 ### New features
 
+- Help > Video walkthrough downloads the video from the latest RDT release on GitHub, where it is now one of the release's files.
+
 ### Bug fixes
 
 ## 1.1.1 (2026-11-02)

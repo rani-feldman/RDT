@@ -37,21 +37,24 @@ def doc_path(name: str) -> Path:
 
 # The walkthrough video and the presentation (INS-16). The installer and the zip carry the
 # presentation in docs/media (INS-17, rani 2026-10-28); GitHub is the fallback when it is missing.
-# The video is not shipped and always opens from the repository (rani, 2026-10-29).
+# The video is not shipped: every GitHub release carries it as a download, and Help opens the one
+# on the latest release (INS-18, rani 2026-11-04).
 MEDIA = {
     "video": "docs/media/rdt-walkthrough.mp4",
     "presentation": "docs/media/rdt-presentation.pdf",
 }
-ONLINE_ONLY = {"video"}
 GITHUB_FILES = "https://github.com/rani-feldman/rdt/blob/main/"
+VIDEO_URL = "https://github.com/rani-feldman/rdt/releases/latest/download/rdt-walkthrough.mp4"
 
 
 def media_url(name: str) -> str:
-    """Where Help opens the video or the presentation: the video's page in the repository; the
-    presentation that ships with RDT, else its page on GitHub."""
+    """Where Help opens the video or the presentation: the video attached to the latest GitHub
+    release; the presentation that ships with RDT, else its page on GitHub."""
+    if name == "video":
+        return VIDEO_URL
     rel = MEDIA[name]
     local = bundle_root() / rel
-    if name not in ONLINE_ONLY and local.is_file():
+    if local.is_file():
         return local.as_uri()
     return GITHUB_FILES + rel
 

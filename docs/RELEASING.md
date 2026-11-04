@@ -13,7 +13,8 @@ a developer. Small changes (tweaks, refactors, documentation, tests) get no line
 ## Before a release: the video and the presentation
 
 The Help menu opens a walkthrough video and a slide presentation from `docs/media/`. The
-installer and the zip carry the presentation; the video is opened from its page in the repository. When the release adds or changes something a user would see,
+installer and the zip carry the presentation; the video is attached to every release as
+`rdt-walkthrough.mp4`, and Help opens the one on the latest release. When the release adds or changes something a user would see,
 remake them with the scripts in
 [tools/media](../tools/media/README.md) (on Linux, against the simulator) and merge that before
 running the release.
@@ -30,7 +31,8 @@ running the release.
      sets the version in `rdt/_version.py`, and commits that to main;
    - runs the tests, builds `RDT-Setup-1.2.0.exe` and `RDT-1.2.0-portable.zip`;
    - installs, upgrades and uninstalls the setup on a clean machine to check it (packaging/smoke_test.ps1);
-   - pushes that commit to main and creates a **draft** release with the files and the notes. No
+   - pushes that commit to main and creates a **draft** release with the files, the walkthrough
+     video and the notes. No
      git tag yet: GitHub creates `v1.2.0` when you publish the draft.
 4. Click **Releases** on the repository's main page, open the draft, download the installer and
    try it on your bench.
@@ -43,6 +45,14 @@ after the build and the test pass). Fix the cause and run it again.
 If a published release turns out bad, don't delete it: fix the bug and release the next patch
 version. If the draft is bad, delete it (**Delete** on the draft): there is no tag to clean up.
 Main keeps the release commit, so fix the bug and release the next patch version (1.2.1).
+
+## Rebuilding a published release
+
+To rebuild a release that is already out, such as after a file had to be taken out of its
+history, run **release** with the version box empty and **Rebuild** set to its tag, such as
+`v1.1.1`. The workflow builds from that tag, runs the smoke test, and replaces the installer, the
+zip, the checksums and the video on the published release. Nothing is committed and the tag is
+not moved.
 
 ## By hand
 
@@ -66,7 +76,7 @@ Defined in [packaging/rdt.iss](../packaging/rdt.iss) (Inno Setup) and
 
 - Installs per user in `%LOCALAPPDATA%\Programs\RDT`, no admin rights. Python and every package
   are inside; nothing else is needed on the PC. The user manual and the presentation are inside
-  too; the walkthrough video is not (Help opens it on GitHub).
+  too; the walkthrough video is not (it is a file of the release, and Help opens it from there).
 - A new setup closes RDT, uninstalls the old version silently, and installs; user files in
   `%LOCALAPPDATA%\rdt` are never touched. Installing an older version warns first.
 - Optional `rdt` on the user's PATH (ticked), `.rdtw` association, Start menu shortcuts for RDT

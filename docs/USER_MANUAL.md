@@ -348,7 +348,7 @@ The theme, density, console text size, memory view format and layout are kept pe
 
 ### Keyboard shortcuts
 
-**Help > Keyboard shortcuts** (F1) lists all of them. **Help > Video walkthrough** opens a narrated video of RDT in use on GitHub, and **Help > Presentation** opens this manual as slides. The main ones:
+**Help > Keyboard shortcuts** (F1) lists all of them. **Help > Video walkthrough** downloads a narrated video of RDT in use from the latest RDT release on GitHub, and **Help > Presentation** opens this manual as slides. The main ones:
 
 | Keys | Action |
 | --- | --- |

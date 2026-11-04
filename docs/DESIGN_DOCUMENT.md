@@ -303,6 +303,7 @@ Agreed with rani on 2026-10-17 (thread "Installer and releases plan", milestone 
 | INS-15 | When a newer version is found, an **Update available** window shows what changed in it (the release notes of the versions newer than the running one) with a Download button; it opens by itself once per new version and again from the status-bar link or Help > Check for updates (rani, 2026-10-18) | Done | [D-INS-15](#d-ins-15-update-available-window) |
 | INS-16 | A narrated walkthrough video (GUI and command line, against the simulator) and the user manual as a slide presentation, kept in the repository under `docs/media/` and opened from **Help > Video walkthrough** and **Help > Presentation** (rani, 2026-10-19) | Done (PR #144) | [D-INS-16](#d-ins-16-video-and-presentation) |
 | INS-17 | The presentation ships inside the installer and the portable zip, so Help opens it with no internet; GitHub is only the fallback when the file is missing (rani, 2026-10-28: "they should be part of the release"). The video is not shipped: Help opens it from its page in the repository (rani, 2026-10-29: "Remove the video from the installer and return as a link to the place in the repo") | Done (PR #152, PR #153) | [D-INS-17](#d-ins-17-video-and-presentation-in-the-release) |
+| INS-18 | Every GitHub release carries the walkthrough video as one of its files, and **Help > Video walkthrough** opens the one on the latest release instead of the repository page; the release workflow can also rebuild an already published release from its tag (rani, 2026-11-04: "Put the video in the assets and update the link in the app", "rebuild 1.1.1") | In review | [D-INS-18](#d-ins-18-video-as-a-release-file) |
 
 Requirements on the firmware itself (FW-1 to FW-10) are in [section 5](#5-firmware-specification).
 
@@ -1554,7 +1555,13 @@ When the check finds a newer version, `fetch_latest` also reads that tag's `CHAN
 
 #### D-INS-17 Video and presentation in the release
 
-`packaging/rdt.spec` adds `rdt-presentation.pdf` to the build's `docs/media` folder, so it lands in `_internal\docs\media` beside the user manual (rani, 2026-10-28). `appfiles.media_url` returns the presentation under `bundle_root()` whenever it exists, in a checkout or an installed app, and its GitHub page only when it is missing. The video and its captions were shipped too at first; rani asked on 2026-10-29 to take the video out of the installer and link to it in the repository, so `media_url("video")` always returns its GitHub page (`ONLINE_ONLY`), even in a checkout. `packaging/smoke_test.ps1` checks the presentation is installed and the video is not.
+`packaging/rdt.spec` adds `rdt-presentation.pdf` to the build's `docs/media` folder, so it lands in `_internal\docs\media` beside the user manual (rani, 2026-10-28). `appfiles.media_url` returns the presentation under `bundle_root()` whenever it exists, in a checkout or an installed app, and its GitHub page only when it is missing. The video and its captions were shipped too at first; rani asked on 2026-10-29 to take the video out of the installer and link to it in the repository, so `media_url("video")` always returned its GitHub page, even in a checkout; since INS-18 it returns the video on the latest release (D-INS-18). `packaging/smoke_test.ps1` checks the presentation is installed and the video is not.
+
+#### D-INS-18 Video as a release file
+
+rani asked on 2026-11-04 for the video to be one of the release's files. The **Draft release** step of `.github/workflows/release.yml` attaches `docs/media/rdt-walkthrough.mp4` with the installer, the zip and `SHA256SUMS.txt`. `appfiles.media_url("video")` returns `VIDEO_URL`, `https://github.com/rani-feldman/rdt/releases/latest/download/rdt-walkthrough.mp4`: GitHub sends that to the file of the newest published release, so the link never names a version and keeps working as long as every release carries the video. The browser downloads it and the PC's player plays it. The video stays in `docs/media/` in the repository, where the workflow takes it from and `tools/media` remakes it.
+
+The same day rani asked to rebuild 1.1.1 after the old `bench.watch.toml` was taken out of the history (WSP-9). The workflow's **Run workflow** form has a second box, `rebuild`, for a published tag such as `v1.1.1`. With it, the job checks out that tag, takes the version from it (`release.py check`), builds and runs the smoke test as usual, skips the version commit, and replaces the files on the published release with `gh release upload --clobber`, video included. The tag and main are left alone.
 
 ## 5. Firmware specification
 
@@ -1720,6 +1727,7 @@ The application is built against the simulator. With the firmware's read and wri
 | 2026-11-02 | Reads that get no reply no longer turn the link red: they make that MCU silent, the main MCU too, and its polling pauses, tried again every 10 s; console commands go ahead of waiting polls; and a Memory access switch, saved in the workspace, sends nothing but console commands (LNK-12). rani asked for the console to work with operational firmware, which has no memory commands, and picked both parts from a mockup |
 | 2026-11-04 | The console no longer adds a `SYS (sent)` line after a command that expects no reply; its `TX` line and time are enough (CON-16), at rani's request |
 | 2026-11-04 | The shipped default watch list `examples/bench.watch.toml` is empty, and its earlier content is removed from the git history (WSP-9, rani) |
+| 2026-11-04 | The walkthrough video becomes a file of every GitHub release and Help opens the one on the latest release; the release workflow can rebuild a published release from its tag, used to rebuild 1.1.1 without the old watch list (INS-18, rani) |
 
 ## 9. Appendix: binary protocol (planned)
 
