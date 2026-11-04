@@ -751,9 +751,9 @@ class Console(QWidget):
                                 lambda e: self.log(f"error: {describe_error(e)}", "error"), urgent=True)
 
     def _reply(self, reply: str | None) -> None:
-        if reply is None:
-            self.log("(sent)", "note")
-        else:
+        # A command that expects no reply has nothing more to show: its TX line already carries
+        # the time it was sent (rani, 2026-11-04, CON-16).
+        if reply is not None:
             self.log(reply, "error" if reply.startswith("(no reply") else "rx")
 
     def send_break(self) -> None:
