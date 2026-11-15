@@ -278,7 +278,7 @@ Writes are always whole 4-byte words (the profile's `align`). A smaller value is
 
 ### Polling
 
-- **RUN / STOP** (F7, also **Watch > Poll automatically**): green `▶ RUN` while polling; click it to stop all polling, including items with their own interval, and it turns red `■ STOP`. Polling is on when RDT starts.
+- **RUN / STOP** (F7, also **Watch > Poll automatically**): it shows the current state, green `▶ RUNNING` while polling; click it to stop all polling, including items with their own interval, and it turns red `■ STOPPED`. Polling is on when RDT starts.
 - The interval next to it is the global polling interval (500 ms by default). `Off` stops the global polling only.
 - **Poll now** (F6): reads every watched item once, in every tab, whether polling runs or not.
 - Each item can follow the global interval, have its own, or be manual (read only by **Poll now** or **Read now**).

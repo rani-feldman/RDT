@@ -1282,11 +1282,11 @@ def test_run_stop_and_icon_buttons(qtbot, win):
     """Polling is a RUN/STOP key (LNF-2); Poll now, Log CSV and the profile are icon buttons with
     tooltips (LNF-3)."""
     bar = win.bar
-    assert "RUN" in bar.polling.text() and bar.polling.isChecked()
+    assert "RUNNING" in bar.polling.text() and bar.polling.isChecked()
     bar.polling.click()
-    assert "STOP" in bar.polling.text() and not win.watch_tabs.polling
-    win.polling_action.trigger()                      # F7 lights RUN again
-    assert "RUN" in bar.polling.text() and bar.polling.isChecked()
+    assert "STOPPED" in bar.polling.text() and not win.watch_tabs.polling
+    win.polling_action.trigger()                      # F7 lights RUNNING again
+    assert "RUNNING" in bar.polling.text() and bar.polling.isChecked()
     for b in (bar.poll_now, bar.log_button, bar.profile):
         assert b.text() == "" and not b.icon().isNull() and b.toolTip()
     assert "RDT simulator" in bar.profile.toolTip()

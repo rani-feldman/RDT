@@ -228,9 +228,10 @@ class ConnectionBar(QToolBar):
         self.port.valueChanged.connect(main.connection_edited)
 
     def show_polling(self) -> None:
-        """RUN in green while polling, STOP in red when stopped (LNF-2)."""
+        """RUNNING in green while polling, STOPPED in red when stopped: the key shows the current state
+        (LNF-2; rani, 2026-11-15)."""
         on = self.polling.isChecked()
-        self.polling.setText("\u25b6 RUN" if on else "\u25a0 STOP")
+        self.polling.setText("\u25b6 RUNNING" if on else "\u25a0 STOPPED")
         self.polling.setToolTip(("Polling the watched items; click to stop all polling, including items with their "
                                  "own interval" if on else "Polling is stopped; click to poll again") + " (F7)")
         fg, bg = ("#ffffff", "#1f8a4c") if on else ("#ffffff", "#c62828")
@@ -238,6 +239,9 @@ class ConnectionBar(QToolBar):
             fg, bg = "#9a9a9a", "#e4e4e4"
         self.polling.setStyleSheet(f"QPushButton#runstop {{ color: {fg}; background: {bg}; border: none;"
                                    " border-radius: 3px; padding: 4px 12px; font-weight: bold; letter-spacing: 1px; }")
+        # As wide as the longer word, so the toolbar doesn't shift when it changes
+        width = max(self.polling.fontMetrics().horizontalAdvance(t) for t in ("\u25b6 RUNNING", "\u25a0 STOPPED"))
+        self.polling.setMinimumWidth(width + 36)
 
     def restyle(self, color: str, logging: bool = False) -> None:
         """Draw the icon buttons in the theme's text colour (LNF-3)."""

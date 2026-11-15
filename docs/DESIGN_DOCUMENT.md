@@ -1094,7 +1094,7 @@ rani asked on 2026-10-15 for all four styles from the look and feel options (thr
 
 #### D-LNF-2 RUN/STOP key
 
-A **RUN/STOP** key, as on an oscilloscope, replaces the **Poll** checkbox of D-POLL-5 and does the same thing, still with F7: a green `▶ RUN` while polling, a red `■ STOP` when stopped. Polling still starts on and is not saved.
+A **RUN/STOP** key, as on an oscilloscope, replaces the **Poll** checkbox of D-POLL-5 and does the same thing, still with F7: a green `▶ RUN` while polling, a red `■ STOP` when stopped. Polling still starts on and is not saved. rani asked on 2026-11-15 for the words to say the current state, so the key now reads `▶ RUNNING` and `■ STOPPED`, and keeps the width of the longer word so the toolbar doesn't shift.
 
 #### D-LNF-3 Icon buttons
 
@@ -1728,6 +1728,7 @@ The application is built against the simulator. With the firmware's read and wri
 | 2026-11-04 | The console no longer adds a `SYS (sent)` line after a command that expects no reply; its `TX` line and time are enough (CON-16), at rani's request |
 | 2026-11-04 | The shipped default watch list `examples/bench.watch.toml` is empty, and its earlier content is removed from the git history (WSP-9, rani) |
 | 2026-11-04 | The walkthrough video becomes a file of every GitHub release and Help opens the one on the latest release; the release workflow can rebuild a published release from its tag, used to rebuild 1.1.1 without the old watch list (INS-18, rani) |
+| 2026-11-15 | The RUN/STOP key reads RUNNING and STOPPED, the current state, instead of RUN and STOP (LNF-2, rani) |
 
 ## 9. Appendix: binary protocol (planned)
 
